@@ -17,17 +17,16 @@ app.use(express.json());
 // Routes
 app.use('/api', routes);
 
-// Route de base générique
 app.get('/', (req: Request, res: Response) => {
     res.send('API is running');
 });
 
-// Gestion des routes non trouvées
+// Routes not found
 app.use((req: Request, res: Response, next: NextFunction) => {
     res.status(404).send('404 Not Found');
 });
 
-// Démarrer le serveur
+// Start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Serveur démarré sur http://localhost:${PORT}`);
