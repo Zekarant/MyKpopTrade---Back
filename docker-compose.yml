@@ -7,3 +7,8 @@ services:
     ports:
       - 27017:27017 # Mappe le port 27017 local au port 27017 du conteneur
     restart: always # Redémarre automatiquement si le conteneur échoue
+    volumes:
+      - mongodb_data:/var/lib/mongodb/data # Montre le volume pour stocker les données de la base de données MongoDB
+
+volumes:
+  mongodb_data: # Crée un volume pour stocker les données de la base de données MongoDB
