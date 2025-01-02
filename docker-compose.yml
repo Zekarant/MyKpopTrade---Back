@@ -6,6 +6,4 @@ services:
     container_name: mongodb
     ports:
       - 27017:27017 # Mappe le port 27017 local au port 27017 du conteneur
-    volumes:
-      - ./data/db:/data/db # Persiste les données dans le répertoire ./data/db sur votre machine
     restart: always # Redémarre automatiquement si le conteneur échoue
