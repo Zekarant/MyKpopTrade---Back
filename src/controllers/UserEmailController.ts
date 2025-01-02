@@ -1,13 +1,15 @@
-const UserEmail = require('../models/UserEmail'); // Assurez-vous que le chemin et le nom du modèle sont corrects
+import { Request, Response } from 'express';
+import UserEmail from '../models/UserEmail';
 
-exports.addEmail = async (req, res) => {
+export const addEmail = async (req: Request, res: Response): Promise<void> => {
     const { email } = req.body;
 
     try {
         // Vérifiez si l'email existe déjà
         const existingEmail = await UserEmail.findOne({ email });
         if (existingEmail) {
-            return res.status(400).json({ message: 'Email déjà enregistré' });
+            res.status(400).json({ message: 'Email déjà enregistré' });
+            return;
         }
 
         const userEmail = new UserEmail({ email });
