@@ -1,19 +1,22 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import passport from 'passport';
+import dotenv from 'dotenv';
 import { initializePassport } from './config/passport';
 import authRoutes from './routes/authRoutes';
-import userRoutes from './routes/userRoutes';
-// ... autres imports
 
 dotenv.config();
+
+// Initialisation de l'application
 const app = express();
+const PORT = process.env.PORT || 3000;
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/mykpoptrade';
 
 // Middlewares
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Initialisation de Passport
 initializePassport();
@@ -21,28 +24,23 @@ app.use(passport.initialize());
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-// ... autres routes
 
 // Route racine
 app.get('/', (req, res) => {
-  res.send('API is running');
+  res.send('API MyKpopTrade en ligne');
 });
 
-// Connexion à la base de données et démarrage du serveur
-import connectDB from './config/db';
-import routes from './routes';
+// Connexion à MongoDB et démarrage du serveur
+mongoose
+  .connect(MONGODB_URI)
+  .then(() => {
+    console.log('Connexion à MongoDB établie');
+    app.listen(PORT, () => {
+      console.log(`Serveur démarré sur le port ${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error('Erreur de connexion à MongoDB:', error);
+  });
 
-// Connect to database
-connectDB();
-
-// Routes not found
-app.use((req: Request, res: Response, next: NextFunction) => {
-    res.status(404).send('404 Not Found');
-});
-
-// Start the server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Serveur démarré sur http://localhost:${PORT}`);
-});
+export default app;

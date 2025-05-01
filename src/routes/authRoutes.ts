@@ -1,38 +1,52 @@
 import { Router } from 'express';
 import passport from 'passport';
-import { register, login, logout, verifyToken, generateToken } from '../controllers/authController';
+import * as authController from '../controllers/authController';
 
 const router = Router();
 
-// Routes d'authentification standard
-router.post('/register', register);
-router.post('/login', login);
-router.post('/logout', logout);
+// Routes d'inscription et connexion classique
+router.post('/register', authController.register);
+router.post('/login', authController.login);
+router.post('/logout', authController.verifyToken, authController.logout);
 
-// Routes d'authentification Discord
-router.get('/discord', passport.authenticate('discord'));
-router.get('/discord/callback', 
-  passport.authenticate('discord', { session: false, failureRedirect: '/login' }),
-  generateToken
-);
+// Routes de vérification d'email
+router.get('/verify-email/:token', authController.verifyEmail);
+router.post('/resend-verification', authController.resendVerificationEmail);
 
-// Routes d'authentification Google
+// Routes de réinitialisation de mot de passe
+router.post('/forgot-password', authController.forgotPassword);
+router.post('/reset-password/:token', authController.resetPassword);
+
+// Routes de vérification du téléphone
+router.post('/send-phone-verification', authController.verifyToken, authController.sendPhoneVerification);
+router.post('/verify-phone', authController.verifyToken, authController.verifyPhone);
+
+// Routes de gestion du profil
+router.get('/profile', authController.verifyToken, authController.getProfile);
+router.put('/profile', authController.verifyToken, authController.updateProfile);
+router.put('/update-password', authController.verifyToken, authController.updatePassword);
+router.delete('/delete-account', authController.verifyToken, authController.deleteAccount);
+
+// Routes d'authentification sociale
+// Google
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 router.get('/google/callback', 
-  passport.authenticate('google', { session: false, failureRedirect: '/login' }),
-  generateToken
+  passport.authenticate('google', { session: false, failureRedirect: '/login?error=google' }),
+  authController.socialAuthCallback
 );
 
-// Routes d'authentification Facebook
+// Facebook
 router.get('/facebook', passport.authenticate('facebook', { scope: ['email'] }));
 router.get('/facebook/callback', 
-  passport.authenticate('facebook', { session: false, failureRedirect: '/login' }),
-  generateToken
+  passport.authenticate('facebook', { session: false, failureRedirect: '/login?error=facebook' }),
+  authController.socialAuthCallback
 );
 
-// Route protégée d'exemple
-router.get('/protected', passport.authenticate('jwt', { session: false }), (req, res) => {
-  res.json({ message: 'Ceci est une route protégée', user: req.user });
-});
+// Discord
+router.get('/discord', passport.authenticate('discord', { scope: ['identify', 'email'] }));
+router.get('/discord/callback', 
+  passport.authenticate('discord', { session: false, failureRedirect: '/login?error=discord' }),
+  authController.socialAuthCallback
+);
 
 export default router;

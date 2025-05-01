@@ -1,90 +1,36 @@
 import passport from 'passport';
 import { Strategy as JwtStrategy, ExtractJwt } from 'passport-jwt';
-import { Strategy as DiscordStrategy } from 'passport-discord';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as FacebookStrategy } from 'passport-facebook';
+import { Strategy as DiscordStrategy } from 'passport-discord';
 import User from '../models/userModel';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Options pour la stratégie JWT
-const jwtOptions = {
-  jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-  secretOrKey: process.env.JWT_SECRET || 'userLogin'
-};
-
-// Initialisation de Passport
-export const initializePassport = () => {
-  // Stratégie JWT (pour les tokens)
+export const initializePassport = (): void => {
+  // Configuration JWT
   passport.use(
-    new JwtStrategy(jwtOptions, async (jwtPayload, done) => {
-      try {
-        const user = await User.findById(jwtPayload.id);
-        if (user) {
-          return done(null, user);
+    new JwtStrategy(
+      {
+        jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+        secretOrKey: process.env.JWT_SECRET || 'default_jwt_secret'
+      },
+      async (payload, done) => {
+        try {
+          const user = await User.findById(payload.id);
+          if (user && user.accountStatus !== 'deleted') {
+            return done(null, user);
+          }
+          return done(null, false);
+        } catch (error) {
+          return done(error, false);
         }
-        return done(null, false);
-      } catch (error) {
-        return done(error, false);
       }
-    })
+    )
   );
 
-  // Stratégie Discord
-  if (process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET) {
-    passport.use(
-      new DiscordStrategy(
-        {
-          clientID: process.env.DISCORD_CLIENT_ID,
-          clientSecret: process.env.DISCORD_CLIENT_SECRET,
-          callbackURL: `${process.env.API_URL}/api/auth/discord/callback`,
-          scope: ['identify', 'email']
-        },
-        async (accessToken, refreshToken, profile, done) => {
-          try {
-            // Chercher si l'utilisateur existe déjà
-            let user = await User.findOne({ 
-              $or: [
-                { 'socialAuth.discord.id': profile.id },
-                { email: profile.email }
-              ]
-            });
-
-            if (!user) {
-              // Créer un nouvel utilisateur
-              user = new User({
-                username: profile.username || `discord_${profile.id}`,
-                email: profile.email,
-                socialAuth: {
-                  discord: {
-                    id: profile.id,
-                    username: profile.username
-                  }
-                },
-                password: Math.random().toString(36).slice(-10) // Mot de passe aléatoire
-              });
-              await user.save();
-            } else if (!user.socialAuth?.discord?.id) {
-              // Lier le compte Discord à un utilisateur existant
-              user.socialAuth = user.socialAuth || {};
-              user.socialAuth.discord = {
-                id: profile.id,
-                username: profile.username
-              };
-              await user.save();
-            }
-            
-            return done(null, user);
-          } catch (error) {
-            return done(error, false);
-          }
-        }
-      )
-    );
-  }
-
-  // Stratégie Google
+  // Configuration Google OAuth
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     passport.use(
       new GoogleStrategy(
@@ -96,39 +42,46 @@ export const initializePassport = () => {
         async (accessToken, refreshToken, profile, done) => {
           try {
             const email = profile.emails?.[0]?.value;
+            
             if (!email) {
-              return done(new Error("Email non fourni par Google"), false);
+              return done(new Error('Email non fourni par Google'), false);
             }
 
-            let user = await User.findOne({
-              $or: [
-                { 'socialAuth.google.id': profile.id },
-                { email: email }
-              ]
-            });
+            // Vérifier si un utilisateur existe déjà avec cet email
+            let user = await User.findOne({ email });
 
-            if (!user) {
+            if (user) {
+              // Mettre à jour les informations Google si nécessaire
+              if (!user.socialAuth?.google?.id) {
+                user.socialAuth = user.socialAuth || {};
+                user.socialAuth.google = {
+                  id: profile.id,
+                  email,
+                  name: profile.displayName
+                };
+                user.isEmailVerified = true; // L'email est vérifié via Google
+                await user.save();
+              }
+            } else {
+              // Créer un nouvel utilisateur
               user = new User({
-                username: profile.displayName || `google_${profile.id}`,
-                email: email,
+                username: `user_${Date.now()}`, // Nom d'utilisateur temporaire unique
+                email,
+                password: Math.random().toString(36).substring(2), // Mot de passe aléatoire
+                isEmailVerified: true,
                 socialAuth: {
                   google: {
                     id: profile.id,
+                    email,
                     name: profile.displayName
                   }
-                },
-                password: Math.random().toString(36).slice(-10)
+                }
               });
-              await user.save();
-            } else if (!user.socialAuth?.google?.id) {
-              user.socialAuth = user.socialAuth || {};
-              user.socialAuth.google = {
-                id: profile.id,
-                name: profile.displayName
-              };
               await user.save();
             }
 
+            user.lastLogin = new Date();
+            await user.save();
             return done(null, user);
           } catch (error) {
             return done(error, false);
@@ -138,7 +91,7 @@ export const initializePassport = () => {
     );
   }
 
-  // Stratégie Facebook
+  // Configuration Facebook
   if (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET) {
     passport.use(
       new FacebookStrategy(
@@ -146,41 +99,49 @@ export const initializePassport = () => {
           clientID: process.env.FACEBOOK_APP_ID,
           clientSecret: process.env.FACEBOOK_APP_SECRET,
           callbackURL: `${process.env.API_URL}/api/auth/facebook/callback`,
-          profileFields: ['id', 'displayName', 'email']
+          profileFields: ['id', 'emails', 'name', 'displayName']
         },
         async (accessToken, refreshToken, profile, done) => {
           try {
             const email = profile.emails?.[0]?.value;
             
-            let user = await User.findOne({
-              $or: [
-                { 'socialAuth.facebook.id': profile.id },
-                { email: email }
-              ]
-            });
+            if (!email) {
+              return done(new Error('Email non fourni par Facebook'), false);
+            }
 
-            if (!user) {
+            // Même logique que pour Google
+            let user = await User.findOne({ email });
+
+            if (user) {
+              if (!user.socialAuth?.facebook?.id) {
+                user.socialAuth = user.socialAuth || {};
+                user.socialAuth.facebook = {
+                  id: profile.id,
+                  email,
+                  name: profile.displayName
+                };
+                user.isEmailVerified = true;
+                await user.save();
+              }
+            } else {
               user = new User({
-                username: profile.displayName || `fb_${profile.id}`,
-                email: email || `fb_${profile.id}@placeholder.com`,
+                username: `user_${Date.now()}`,
+                email,
+                password: Math.random().toString(36).substring(2),
+                isEmailVerified: true,
                 socialAuth: {
                   facebook: {
                     id: profile.id,
+                    email,
                     name: profile.displayName
                   }
-                },
-                password: Math.random().toString(36).slice(-10)
+                }
               });
-              await user.save();
-            } else if (!user.socialAuth?.facebook?.id) {
-              user.socialAuth = user.socialAuth || {};
-              user.socialAuth.facebook = {
-                id: profile.id,
-                name: profile.displayName
-              };
               await user.save();
             }
 
+            user.lastLogin = new Date();
+            await user.save();
             return done(null, user);
           } catch (error) {
             return done(error, false);
@@ -190,7 +151,66 @@ export const initializePassport = () => {
     );
   }
 
-  // Sérialisation et désérialisation pour les sessions
+  // Configuration Discord
+  if (process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET) {
+    passport.use(
+      new DiscordStrategy(
+        {
+          clientID: process.env.DISCORD_CLIENT_ID,
+          clientSecret: process.env.DISCORD_CLIENT_SECRET,
+          callbackURL: `${process.env.API_URL}/api/auth/discord/callback`,
+          scope: ['identify', 'email']
+        },
+        async (accessToken, refreshToken, profile, done) => {
+          try {
+            const email = profile.email;
+            
+            if (!email) {
+              return done(new Error('Email non fourni par Discord'), false);
+            }
+
+            // Même logique que pour les autres providers
+            let user = await User.findOne({ email });
+
+            if (user) {
+              if (!user.socialAuth?.discord?.id) {
+                user.socialAuth = user.socialAuth || {};
+                user.socialAuth.discord = {
+                  id: profile.id,
+                  email,
+                  username: profile.username
+                };
+                user.isEmailVerified = true;
+                await user.save();
+              }
+            } else {
+              user = new User({
+                username: `user_${Date.now()}`,
+                email,
+                password: Math.random().toString(36).substring(2),
+                isEmailVerified: true,
+                socialAuth: {
+                  discord: {
+                    id: profile.id,
+                    email,
+                    username: profile.username
+                  }
+                }
+              });
+              await user.save();
+            }
+
+            user.lastLogin = new Date();
+            await user.save();
+            return done(null, user);
+          } catch (error) {
+            return done(error, false);
+          }
+        }
+      )
+    );
+  }
+
   passport.serializeUser((user: any, done) => {
     done(null, user.id);
   });
