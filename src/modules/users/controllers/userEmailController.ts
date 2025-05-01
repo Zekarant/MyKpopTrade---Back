@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import UserEmail from '../models/UserEmail';
+import UserEmail from '../../../models/UserEmail';
 
 export const addEmail = async (req: Request, res: Response): Promise<void> => {
     const { email } = req.body;

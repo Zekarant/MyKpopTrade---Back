@@ -1,12 +1,42 @@
-import { getEmailTransporter } from '../config/email';
-import { IUser } from '../models/userModel';
-import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
+import { IUser } from '../../models/userModel';
+import dotenv from 'dotenv';
 
 dotenv.config();
 
 const BASE_URL = process.env.FRONTEND_URL || 'http://localhost:8080';
 const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@mykpoptrade.com';
+
+// Création du transporteur d'emails
+const createTransporter = async () => {
+  // En développement, créer un compte Ethereal temporaire
+  if (process.env.NODE_ENV !== 'production') {
+    const testAccount = await nodemailer.createTestAccount();
+    
+    console.log('Compte Ethereal créé:');
+    console.log('- Email:', testAccount.user);
+    console.log('- Mot de passe:', testAccount.pass);
+    console.log('- URL de prévisualisation: https://ethereal.email');
+
+    return nodemailer.createTransport({
+      host: 'smtp.ethereal.email',
+      port: 587,
+      secure: false,
+      auth: {
+        user: testAccount.user,
+        pass: testAccount.pass,
+      },
+    });
+  } else {
+    return nodemailer.createTransport({
+      service: process.env.EMAIL_SERVICE,
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+  }
+};
 
 /**
  * Envoie un email de vérification à l'utilisateur
@@ -14,7 +44,7 @@ const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@mykpoptrade.com';
 export const sendVerificationEmail = async (user: IUser, token: string): Promise<void> => {
   const verificationUrl = `${BASE_URL}/verify-email/${token}`;
   
-  const transporter = await getEmailTransporter();
+  const transporter = await createTransporter();
   
   const mailOptions = {
     from: `"MyKpopTrade" <${FROM_EMAIL}>`,
@@ -40,16 +70,17 @@ export const sendVerificationEmail = async (user: IUser, token: string): Promise
   const info = await transporter.sendMail(mailOptions);
   
   if (process.env.NODE_ENV !== 'production') {
-    // Afficher l'URL de prévisualisation pour Ethereal
     console.log('URL de prévisualisation de l\'email:', nodemailer.getTestMessageUrl(info));
   }
 };
 
-// Mettre à jour les autres fonctions d'envoi d'email de la même manière
+/**
+ * Envoie un email de réinitialisation de mot de passe
+ */
 export const sendPasswordResetEmail = async (user: IUser, token: string): Promise<void> => {
   const resetUrl = `${BASE_URL}/reset-password/${token}`;
   
-  const transporter = await getEmailTransporter();
+  const transporter = await createTransporter();
   
   const mailOptions = {
     from: `"MyKpopTrade" <${FROM_EMAIL}>`,
@@ -79,8 +110,11 @@ export const sendPasswordResetEmail = async (user: IUser, token: string): Promis
   }
 };
 
+/**
+ * Envoie un email de confirmation de suppression de compte
+ */
 export const sendAccountDeletionEmail = async (user: IUser): Promise<void> => {
-  const transporter = await getEmailTransporter();
+  const transporter = await createTransporter();
   
   const mailOptions = {
     from: `"MyKpopTrade" <${FROM_EMAIL}>`,

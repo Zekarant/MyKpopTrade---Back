@@ -2,21 +2,31 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import passport from 'passport';
-import dotenv from 'dotenv';
+import { authRoutes } from './modules/auth';
+import { userRoute } from './modules/users';
+import { errorHandler, notFoundHandler } from './commons/middlewares/errorMiddleware';
 import { initializePassport } from './config/passport';
-import authRoutes from './routes/authRoutes';
+import { logAPIRequest } from './commons/utils/logger';
+import env from './config/env';
+import logger from './commons/utils/logger';
 
-dotenv.config();
-
-// Initialisation de l'application
+// Initialisation de l'application Express
 const app = express();
-const PORT = process.env.PORT || 3000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/mykpoptrade';
 
 // Middlewares
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Logging des requêtes
+app.use((req, res, next) => {
+  const startTime = Date.now();
+  res.on('finish', () => {
+    const responseTime = Date.now() - startTime;
+    logAPIRequest(req, responseTime);
+  });
+  next();
+});
 
 // Initialisation de Passport
 initializePassport();
@@ -24,23 +34,34 @@ app.use(passport.initialize());
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoute);
 
 // Route racine
 app.get('/', (req, res) => {
-  res.send('API MyKpopTrade en ligne');
+  res.send('API MyKpopTrade v1.0.0');
 });
 
-// Connexion à MongoDB et démarrage du serveur
-mongoose
-  .connect(MONGODB_URI)
+// Middleware pour les routes non trouvées
+app.use('*', notFoundHandler);
+
+// Middleware de gestion des erreurs
+app.use(errorHandler);
+
+// Connexion à MongoDB
+mongoose.connect(env.MONGODB_URI)
   .then(() => {
-    console.log('Connexion à MongoDB établie');
-    app.listen(PORT, () => {
-      console.log(`Serveur démarré sur le port ${PORT}`);
+    logger.info(`Connecté à MongoDB: ${env.MONGODB_URI}`);
+    
+    // Démarrage du serveur
+    app.listen(env.PORT, () => {
+      logger.info(`Serveur démarré sur le port ${env.PORT} en mode ${env.NODE_ENV}`);
+      logger.info(`API URL: ${env.API_URL}`);
+      logger.info(`Frontend URL: ${env.FRONTEND_URL}`);
     });
   })
-  .catch((error) => {
-    console.error('Erreur de connexion à MongoDB:', error);
+  .catch(error => {
+    logger.error('Erreur de connexion à MongoDB:', error);
+    process.exit(1);
   });
 
 export default app;
