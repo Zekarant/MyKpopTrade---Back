@@ -1,25 +1,40 @@
-import dotenv from 'dotenv';
 import express, { Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import cors from 'cors';
-import connectDB from './config/db';
-import routes from './routes';
+import dotenv from 'dotenv';
+import passport from 'passport';
+import { initializePassport } from './config/passport';
+import authRoutes from './routes/authRoutes';
+import userRoutes from './routes/userRoutes';
+// ... autres imports
 
 dotenv.config();
-
 const app = express();
 
-// Connect to database
-connectDB();
-
+// Middlewares
 app.use(cors());
 app.use(express.json());
 
-// Routes
-app.use('/api', routes);
+// Initialisation de Passport
+initializePassport();
+app.use(passport.initialize());
 
-app.get('/', (req: Request, res: Response) => {
-    res.send('API is running');
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+// ... autres routes
+
+// Route racine
+app.get('/', (req, res) => {
+  res.send('API is running');
 });
+
+// Connexion à la base de données et démarrage du serveur
+import connectDB from './config/db';
+import routes from './routes';
+
+// Connect to database
+connectDB();
 
 // Routes not found
 app.use((req: Request, res: Response, next: NextFunction) => {
