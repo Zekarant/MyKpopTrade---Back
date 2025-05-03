@@ -12,6 +12,26 @@ export interface IUser extends Document {
   isPhoneVerified: boolean;
   accountStatus: 'active' | 'suspended' | 'deleted';
   lastLogin?: Date;
+  bio?: string;
+  location?: string;
+  preferences?: {
+    kpopGroups?: string[];
+    allowDirectMessages?: boolean;
+  };
+  socialLinks?: {
+    instagram?: string;
+    twitter?: string;
+    discord?: string;
+  };
+  statistics?: {
+    totalSales: number;
+    totalPurchases: number;
+    totalListings: number;
+    memberSince: Date;
+    lastActive: Date;
+    averageRating: number;
+    totalRatings: number;
+  };
   socialAuth?: {
     google?: {
       id: string;
@@ -82,6 +102,59 @@ const UserSchema: Schema = new Schema({
   },
   lastLogin: {
     type: Date
+  },
+  bio: {
+    type: String,
+    maxlength: 500
+  },
+  location: {
+    type: String,
+    maxlength: 100
+  },
+  preferences: {
+    kpopGroups: {
+      type: [String],
+      default: []
+    },
+    allowDirectMessages: {
+      type: Boolean,
+      default: true
+    }
+  },
+  socialLinks: {
+    instagram: String,
+    twitter: String,
+    discord: String
+  },
+  statistics: {
+    totalSales: {
+      type: Number,
+      default: 0
+    },
+    totalPurchases: {
+      type: Number,
+      default: 0
+    },
+    totalListings: {
+      type: Number,
+      default: 0
+    },
+    memberSince: {
+      type: Date,
+      default: Date.now
+    },
+    lastActive: {
+      type: Date,
+      default: Date.now
+    },
+    averageRating: {
+      type: Number,
+      default: 0
+    },
+    totalRatings: {
+      type: Number,
+      default: 0
+    }
   },
   socialAuth: {
     google: {

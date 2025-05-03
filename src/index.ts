@@ -4,6 +4,7 @@ import cors from 'cors';
 import passport from 'passport';
 import { authRoutes } from './modules/auth';
 import { userRoute } from './modules/users';
+import { profileRoutes } from './modules/profiles';
 import { errorHandler, notFoundHandler } from './commons/middlewares/errorMiddleware';
 import { initializePassport } from './config/passport';
 import { logAPIRequest } from './commons/utils/logger';
@@ -35,6 +36,7 @@ app.use(passport.initialize());
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoute);
+app.use('/api/profiles', profileRoutes);
 
 // Route racine
 app.get('/', (req, res) => {
