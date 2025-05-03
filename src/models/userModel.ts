@@ -55,6 +55,7 @@ export interface IUser extends Document {
   comparePassword(candidatePassword: string): Promise<boolean>;
   generateVerificationToken(): string;
   generatePasswordResetToken(): string;
+  favorites?: mongoose.Types.ObjectId[];
 }
 
 const UserSchema: Schema = new Schema({
@@ -76,7 +77,6 @@ const UserSchema: Schema = new Schema({
   password: {
     type: String,
     required: function(this: mongoose.Document & IUser): boolean {
-      // Mot de passe requis sauf si authentification sociale
       return !this.socialAuth?.google && !this.socialAuth?.facebook && !this.socialAuth?.discord;
     },
     minlength: 8
@@ -175,12 +175,15 @@ const UserSchema: Schema = new Schema({
   passwordResetToken: String,
   passwordResetExpires: Date,
   phoneVerificationCode: String,
-  phoneVerificationExpires: Date
+  phoneVerificationExpires: Date,
+  favorites: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product'
+  }]
 }, {
   timestamps: true
 });
 
-// Hash le mot de passe avant de sauvegarder
 UserSchema.pre('save', async function(next) {
   if (this.isModified('password')) {
     try {
@@ -193,7 +196,6 @@ UserSchema.pre('save', async function(next) {
   next();
 });
 
-// Méthode pour comparer les mots de passe
 UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
   try {
     return await bcrypt.compare(candidatePassword, this.password);
@@ -202,7 +204,6 @@ UserSchema.methods.comparePassword = async function(candidatePassword: string): 
   }
 };
 
-// Méthode pour générer un token de vérification d'email
 UserSchema.methods.generateVerificationToken = function(): string {
   const token = crypto.randomBytes(32).toString('hex');
   this.emailVerificationToken = token;
@@ -210,7 +211,6 @@ UserSchema.methods.generateVerificationToken = function(): string {
   return token;
 };
 
-// Méthode pour générer un token de réinitialisation de mot de passe
 UserSchema.methods.generatePasswordResetToken = function(): string {
   const token = crypto.randomBytes(32).toString('hex');
   this.passwordResetToken = token;

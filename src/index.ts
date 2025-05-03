@@ -5,6 +5,7 @@ import passport from 'passport';
 import { authRoutes } from './modules/auth';
 import { userRoute } from './modules/users';
 import { profileRoutes } from './modules/profiles';
+import { productRoutes } from './modules/products';
 import { errorHandler, notFoundHandler } from './commons/middlewares/errorMiddleware';
 import { initializePassport } from './config/passport';
 import { logAPIRequest } from './commons/utils/logger';
@@ -37,6 +38,7 @@ app.use(passport.initialize());
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoute);
 app.use('/api/profiles', profileRoutes);
+app.use('/api/products', productRoutes);
 
 // Route racine
 app.get('/', (req, res) => {

@@ -12,7 +12,7 @@ export interface IProduct extends Document {
   kpopGroup: string;
   kpopMember?: string;
   albumName?: string;
-  images: string[];  // URLs des images
+  images: string[];
   isAvailable: boolean;
   isReserved: boolean;
   reservedFor?: mongoose.Types.ObjectId;
@@ -128,5 +128,27 @@ const ProductSchema: Schema = new Schema({
 }, {
   timestamps: true
 });
+
+ProductSchema.index({ 
+  title: 'text', 
+  description: 'text',
+  kpopGroup: 'text',
+  kpopMember: 'text',
+  albumName: 'text'
+}, {
+  weights: {
+    title: 10,
+    kpopGroup: 5,
+    kpopMember: 5,
+    albumName: 3,
+    description: 1
+  },
+  name: 'product_text_index'
+});
+
+ProductSchema.index({ seller: 1, isAvailable: 1 });
+ProductSchema.index({ kpopGroup: 1, isAvailable: 1 });
+ProductSchema.index({ type: 1, isAvailable: 1 });
+ProductSchema.index({ createdAt: -1 });
 
 export default mongoose.models.Product || mongoose.model<IProduct>('Product', ProductSchema);
