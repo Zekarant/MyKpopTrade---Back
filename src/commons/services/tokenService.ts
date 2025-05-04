@@ -9,11 +9,16 @@ export const tokenBlacklist = new Set<string>();
 /**
  * Génère un token d'accès JWT (courte durée)
  */
-export const generateAccessToken = (user: IUser): string => {
+export const generateAccessToken = (user: any): string => {
   return jwt.sign(
-    { id: user._id, username: user.username, email: user.email },
-    process.env.JWT_SECRET || 'default_jwt_secret',
-    { expiresIn: '15m' } // 15 minutes
+    { 
+      id: user._id, 
+      email: user.email,
+      username: user.username,
+      role: user.role // Ajout du rôle dans le token
+    },
+    process.env.JWT_SECRET || 'default_secret',
+    { expiresIn: process.env.JWT_EXPIRE || '15m' }
   );
 };
 

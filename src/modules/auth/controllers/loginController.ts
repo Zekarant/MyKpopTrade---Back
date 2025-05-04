@@ -61,7 +61,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         username: user.username,
         email: user.email,
         isEmailVerified: user.isEmailVerified,
-        isPhoneVerified: user.isPhoneVerified
+        isPhoneVerified: user.isPhoneVerified,
+        role: user.role // Ajout du rôle ici
       }
     });
   } catch (error) {

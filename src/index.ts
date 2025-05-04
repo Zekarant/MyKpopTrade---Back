@@ -10,6 +10,7 @@ import { errorHandler, notFoundHandler } from './commons/middlewares/errorMiddle
 import { initializePassport } from './config/passport';
 import { logAPIRequest } from './commons/utils/logger';
 import env from './config/env';
+import { verificationRoutes } from './modules/verification';
 import logger from './commons/utils/logger';
 
 // Initialisation de l'application Express
@@ -39,6 +40,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoute);
 app.use('/api/profiles', profileRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/verification', verificationRoutes);
 
 // Route racine
 app.get('/', (req, res) => {

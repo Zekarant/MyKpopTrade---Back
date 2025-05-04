@@ -11,6 +11,7 @@ export interface IUser extends Document {
   isEmailVerified: boolean;
   isPhoneVerified: boolean;
   accountStatus: 'active' | 'suspended' | 'deleted';
+  role: 'user' | 'moderator' | 'admin';
   lastLogin?: Date;
   bio?: string;
   location?: string;
@@ -56,6 +57,9 @@ export interface IUser extends Document {
   generateVerificationToken(): string;
   generatePasswordResetToken(): string;
   favorites?: mongoose.Types.ObjectId[];
+  isIdentityVerified?: boolean;
+  identityVerifiedAt?: Date;
+  verificationLevel: 'none' | 'basic' | 'advanced' | 'complete';
 }
 
 const UserSchema: Schema = new Schema({
@@ -99,6 +103,11 @@ const UserSchema: Schema = new Schema({
     type: String,
     enum: ['active', 'suspended', 'deleted'],
     default: 'active'
+  },
+  role: {
+    type: String,
+    enum: ['user', 'moderator', 'admin'],
+    default: 'user'
   },
   lastLogin: {
     type: Date
@@ -179,7 +188,17 @@ const UserSchema: Schema = new Schema({
   favorites: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product'
-  }]
+  }],
+  isIdentityVerified: {
+    type: Boolean,
+    default: false
+  },
+  identityVerifiedAt: Date,
+  verificationLevel: {
+    type: String,
+    enum: ['none', 'basic', 'advanced', 'complete'],
+    default: 'none'
+  }
 }, {
   timestamps: true
 });
