@@ -1,0 +1,97 @@
+import express from 'express';
+import * as conversationController from './controllers/conversationController';
+import * as messageController from './controllers/messageController';
+import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
+import { sanitizeInputs } from '../../commons/middlewares/sanitizeMiddleware';
+import {
+  rateLimitMessages,
+  verifyConversationAccess,
+  validateMessageContent
+} from './middleware/messageSecurityMiddleware';
+
+const router = express.Router();
+
+// Appliquer la sanitisation globalement pour toutes les routes de messagerie
+router.use(sanitizeInputs);
+
+// Routes des conversations
+router.get(
+  '/',
+  authenticateJWT,
+  conversationController.getUserConversations
+);
+
+router.get(
+  '/:id',
+  authenticateJWT,
+  verifyConversationAccess,
+  conversationController.getConversation
+);
+
+router.post(
+  '/',
+  authenticateJWT,
+  conversationController.startConversation
+);
+
+// Routes des négociations
+router.post(
+  '/negotiate',
+  authenticateJWT,
+  conversationController.initiateNegotiation
+);
+
+router.post(
+  '/:id/respond',
+  authenticateJWT,
+  verifyConversationAccess,
+  conversationController.respondToNegotiation
+);
+
+// Routes Pay What You Want
+router.post(
+  '/pwyw',
+  authenticateJWT,
+  conversationController.initiatePayWhatYouWant
+);
+
+router.post(
+  '/:id/pwyw-offer',
+  authenticateJWT,
+  verifyConversationAccess,
+  conversationController.makePayWhatYouWantProposal
+);
+
+// Routes des messages
+router.post(
+  '/:id/messages',
+  authenticateJWT,
+  verifyConversationAccess,
+  validateMessageContent,
+  rateLimitMessages,
+  messageController.upload.array('attachments', 5),
+  messageController.sendNewMessage
+);
+
+router.put(
+  '/:id/read',
+  authenticateJWT,
+  verifyConversationAccess,
+  messageController.markConversationAsRead
+);
+
+router.delete(
+  '/messages/:id',
+  authenticateJWT,
+  // Nous aurons besoin d'un middleware spécifique pour vérifier que l'utilisateur est bien le propriétaire du message
+  messageController.deleteMessage
+);
+
+router.get(
+  '/messages/:messageId/attachments/:attachment',
+  authenticateJWT,
+  // Middleware de vérification des droits d'accès à la pièce jointe
+  messageController.getMessageAttachment
+);
+
+export default router;

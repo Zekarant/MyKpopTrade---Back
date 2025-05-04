@@ -26,6 +26,11 @@ export interface IProduct extends Document {
   updatedAt: Date;
   views: number;
   favorites: number;
+  allowOffers: boolean;
+  minOfferPercentage: number;
+  isPayWhatYouWant: boolean;
+  pwywMinPrice?: number;
+  pwywMaxPrice?: number;
 }
 
 const ProductSchema: Schema = new Schema({
@@ -116,6 +121,24 @@ const ProductSchema: Schema = new Schema({
     shippingCost: {
       type: Number
     }
+  },
+  allowOffers: {
+    type: Boolean,
+    default: false
+  },
+  minOfferPercentage: {
+    type: Number,
+    default: 50 // 50% du prix minimum par défaut
+  },
+  isPayWhatYouWant: {
+    type: Boolean,
+    default: false
+  },
+  pwywMinPrice: {
+    type: Number
+  },
+  pwywMaxPrice: {
+    type: Number
   },
   views: {
     type: Number,

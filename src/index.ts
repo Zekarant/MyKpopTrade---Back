@@ -6,6 +6,7 @@ import { authRoutes } from './modules/auth';
 import { userRoute } from './modules/users';
 import { profileRoutes } from './modules/profiles';
 import { productRoutes } from './modules/products';
+import { messagingRoutes } from './modules/messaging';
 import { errorHandler, notFoundHandler } from './commons/middlewares/errorMiddleware';
 import { initializePassport } from './config/passport';
 import { logAPIRequest } from './commons/utils/logger';
@@ -41,6 +42,7 @@ app.use('/api/users', userRoute);
 app.use('/api/profiles', profileRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/verification', verificationRoutes);
+app.use('/api/messaging', messagingRoutes);
 
 // Route racine
 app.get('/', (req, res) => {
