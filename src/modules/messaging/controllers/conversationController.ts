@@ -170,138 +170,407 @@ export const startConversation = asyncHandler(async (req: Request, res: Response
   if (recipientId === userId) {
     return res.status(400).json({ message: 'Vous ne pouvez pas créer une conversation avec vous-même' });
   }
-  
+
   // Vérifier si le destinataire existe
   const recipient = await User.findById(recipientId);
   if (!recipient) {
     return res.status(404).json({ message: 'Destinataire non trouvé' });
   }
-  
-  // Vérifier les autorisations de messages directs du destinataire
-  if (!recipient.preferences?.allowDirectMessages && type === 'general') {
-    return res.status(403).json({ 
-      message: 'Ce membre n\'accepte pas les messages directs' 
-    });
-  }
-  
-  // Si c'est une discussion sur un produit, vérifier qu'il existe
+
+  // Vérifier si un produit est spécifié et existe
   if (productId) {
     const product = await Product.findById(productId);
     if (!product) {
       return res.status(404).json({ message: 'Produit non trouvé' });
     }
-    
-    // Vérifier que l'utilisateur n'est pas le vendeur du produit
-    if (product.seller.toString() === userId && type !== 'pay_what_you_want') {
-      return res.status(400).json({ 
-        message: 'Vous ne pouvez pas créer une conversation sur votre propre produit' 
-      });
-    }
-    
-    // Vérifier que le destinataire est bien le vendeur du produit
-    if (product.seller.toString() !== recipientId && type !== 'pay_what_you_want') {
-      return res.status(400).json({ 
-        message: 'Le destinataire n\'est pas le vendeur de ce produit' 
-      });
-    }
   }
-  
+
   try {
-    // Créer la conversation
-    const participants = [userId, recipientId];
-    const conversation = await createConversation({
-      participants,
-      productId,
-      type,
-      createdBy: userId
-    });
+    // Vérifier si une conversation existe déjà entre ces utilisateurs (et éventuellement pour ce produit)
+    const query: any = {
+      participants: { $all: [userId, recipientId] },
+      type
+    };
     
-    // Envoyer le message initial si fourni
-    if (initialMessage && initialMessage.trim()) {
-      const messageService = require('../services/messageService');
-      await messageService.sendMessage({
-        conversationId: conversation._id,
-        senderId: userId,
+    // Si un produit est spécifié, l'ajouter à la requête
+    if (productId) {
+      query.productId = productId;
+    }
+    
+    let conversation = await Conversation.findOne(query);
+    
+    if (!conversation) {
+      // Créer une conversation sans lastMessage pour l'instant
+      conversation = await Conversation.create({
+        participants: [userId, recipientId],
+        type,
+        productId: productId || null,
+        createdBy: userId
+        // Ne pas inclure lastMessage ici
+      });
+    }
+    
+    // Créer le message initial séparément
+    if (initialMessage) {
+      const message = await Message.create({
+        conversation: conversation._id,
+        sender: userId,
         content: initialMessage,
         contentType: 'text'
       });
+      
+      // Mettre à jour la conversation avec le dernier message après sa création
+      // Utiliser findByIdAndUpdate au lieu de la méthode save()
+      await Conversation.findByIdAndUpdate(
+        conversation._id, 
+        { 
+          lastMessage: message._id,
+          updatedAt: new Date()
+        }
+      );
+      
+      // Récupérer la conversation mise à jour
+      conversation = await Conversation.findById(conversation._id);
     }
+    
+    // Récupérer la conversation complète avec les participants
+    const populatedConversation = await Conversation.findById(conversation._id)
+      .populate('participants', 'username profilePicture email')
+      .populate('productId', 'title price images')
+      .populate('lastMessage');
     
     return res.status(201).json({
       message: 'Conversation créée avec succès',
-      conversation
+      conversation: populatedConversation
     });
-  } catch (error: any) {
-    logger.error('Erreur lors de la création d\'une conversation', { error });
-    return res.status(500).json({ message: error.message });
+  } catch (error) {
+    // Améliorer la journalisation des erreurs pour faciliter le débogage
+    if (error instanceof Error) {
+      logger.error('Erreur lors de la création de la conversation', { 
+        error: error.message,
+        stack: error.stack,
+        path: (error as any).path // Pour capturer le champ problématique
+      });
+    } else {
+      logger.error('Erreur inconnue lors de la création de la conversation', { error });
+    }
+    
+    return res.status(500).json({ 
+      message: 'Une erreur est survenue lors de la création de la conversation',
+      error: process.env.NODE_ENV === 'development' ? { 
+        message: error instanceof Error ? error.message : 'Erreur inconnue',
+        path: (error as any).path
+      } : undefined
+    });
   }
 });
 
 /**
- * Initie une négociation sur un produit
+ * Initie une négociation pour un produit
  */
 export const initiateNegotiation = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const { productId, initialOffer, message } = req.body;
   
-  if (!productId) {
-    return res.status(400).json({ message: 'ID du produit requis' });
+  // Validation des entrées
+  if (!productId || !initialOffer) {
+    return res.status(400).json({ message: 'ID du produit et offre initiale requis' });
   }
   
-  if (!initialOffer || isNaN(parseFloat(initialOffer)) || parseFloat(initialOffer) <= 0) {
-    return res.status(400).json({ message: 'Offre initiale invalide' });
+  if (typeof initialOffer !== 'number' || initialOffer <= 0) {
+    return res.status(400).json({ message: 'L\'offre doit être un nombre positif' });
   }
   
   try {
-    const result = await startNegotiation({
-      productId,
-      buyerId: userId,
-      initialOffer: parseFloat(initialOffer),
-      message: message || ''
+    // Récupérer le produit
+    const product = await Product.findById(productId);
+    
+    if (!product) {
+      return res.status(404).json({ message: 'Produit non trouvé' });
+    }
+    
+    if (!product.isAvailable) {
+      return res.status(400).json({ message: 'Ce produit n\'est plus disponible' });
+    }
+    
+    if (!product.allowOffers) {
+      return res.status(400).json({ message: 'Ce produit n\'accepte pas les offres' });
+    }
+    
+    // Vérifier que l'utilisateur n'est pas le vendeur
+    if (product.seller.toString() === userId) {
+      return res.status(400).json({ message: 'Vous ne pouvez pas faire une offre sur votre propre produit' });
+    }
+    
+    // Vérifier que l'offre est supérieure au pourcentage minimum
+    const minOffer = product.price * (product.minOfferPercentage || 50) / 100;
+    if (initialOffer < minOffer) {
+      return res.status(400).json({ 
+        message: `L'offre doit être au moins ${product.minOfferPercentage || 50}% du prix (${minOffer} ${product.currency})` 
+      });
+    }
+    
+    // Vérifier si une négociation existe déjà pour cet utilisateur et ce produit
+    let existingNegotiation = product.negotiations?.find((n: any) => 
+      n.buyer.toString() === userId && ['pending', 'accepted'].includes(n.status)
+    );
+    
+    // Si une négociation existe déjà, rediriger vers la conversation existante
+    if (existingNegotiation && existingNegotiation.conversationId) {
+      const conversation = await Conversation.findById(existingNegotiation.conversationId)
+        .populate('participants', 'username profilePicture email');
+      
+      return res.status(200).json({
+        message: 'Une négociation existe déjà pour ce produit',
+        negotiation: existingNegotiation,
+        conversation
+      });
+    }
+    
+    // Créer une nouvelle conversation de type négociation
+    const conversation = await Conversation.create({
+      participants: [userId, product.seller],
+      type: 'negotiation',
+      productId: product._id,
+      createdBy: userId,
+      status: 'open',
+      negotiation: {
+        initialPrice: product.price,
+        currentOffer: initialOffer,
+        status: 'pending'
+      },
+      title: `Négociation pour ${product.title}`
     });
+    
+    // Créer un message système pour l'offre initiale
+    const systemMessage = await Message.create({
+      conversation: conversation._id,
+      sender: userId,
+      content: `Offre initiale de ${initialOffer} ${product.currency}`,
+      contentType: 'offer',
+      isSystemMessage: true,
+      readBy: [userId]
+    });
+    
+    // Créer un message avec le texte de l'acheteur si fourni
+    if (message && message.trim()) {
+      const userMessage = await Message.create({
+        conversation: conversation._id,
+        sender: userId,
+        content: message,
+        contentType: 'text',
+        readBy: [userId]
+      });
+      
+      // Mettre à jour la conversation avec le dernier message
+      await Conversation.findByIdAndUpdate(
+        conversation._id,
+        { lastMessage: userMessage._id, lastMessageAt: new Date() }
+      );
+    } else {
+      // Utiliser le message système comme dernier message
+      await Conversation.findByIdAndUpdate(
+        conversation._id,
+        { lastMessage: systemMessage._id, lastMessageAt: new Date() }
+      );
+    }
+    
+    // Ajouter la négociation au produit
+    const negotiation = {
+      buyer: userId,
+      initialOffer,
+      currentOffer: initialOffer,
+      status: 'pending',
+      conversationId: conversation._id,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    // Utiliser $push pour ajouter à l'array de négociations
+    await Product.findByIdAndUpdate(
+      productId,
+      { $push: { negotiations: negotiation } }
+    );
+    
+    // Récupérer la conversation complète avec les relations
+    const populatedConversation = await Conversation.findById(conversation._id)
+      .populate('participants', 'username profilePicture email')
+      .populate('productId', 'title price images')
+      .populate('lastMessage');
     
     return res.status(201).json({
       message: 'Négociation initiée avec succès',
-      negotiation: result
+      conversation: populatedConversation,
+      initialOffer
     });
-  } catch (error: any) {
-    logger.error('Erreur lors de l\'initiation d\'une négociation', { error });
-    return res.status(400).json({ message: error.message });
+  } catch (error) {
+    logger.error('Erreur lors de l\'initiation d\'une négociation', { 
+      error: error instanceof Error ? error.message : 'Erreur inconnue',
+      stack: error instanceof Error ? error.stack : undefined,
+      productId,
+      userId,
+      initialOffer
+    });
+    
+    return res.status(500).json({ 
+      message: 'Une erreur est survenue lors de la création de la négociation'
+    });
   }
 });
 
 /**
- * Répond à une offre de négociation
+ * Répond à une négociation (accept, reject, counter)
  */
 export const respondToNegotiation = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const conversationId = req.params.id;
   const { action, counterOffer, message } = req.body;
   
-  if (!['accept', 'counter', 'reject'].includes(action)) {
-    return res.status(400).json({ message: 'Action non reconnue' });
+  // Validation des entrées
+  if (!action || !['accept', 'reject', 'counter'].includes(action)) {
+    return res.status(400).json({ message: 'Action invalide. Doit être accept, reject ou counter' });
   }
   
-  if (action === 'counter' && (!counterOffer || isNaN(parseFloat(counterOffer)) || parseFloat(counterOffer) <= 0)) {
-    return res.status(400).json({ message: 'Contre-offre invalide' });
+  if (action === 'counter' && (!counterOffer || typeof counterOffer !== 'number' || counterOffer <= 0)) {
+    return res.status(400).json({ message: 'Contre-offre requise et doit être un nombre positif' });
   }
   
   try {
-    const result = await respondToOffer({
-      conversationId,
-      userId,
-      action,
-      counterOffer: action === 'counter' ? parseFloat(counterOffer) : undefined,
-      message: message || ''
+    // Récupérer la conversation avec les détails du produit
+    const conversation = await Conversation.findById(conversationId)
+      .populate({
+        path: 'productId',
+        select: 'title price images seller negotiations currency'
+      });
+    
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation non trouvée' });
+    }
+    
+    if (conversation.type !== 'negotiation') {
+      return res.status(400).json({ message: 'Cette conversation n\'est pas une négociation' });
+    }
+    
+    const product = conversation.productId as any;
+    
+    if (!product) {
+      return res.status(400).json({ message: 'Produit non trouvé dans cette négociation' });
+    }
+    
+    // Vérifier que l'utilisateur est bien le vendeur
+    if (product.seller.toString() !== userId) {
+      return res.status(403).json({ message: 'Seul le vendeur peut répondre à cette offre' });
+    }
+    
+    // Trouver la négociation dans le produit
+    const productDoc = await Product.findById(product._id);
+    const negotiationIndex = productDoc.negotiations.findIndex(
+      (n: { conversationId: { toString(): string } }) => n.conversationId.toString() === conversationId
+    );
+    
+    if (negotiationIndex === -1) {
+      return res.status(404).json({ message: 'Négociation non trouvée pour ce produit' });
+    }
+    
+    const negotiation = productDoc.negotiations[negotiationIndex];
+    
+    // Traiter l'action selon son type
+    let statusMessage = '';
+    let contentType = 'system_notification';
+    
+    switch (action) {
+      case 'accept':
+        // Accepter l'offre
+        negotiation.status = 'accepted';
+        statusMessage = `Offre de ${negotiation.currentOffer} ${product.currency} acceptée`;
+        
+        // Mettre à jour la conversation
+        conversation.negotiation.status = 'accepted';
+        await conversation.save();
+        break;
+        
+      case 'reject':
+        // Rejeter l'offre
+        negotiation.status = 'rejected';
+        statusMessage = `Offre de ${negotiation.currentOffer} ${product.currency} rejetée`;
+        
+        // Mettre à jour la conversation
+        conversation.negotiation.status = 'rejected';
+        await conversation.save();
+        break;
+        
+      case 'counter':
+        // Faire une contre-offre
+        negotiation.counterOffer = counterOffer;
+        negotiation.updatedAt = new Date();
+        statusMessage = `Contre-offre de ${counterOffer} ${product.currency}`;
+        contentType = 'counter_offer';
+        
+        // Mettre à jour la conversation
+        conversation.negotiation.counterOffer = counterOffer;
+        await conversation.save();
+        break;
+    }
+    
+    // Sauvegarder les changements dans le produit
+    productDoc.negotiations[negotiationIndex] = negotiation;
+    await productDoc.save();
+    
+    // Créer un message système pour l'action
+    const systemMessage = await Message.create({
+      conversation: conversationId,
+      sender: userId,
+      content: statusMessage,
+      contentType,
+      isSystemMessage: true,
+      readBy: [userId]
     });
     
+    // Créer un message avec le texte du vendeur si fourni
+    let lastMessageId = systemMessage._id;
+    
+    if (message && message.trim()) {
+      const userMessage = await Message.create({
+        conversation: conversationId,
+        sender: userId,
+        content: message,
+        contentType: 'text',
+        readBy: [userId]
+      });
+      
+      lastMessageId = userMessage._id;
+    }
+    
+    // Mettre à jour la conversation avec le dernier message
+    await Conversation.findByIdAndUpdate(
+      conversationId,
+      { lastMessage: lastMessageId, lastMessageAt: new Date() }
+    );
+    
+    // Récupérer la conversation mise à jour
+    const updatedConversation = await Conversation.findById(conversationId)
+      .populate('participants', 'username profilePicture email')
+      .populate('productId', 'title price images')
+      .populate('lastMessage');
+    
     return res.status(200).json({
-      message: `Offre ${action === 'accept' ? 'acceptée' : action === 'counter' ? 'contre-proposée' : 'rejetée'} avec succès`,
-      result
+      message: 'Réponse à la négociation envoyée avec succès',
+      action,
+      conversation: updatedConversation,
+      negotiation: productDoc.negotiations[negotiationIndex]
     });
-  } catch (error: any) {
-    logger.error('Erreur lors de la réponse à une offre', { error });
-    return res.status(400).json({ message: error.message });
+  } catch (error) {
+    logger.error('Erreur lors de la réponse à une négociation', { 
+      error: error instanceof Error ? error.message : 'Erreur inconnue',
+      stack: error instanceof Error ? error.stack : undefined,
+      conversationId,
+      userId,
+      action
+    });
+    
+    return res.status(500).json({ 
+      message: 'Une erreur est survenue lors de la réponse à la négociation'
+    });
   }
 });
 

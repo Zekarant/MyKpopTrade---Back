@@ -67,9 +67,10 @@ router.post(
   '/:id/messages',
   authenticateJWT,
   verifyConversationAccess,
-  validateMessageContent,
+  // Important: le middleware de validation doit venir APRÈS l'upload pour que req.body soit correctement rempli
+  messageController.upload.array('attachments', 5), // Accepter jusqu'à 5 pièces jointes
+  // Ne pas utiliser validateMessageContent ici car il vérifie avant que multer n'ait traité les données
   rateLimitMessages,
-  messageController.upload.array('attachments', 5),
   messageController.sendNewMessage
 );
 
