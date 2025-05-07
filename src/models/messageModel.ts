@@ -5,9 +5,20 @@ export interface IMessage extends Document {
   sender: mongoose.Types.ObjectId;
   content: string;
   attachments?: string[];
-  contentType: 'text' | 'system_notification' | 'offer' | 'counter_offer' | 'shipping_update' | 'mixed';
+  contentType: 'text' | 'system_notification' | 'offer' | 'counter_offer' | 'shipping_update';
   readBy: mongoose.Types.ObjectId[];
-  isSystemMessage: boolean;
+  metadata?: {
+    offerAmount?: number;
+    shippingStatus?: string;
+    negotiationAction?: string;
+  };
+  isEncrypted: boolean;
+  encryptionDetails?: {
+    algorithm: string;
+    iv: string;
+  };
+  isDeleted: boolean;
+  deletedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -34,16 +45,32 @@ const MessageSchema: Schema = new Schema({
   }],
   contentType: {
     type: String,
-    enum: ['text', 'system_notification', 'offer', 'counter_offer', 'shipping_update', 'mixed'],
+    enum: ['text', 'system_notification', 'offer', 'counter_offer', 'shipping_update'],
     default: 'text'
   },
   readBy: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }],
-  isSystemMessage: {
+  metadata: {
+    offerAmount: Number,
+    shippingStatus: String,
+    negotiationAction: String
+  },
+  isEncrypted: {
     type: Boolean,
     default: false
+  },
+  encryptionDetails: {
+    algorithm: String,
+    iv: String
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false
+  },
+  deletedAt: {
+    type: Date
   }
 }, {
   timestamps: true

@@ -3,7 +3,6 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IConversation extends Document {
   participants: mongoose.Types.ObjectId[];
   productId?: mongoose.Types.ObjectId;
-  lastMessage?: mongoose.Types.ObjectId;
   lastMessageAt: Date;
   isActive: boolean;
   type: 'general' | 'product_inquiry' | 'negotiation' | 'pay_what_you_want';
@@ -37,10 +36,6 @@ const ConversationSchema: Schema = new Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product',
     index: true
-  },
-  lastMessage: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Message'
   },
   lastMessageAt: {
     type: Date,

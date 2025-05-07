@@ -26,31 +26,11 @@ export interface IProduct extends Document {
   updatedAt: Date;
   views: number;
   favorites: number;
-  // Champs pour les offres/négociations
   allowOffers: boolean;
   minOfferPercentage: number;
-  negotiations?: {
-    buyer: mongoose.Types.ObjectId;
-    initialOffer: number;
-    currentOffer: number;
-    counterOffer?: number;
-    status: 'pending' | 'accepted' | 'rejected' | 'expired' | 'completed';
-    expiresAt?: Date;
-    conversationId: mongoose.Types.ObjectId;
-    createdAt: Date;
-    updatedAt: Date;
-  }[];
-  // Champs pour PWYW
   isPayWhatYouWant: boolean;
   pwywMinPrice?: number;
   pwywMaxPrice?: number;
-  pwywOffers?: {
-    buyer: mongoose.Types.ObjectId;
-    proposedPrice: number;
-    status: 'pending' | 'accepted' | 'rejected';
-    conversationId: mongoose.Types.ObjectId;
-    createdAt: Date;
-  }[];
 }
 
 const ProductSchema: Schema = new Schema({
@@ -142,53 +122,14 @@ const ProductSchema: Schema = new Schema({
       type: Number
     }
   },
-  // Configuration des offres et négociations
   allowOffers: {
     type: Boolean,
     default: false
   },
   minOfferPercentage: {
     type: Number,
+    default: 50 // 50% du prix minimum par défaut
   },
-  negotiations: [{
-    buyer: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    initialOffer: {
-      type: Number,
-      required: true
-    },
-    currentOffer: {
-      type: Number,
-      required: true
-    },
-    counterOffer: {
-      type: Number
-    },
-    status: {
-      type: String,
-      enum: ['pending', 'accepted', 'rejected', 'expired', 'completed'],
-      default: 'pending'
-    },
-    expiresAt: {
-      type: Date
-    },
-    conversationId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Conversation'
-    },
-    createdAt: {
-      type: Date,
-      default: Date.now
-    },
-    updatedAt: {
-      type: Date,
-      default: Date.now
-    }
-  }],
-  // Configuration du "Pay What You Want"
   isPayWhatYouWant: {
     type: Boolean,
     default: false
@@ -199,30 +140,6 @@ const ProductSchema: Schema = new Schema({
   pwywMaxPrice: {
     type: Number
   },
-  pwywOffers: [{
-    buyer: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    proposedPrice: {
-      type: Number,
-      required: true
-    },
-    status: {
-      type: String,
-      enum: ['pending', 'accepted', 'rejected'],
-      default: 'pending'
-    },
-    conversationId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Conversation'
-    },
-    createdAt: {
-      type: Date,
-      default: Date.now
-    }
-  }],
   views: {
     type: Number,
     default: 0
@@ -256,7 +173,5 @@ ProductSchema.index({ seller: 1, isAvailable: 1 });
 ProductSchema.index({ kpopGroup: 1, isAvailable: 1 });
 ProductSchema.index({ type: 1, isAvailable: 1 });
 ProductSchema.index({ createdAt: -1 });
-ProductSchema.index({ 'negotiations.buyer': 1, 'negotiations.status': 1 });
-ProductSchema.index({ 'pwywOffers.buyer': 1, 'pwywOffers.status': 1 });
 
 export default mongoose.models.Product || mongoose.model<IProduct>('Product', ProductSchema);
