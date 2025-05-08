@@ -55,52 +55,69 @@ export const sendNewMessage = asyncHandler(async (req: Request, res: Response) =
   const conversationId = req.params.id;
   const { content, contentType = 'text' } = req.body;
   
-  // Vérifier que le contenu n'est pas vide
-  if (!content || content.trim() === '') {
+  // Améliorer la validation du contenu pour form-data
+  if (typeof content !== 'string' || content.trim() === '') {
+    logger.warn(`Tentative d'envoi de message avec contenu vide: ${JSON.stringify(req.body)}`);
     return res.status(400).json({ message: 'Le contenu du message ne peut pas être vide' });
   }
   
   try {
-    // Vérifier l'accès à la conversation
+    // Vérifier si la conversation existe et l'utilisateur en fait partie
     const conversation = await Conversation.findOne({
       _id: conversationId,
       participants: userId,
-      status: 'open',
       isActive: true
     });
     
     if (!conversation) {
-      return res.status(404).json({ message: 'Conversation non trouvée ou accès refusé' });
+      return res.status(404).json({ message: 'Conversation non trouvée ou accès non autorisé' });
     }
     
-    // Gérer les pièces jointes
+    // Traiter les pièces jointes si présentes
     let attachments: string[] = [];
-    if (req.files && Array.isArray(req.files)) {
-      attachments = (req.files as Express.Multer.File[]).map(file => file.filename);
-    } else if (req.file) {
-      attachments = [req.file.filename];
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      logger.debug(`Fichiers reçus: ${req.files.length}`);
+      attachments = req.files.map((file: Express.Multer.File) => file.filename);
+      logger.debug(`Noms de fichiers enregistrés: ${attachments.join(', ')}`);
     }
     
-    // Construire les métadonnées du message si nécessaire
-    const metadata: any = {};
+    // Créer et sauvegarder le nouveau message
+    // Utiliser une valeur enum valide pour contentType
+    const usedContentType = ['text', 'system_notification', 'offer', 'counter_offer', 'shipping_update'].includes(contentType) 
+      ? contentType 
+      : 'text';
     
-    // Créer et envoyer le message
-    const newMessage = await sendMessage({
-      conversationId,
-      senderId: userId,
+    const newMessage = await Message.create({
+      conversation: conversationId,
+      sender: userId,
       content,
-      attachments,
-      contentType,
-      metadata
+      contentType: usedContentType,
+      attachments: attachments.length > 0 ? attachments : undefined,
+      readBy: [userId] // Le message est déjà lu par l'expéditeur
     });
+    
+    // Mettre à jour la conversation séparément (au lieu d'utiliser une transaction)
+    await Conversation.findByIdAndUpdate(conversationId, {
+      lastMessage: newMessage._id,
+      lastMessageAt: new Date(),
+      status: 'open' // Réouvrir la conversation si elle était fermée
+    });
+    
+    // Récupérer le message avec les relations
+    const populatedMessage = await Message.findById(newMessage._id)
+      .populate('sender', 'username profilePicture');
     
     return res.status(201).json({
       message: 'Message envoyé avec succès',
-      data: newMessage
+      data: populatedMessage
     });
-  } catch (error: any) {
+  } catch (error) {
     logger.error('Erreur lors de l\'envoi d\'un message', { error });
-    return res.status(500).json({ message: error.message });
+    return res.status(500).json({ 
+      message: 'Une erreur est survenue lors de l\'envoi du message',
+      details: process.env.NODE_ENV === 'development' ? 
+        (error instanceof Error ? error.message : String(error)) : undefined
+    });
   }
 });
 
@@ -112,32 +129,34 @@ export const markConversationAsRead = asyncHandler(async (req: Request, res: Res
   const conversationId = req.params.id;
   
   try {
-    // Vérifier l'accès à la conversation
+    // Vérifier si la conversation existe
     const conversation = await Conversation.findOne({
       _id: conversationId,
       participants: userId
     });
     
     if (!conversation) {
-      return res.status(404).json({ message: 'Conversation non trouvée ou accès refusé' });
+      return res.status(404).json({ message: 'Conversation non trouvée' });
     }
     
-    // Marquer tous les messages comme lus
-    const result = await Message.updateMany(
-      {
+    // Marquer tous les messages non lus comme lus
+    await Message.updateMany(
+      { 
         conversation: conversationId,
+        sender: { $ne: userId },
         readBy: { $ne: userId }
       },
-      { $addToSet: { readBy: userId } }
+      {
+        $addToSet: { readBy: userId }
+      }
     );
     
     return res.status(200).json({
-      message: 'Messages marqués comme lus',
-      count: result.modifiedCount
+      message: 'Messages marqués comme lus'
     });
-  } catch (error: any) {
+  } catch (error) {
     logger.error('Erreur lors du marquage des messages comme lus', { error });
-    return res.status(500).json({ message: error.message });
+    return res.status(500).json({ message: 'Une erreur est survenue' });
   }
 });
 
