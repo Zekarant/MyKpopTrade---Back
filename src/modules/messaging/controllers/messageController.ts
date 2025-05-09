@@ -8,6 +8,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { NotificationService } from '../../notifications/services/notificationService';
 
 // Configuration de multer pour les pièces jointes
 const storage = multer.diskStorage({
@@ -95,6 +96,31 @@ export const sendNewMessage = asyncHandler(async (req: Request, res: Response) =
       attachments: attachments.length > 0 ? attachments : undefined,
       readBy: [userId] // Le message est déjà lu par l'expéditeur
     });
+    
+    // Notifier les autres participants de la conversation
+    const otherParticipants = conversation.participants.filter(
+      (p: any) => p.toString() !== userId
+    );
+
+    const username = (req.user as any)?.username || 'Utilisateur';
+    
+    for (const recipientId of otherParticipants) {
+      await NotificationService.createNotification({
+        recipientId,
+        type: 'message',
+        title: 'Nouveau message',
+        content: `Vous avez reçu un nouveau message de ${username}`,
+        link: `/conversations/${conversation._id}`,
+        data: { 
+          conversationId: conversation._id,
+          messageId: newMessage._id,
+          sender: {
+            id: userId,
+            username: username
+          }
+        }
+      });
+    }
     
     // Mettre à jour la conversation séparément (au lieu d'utiliser une transaction)
     await Conversation.findByIdAndUpdate(conversationId, {
