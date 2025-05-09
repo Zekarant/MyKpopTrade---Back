@@ -13,6 +13,7 @@ import { logAPIRequest } from './commons/utils/logger';
 import env from './config/env';
 import { verificationRoutes } from './modules/verification';
 import logger from './commons/utils/logger';
+import path from 'path';
 
 // Initialisation de l'application Express
 const app = express();
@@ -43,6 +44,7 @@ app.use('/api/profiles', profileRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/verification', verificationRoutes);
 app.use('/api/messaging', messagingRoutes);
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Route racine
 app.get('/', (req, res) => {

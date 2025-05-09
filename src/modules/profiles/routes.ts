@@ -3,6 +3,7 @@ import * as profileController from './controllers/profileController';
 import * as ratingController from './controllers/ratingController';
 import * as verificationController from './controllers/verificationController';
 import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
+import { profilePictureUpload } from './middleware/fileUploaderMiddleware';
 
 const router = Router();
 
@@ -20,5 +21,19 @@ router.post('/ratings/:ratingId/report', authenticateJWT, ratingController.repor
 router.get('/proofs/:userId', verificationController.getUserProofs);
 router.post('/proofs', authenticateJWT, verificationController.addTransactionProof);
 router.get('/verification-stats/:userId', verificationController.getUserVerificationStats);
+
+router.post(
+    '/me/picture',
+    authenticateJWT,
+    profilePictureUpload.single('profilePicture'),
+    profileController.updateProfilePicture
+  );
+  
+  // Route pour supprimer la photo de profil
+  router.delete(
+    '/me/picture',
+    authenticateJWT,
+    profileController.deleteProfilePicture
+  );
 
 export default router;

@@ -4,6 +4,9 @@ import Product from '../../../models/productModel';
 import Rating from '../../../models/ratingModel';
 import { calculateProfileCompleteness } from '../services/profileService';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
+import fs from 'fs';
+import path from 'path';
+import logger from '../../../commons/utils/logger';
 
 /**
  * Récupérer le profil public d'un utilisateur
@@ -163,4 +166,112 @@ export const updateProfile = asyncHandler(async (req: Request, res: Response) =>
       preferences: user.preferences
     }
   });
+});
+
+/**
+ * Mettre à jour la photo de profil
+ */
+export const updateProfilePicture = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  
+  if (!req.file) {
+    return res.status(400).json({ message: 'Aucune image n\'a été téléchargée' });
+  }
+  
+  try {
+    // Récupérer l'utilisateur pour vérifier s'il a déjà une photo de profil
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+    
+    // Chemin relatif pour stocker en base de données (sans le chemin absolu)
+    const relativePath = `/uploads/profiles/${path.basename(req.file.path)}`;
+    
+    // Si l'utilisateur a déjà une photo de profil, supprimer l'ancienne
+    if (user.profilePicture) {
+      const oldPicturePath = path.join(
+        __dirname, 
+        '../../../../', 
+        user.profilePicture.replace(/^\//, '')
+      );
+      
+      // Vérifier si le fichier existe avant de le supprimer
+      if (fs.existsSync(oldPicturePath)) {
+        fs.unlinkSync(oldPicturePath);
+      }
+    }
+    
+    // Mettre à jour le profil avec le nouveau chemin d'image
+    user.profilePicture = relativePath;
+    await user.save();
+    
+    return res.status(200).json({
+      message: 'Photo de profil mise à jour avec succès',
+      profilePicture: user.profilePicture
+    });
+  } catch (error) {
+    // En cas d'erreur, supprimer le fichier téléchargé
+    if (req.file && req.file.path) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    logger.error('Erreur lors de la mise à jour de la photo de profil', { 
+      error: error instanceof Error ? error.message : 'Erreur inconnue',
+      userId 
+    });
+    
+    return res.status(500).json({ 
+      message: 'Une erreur est survenue lors de la mise à jour de la photo de profil' 
+    });
+  }
+});
+
+/**
+ * Supprimer la photo de profil
+ */
+export const deleteProfilePicture = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  
+  try {
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+    
+    // Vérifier si l'utilisateur a une photo de profil
+    if (!user.profilePicture) {
+      return res.status(400).json({ message: 'Aucune photo de profil à supprimer' });
+    }
+    
+    // Supprimer le fichier
+    const picturePath = path.join(
+      __dirname, 
+      '../../../../', 
+      user.profilePicture.replace(/^\//, '')
+    );
+    
+    if (fs.existsSync(picturePath)) {
+      fs.unlinkSync(picturePath);
+    }
+    
+    // Mettre à jour le profil
+    user.profilePicture = undefined;
+    await user.save();
+    
+    return res.status(200).json({
+      message: 'Photo de profil supprimée avec succès'
+    });
+  } catch (error) {
+    logger.error('Erreur lors de la suppression de la photo de profil', { 
+      error: error instanceof Error ? error.message : 'Erreur inconnue',
+      userId 
+    });
+    
+    return res.status(500).json({ 
+      message: 'Une erreur est survenue lors de la suppression de la photo de profil' 
+    });
+  }
 });
