@@ -115,3 +115,84 @@ export const loadUser = async (req: Request, res: Response, next: NextFunction):
     res.status(500).json({ message: 'Erreur interne du serveur.' });
   }
 };
+
+/**
+ * Middleware pour vérifier si l'utilisateur est un administrateur
+ * À utiliser après authenticateJWT
+ */
+export const requireAdmin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+
+    const userId = (req.user as any).id;
+    // Vérifier que l'utilisateur est authentifié
+    if (!userId) {
+      res.status(401).json({ message: 'Authentification requise' });
+      return;
+    }
+    
+    // Récupérer l'utilisateur complet depuis la base de données pour vérifier son rôle
+    const user = await User.findById(userId).select('role');
+    
+    if (!user) {
+      res.status(404).json({ message: 'Utilisateur non trouvé' });
+      return;
+    }
+    
+    // Vérifier si l'utilisateur a le rôle d'administrateur
+    if (user.role !== 'admin') {
+      res.status(403).json({ 
+        message: 'Accès non autorisé. Droits d\'administrateur requis.',
+        code: 'ADMIN_REQUIRED'
+      });
+      return;
+    }
+    
+    // L'utilisateur est un administrateur, continuer
+    next();
+  } catch (error) {
+    logger.error('Erreur lors de la vérification des droits administrateur:', 
+      error instanceof Error ? error.message : String(error)
+    );
+    res.status(500).json({ message: 'Erreur interne du serveur.' });
+  }
+};
+
+/**
+ * Middleware pour vérifier si l'utilisateur est un administrateur ou un modérateur
+ * À utiliser après authenticateJWT
+ */
+export const requireStaff = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = (req.user as any).id;
+    // Vérifier que l'utilisateur est authentifié
+    if (!req.user || !userId) {
+      res.status(401).json({ message: 'Authentification requise' });
+      return;
+    }
+    
+    // Récupérer l'utilisateur complet depuis la base de données pour vérifier son rôle
+    const user = await User.findById(userId).select('role');
+    
+    if (!user) {
+      res.status(404).json({ message: 'Utilisateur non trouvé' });
+      return;
+    }
+    
+    // Vérifier si l'utilisateur a un rôle d'administration ou de modération
+    if (user.role !== 'admin' && user.role !== 'moderator') {
+      res.status(403).json({ 
+        message: 'Accès non autorisé. Droits de modération ou d\'administration requis.',
+        code: 'STAFF_REQUIRED'
+      });
+      return;
+    }
+    
+    // L'utilisateur fait partie du staff, continuer
+    next();
+  } catch (error) {
+    logger.error('Erreur lors de la vérification des droits de staff:', 
+      error instanceof Error ? error.message : String(error)
+    );
+    res.status(500).json({ message: 'Erreur interne du serveur.' });
+  }
+};
