@@ -1,13 +1,26 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 
 export interface IUser extends Document {
   username: string;
   email: string;
   password: string;
-  profilePicture?: string;
-  phoneNumber?: string;
+  isActive: boolean;
+  profilePicture: string;
+  createdAt: Date;
+  updatedAt: Date;
+  lastLoginAt?: Date;
+  privacyPolicyAccepted: boolean;
+  privacyPolicyAcceptedAt?: Date;
+  dataProcessingConsent: boolean;
+  dataProcessingConsentAt?: Date;
+  marketingConsent: boolean;
+  marketingConsentAt?: Date;
+  scheduledForDeletion: boolean;
+  scheduledDeletionDate?: Date;
+  anonymized: boolean;
+  comparePassword(candidatePassword: string): Promise<boolean>;
   isEmailVerified: boolean;
   isPhoneVerified: boolean;
   accountStatus: 'active' | 'suspended' | 'deleted';
@@ -60,36 +73,88 @@ export interface IUser extends Document {
   isIdentityVerified?: boolean;
   identityVerifiedAt?: Date;
   verificationLevel: 'none' | 'basic' | 'advanced' | 'complete';
+  paypalEmail?: string;
+  isSellerVerified?: boolean;
+  sellerRating?: number;
 }
 
 const UserSchema: Schema = new Schema({
   username: {
     type: String,
-    required: true,
+    required: [true, 'Veuillez fournir un nom d\'utilisateur'],
     unique: true,
     trim: true,
-    minlength: 3,
-    maxlength: 30
+    maxlength: [50, 'Le nom d\'utilisateur ne peut pas dépasser 50 caractères']
   },
   email: {
     type: String,
-    required: true,
+    required: [true, 'Veuillez fournir un email'],
     unique: true,
-    trim: true,
-    lowercase: true
+    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Veuillez fournir un email valide']
   },
   password: {
     type: String,
-    required: function(this: mongoose.Document & IUser): boolean {
-      return !this.socialAuth?.google && !this.socialAuth?.facebook && !this.socialAuth?.discord;
-    },
-    minlength: 8
+    required: [true, 'Veuillez fournir un mot de passe'],
+    minlength: [8, 'Le mot de passe doit comporter au moins 8 caractères'],
+    select: false // Ne pas inclure par défaut dans les requêtes
+  },
+  role: {
+    type: String,
+    enum: ['user', 'admin'],
+    default: 'user'
+  },
+  isActive: {
+    type: Boolean,
+    default: true
   },
   profilePicture: {
-    type: String
+    type: String,
+    default: 'https://mykpoptrade.com/images/avatar-default.png'
   },
-  phoneNumber: {
-    type: String
+  paypalEmail: {
+    type: String,
+    validate: {
+      validator: function(v: string) {
+        return /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(v);
+      },
+      message: 'Veuillez fournir un email PayPal valide'
+    }
+  },
+  // Champs RGPD
+  privacyPolicyAccepted: {
+    type: Boolean,
+    default: false
+  },
+  privacyPolicyAcceptedAt: {
+    type: Date
+  },
+  dataProcessingConsent: {
+    type: Boolean,
+    default: false
+  },
+  dataProcessingConsentAt: {
+    type: Date
+  },
+  marketingConsent: {
+    type: Boolean,
+    default: false
+  },
+  marketingConsentAt: {
+    type: Date
+  },
+  scheduledForDeletion: {
+    type: Boolean,
+    default: false
+  },
+  scheduledDeletionDate: {
+    type: Date
+  },
+  anonymized: {
+    type: Boolean,
+    default: false
+  },
+  lastLoginAt: {
+    type: Date
   },
   isEmailVerified: {
     type: Boolean,
@@ -103,11 +168,6 @@ const UserSchema: Schema = new Schema({
     type: String,
     enum: ['active', 'suspended', 'deleted'],
     default: 'active'
-  },
-  role: {
-    type: String,
-    enum: ['user', 'moderator', 'admin'],
-    default: 'user'
   },
   lastLogin: {
     type: Date
@@ -198,28 +258,48 @@ const UserSchema: Schema = new Schema({
     type: String,
     enum: ['none', 'basic', 'advanced', 'complete'],
     default: 'none'
+  },
+  isSellerVerified: {
+    type: Boolean,
+    default: false
+  },
+  sellerRating: {
+    type: Number,
+    min: 0,
+    max: 5,
+    default: 0
   }
 }, {
   timestamps: true
 });
 
+// Middleware de pré-sauvegarde pour le hachage du mot de passe
 UserSchema.pre('save', async function(next) {
-  if (this.isModified('password')) {
-    try {
-      const salt = await bcrypt.genSalt(10);
-      this.password = await bcrypt.hash(this.password as string, salt);
-    } catch (error) {
-      return next(error as Error);
-    }
+  if (!this.isModified('password')) {
+    return next();
   }
-  next();
+  
+  try {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password as string, salt);
+    next();
+  } catch (error: any) {
+    next(error);
+  }
 });
 
+// Modification de la méthode comparePassword
 UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
   try {
+    // Vérifier si le mot de passe est défini
+    if (!this.password) {
+      throw new Error('Le mot de passe utilisateur n\'est pas disponible pour la comparaison');
+    }
+    
     return await bcrypt.compare(candidatePassword, this.password);
   } catch (error) {
-    return false;
+    console.error('Erreur lors de la comparaison du mot de passe:', error);
+    throw new Error(error instanceof Error ? error.message : String(error));
   }
 };
 

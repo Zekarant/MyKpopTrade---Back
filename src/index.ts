@@ -9,6 +9,7 @@ import { productRoutes } from './modules/products';
 import { messagingRoutes } from './modules/messaging';
 import notificationRoutes from './modules/notifications/routes';
 import paymentRoutes from './modules/payments/routes';
+import accountsRoutes from './modules/accounts/routes';
 import { errorHandler, notFoundHandler } from './commons/middlewares/errorMiddleware';
 import { initializePassport } from './config/passport';
 import { logAPIRequest } from './commons/utils/logger';
@@ -49,6 +50,7 @@ app.use('/api/messaging', messagingRoutes);
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/accounts', accountsRoutes);
 
 // Route racine
 app.get('/', (req, res) => {

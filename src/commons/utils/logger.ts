@@ -1,4 +1,5 @@
 import winston from 'winston';
+import 'winston-daily-rotate-file';
 import path from 'path';
 import fs from 'fs';
 
@@ -57,6 +58,42 @@ if (process.env.NODE_ENV !== 'production') {
   );
 }
 
+// Configuration pour ne pas enregistrer d'informations sensibles
+const logsSanitizer = winston.format((info) => {
+  // Liste des champs sensibles à masquer dans les logs
+  const sensitiveFields = ['password', 'token', 'email', 'paypalEmail', 'address', 'phoneNumber', 'fullName'];
+  
+  // Fonction récursive pour masquer les données sensibles
+  const sanitizeObject = (obj: any): any => {
+    if (!obj) return obj;
+    
+    const newObj = { ...obj };
+    
+    Object.keys(newObj).forEach(key => {
+      // Si c'est un champ sensible et une chaîne
+      if (sensitiveFields.includes(key) && typeof newObj[key] === 'string') {
+        // Masquer l'email en ne gardant que les 3 premiers caractères
+        if (key.includes('email') && newObj[key].includes('@')) {
+          const [localPart, domain] = newObj[key].split('@');
+          newObj[key] = `${localPart.substring(0, 3)}***@***${domain.substring(domain.lastIndexOf('.'))}`;
+        } else {
+          // Masquer complètement les autres données sensibles
+          newObj[key] = '******';
+        }
+      } 
+      // Traiter les objets imbriqués
+      else if (typeof newObj[key] === 'object' && newObj[key] !== null) {
+        newObj[key] = sanitizeObject(newObj[key]);
+      }
+    });
+    
+    return newObj;
+  };
+  
+  // Appliquer la sanitisation aux données du log
+  return sanitizeObject(info);
+});
+
 // Création du logger
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
@@ -64,7 +101,8 @@ const logger = winston.createLogger({
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.errors({ stack: true }),
     winston.format.splat(),
-    winston.format.json()
+    winston.format.json(),
+    logsSanitizer()
   ),
   defaultMeta: { service: 'mykpoptrade-api' },
   transports

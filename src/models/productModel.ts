@@ -15,6 +15,9 @@ export interface IProduct extends Document {
   images: string[];
   isAvailable: boolean;
   isReserved: boolean;
+  isSold: boolean; // Nouveau champ
+  soldAt?: Date; // Nouveau champ
+  soldTo?: mongoose.Types.ObjectId; // Nouveau champ
   reservedFor?: mongoose.Types.ObjectId;
   shippingOptions: {
     worldwide: boolean;
@@ -120,6 +123,17 @@ const ProductSchema: Schema = new Schema({
   isReserved: {
     type: Boolean,
     default: false
+  },
+  isSold: {
+    type: Boolean,
+    default: false
+  },
+  soldAt: {
+    type: Date
+  },
+  soldTo: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   },
   reservedFor: {
     type: mongoose.Schema.Types.ObjectId,

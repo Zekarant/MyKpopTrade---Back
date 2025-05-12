@@ -7,6 +7,7 @@ import {
   verifyRefreshToken,
   tokenBlacklist 
 } from '../../../commons/services/tokenService';
+import logger from '../../../commons/utils/logger';
 
 /**
  * Connexion utilisateur
@@ -20,13 +21,14 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Ajouter .select('+password') pour inclure explicitement le champ password
     const user = await User.findOne({
       $or: [
         { email: identifier },
         { username: identifier }
       ],
       accountStatus: { $ne: 'deleted' }
-    });
+    }).select('+password');
 
     if (!user) {
       res.status(401).json({ message: 'Identifiants incorrects' });
@@ -52,6 +54,12 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const accessToken = generateAccessToken(user);
     const refreshToken = await generateRefreshToken(user._id.toString());
 
+    // Journalisation de la connexion réussie (sans données sensibles)
+    logger.info('Connexion réussie', {
+      userId: user._id.toString().substring(0, 5) + '...',
+      username: user.username
+    });
+
     res.status(200).json({
       message: 'Connexion réussie',
       accessToken,
@@ -62,10 +70,17 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         email: user.email,
         isEmailVerified: user.isEmailVerified,
         isPhoneVerified: user.isPhoneVerified,
-        role: user.role // Ajout du rôle ici
+        role: user.role
+      },
+      consents: {
+        privacyPolicy: user.privacyPolicyAccepted,
+        dataProcessing: user.dataProcessingConsent,
+        marketing: user.marketingConsent
       }
     });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error('Erreur lors de la connexion', { error: errorMessage });
     console.error('Erreur lors de la connexion:', error);
     res.status(500).json({ message: 'Erreur lors de la connexion. Veuillez réessayer.' });
   }

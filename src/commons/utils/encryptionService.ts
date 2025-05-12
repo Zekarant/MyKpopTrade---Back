@@ -85,23 +85,36 @@ export class EncryptionService {
   static anonymize(value: string): string {
     if (!value) return '';
     
-    // Si c'est un email
+    // Pour les adresses email
     if (value.includes('@')) {
-      const [name, domain] = value.split('@');
-      return `${name.charAt(0)}${'*'.repeat(Math.max(name.length - 2, 2))}${name.charAt(name.length - 1)}@${domain}`;
+      const parts = value.split('@');
+      const name = parts[0];
+      const domain = parts[1];
+      
+      // Garder les 2 premiers et derniers caractères du nom
+      let maskedName = '';
+      if (name.length <= 4) {
+        maskedName = name[0] + '*'.repeat(name.length - 1);
+      } else {
+        maskedName = name.substring(0, 2) + 
+                   '*'.repeat(name.length - 4) + 
+                   name.substring(name.length - 2);
+      }
+      
+      return `${maskedName}@${domain}`;
     }
     
-    // Si c'est un numéro de téléphone
-    if (/^\+?[0-9\s-]{8,}$/.test(value)) {
-      return `${'*'.repeat(value.length - 4)}${value.slice(-4)}`;
+    // Pour les numéros de téléphone
+    if (/^\+?[\d\s\-()]{6,}$/.test(value)) {
+      return value.substring(0, 4) + '*'.repeat(value.length - 7) + value.substring(value.length - 3);
     }
     
-    // Si c'est une chaîne courte (comme un nom), préserver première et dernière lettre
-    if (value.length < 12) {
-      return `${value.charAt(0)}${'*'.repeat(Math.max(value.length - 2, 1))}${value.charAt(value.length - 1)}`;
+    // Pour les autres valeurs sensibles (numéro de carte, etc.)
+    if (value.length > 6) {
+      return value.substring(0, 2) + '*'.repeat(value.length - 4) + value.substring(value.length - 2);
     }
     
-    // Pour les chaînes longues, masquer le milieu
-    return `${value.substring(0, 3)}${'*'.repeat(Math.max(value.length - 6, 3))}${value.substring(value.length - 3)}`;
+    // Si la valeur est trop courte, masquer tout sauf le premier caractère
+    return value[0] + '*'.repeat(value.length - 1);
   }
 }
