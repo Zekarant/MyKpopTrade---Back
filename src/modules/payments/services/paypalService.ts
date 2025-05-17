@@ -479,10 +479,10 @@ export class PayPalService {
       // Masquer partiellement le captureId pour la journalisation
       const maskedCaptureId = captureId.substring(0, 5) + '...';
 
-      logger.info('Préparation du remboursement', {
+      GdprLogger.logPaymentAction('remboursement_preparation', {
         captureId: maskedCaptureId,
         isPartial: amount !== null
-      });
+      }, sellerId);
 
       // Récupérer l'utilisateur pour ses informations
       const seller = await User.findById(sellerId);
@@ -584,15 +584,10 @@ export class PayPalService {
       const errorResponse = error.response?.data || {};
       const errorDetails = errorResponse.details || [];
 
-      logger.error('Erreur lors du remboursement du paiement', {
-        error: error.message || 'Erreur inconnue',
-        captureId: captureId.substring(0, 5) + '...',
-        sellerId: sellerId.substring(0, 5) + '...',
+      GdprLogger.logPaymentError(error, sellerId, {
+        captureId: captureId,
         statusCode: error.response?.status,
-        errorName: errorResponse.name,
-        errorMessage: errorResponse.message,
-        errorDetails: JSON.stringify(errorDetails),
-        rawResponse: JSON.stringify(error.response?.data)
+        errorName: errorResponse.name
       });
 
       // Gestion spécifique des erreurs courantes de PayPal
@@ -629,7 +624,7 @@ export class PayPalService {
   /**
    * Récupère les détails d'une capture de paiement
    */
-  private static async getCaptureDetails(captureId: string, accessToken: string): Promise<{
+  public static async getCaptureDetails(captureId: string, accessToken: string): Promise<{
     amount: number;
     currency: string;
     status: string;

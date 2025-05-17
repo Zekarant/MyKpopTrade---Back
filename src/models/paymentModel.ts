@@ -53,6 +53,8 @@ export interface IPayment extends Document {
   createdAt: Date;
   updatedAt: Date;
   retentionExpiresAt?: Date; // Date d'expiration de la rétention des données
+  anonymized: boolean;
+  gdprRetentionDate?: Date;
 }
 
 const paymentSchema: Schema = new Schema({
@@ -112,13 +114,16 @@ const paymentSchema: Schema = new Schema({
     default: 'direct'
   },
   paymentMetadata: {
-    type: String
+    type: String,
+    select: false // Données cryptées, ne pas sélectionner par défaut
   },
   ipAddress: {
-    type: String
+    type: String,
+    select: false // Ne pas sélectionner par défaut pour protéger la vie privée
   },
   userAgent: {
-    type: String
+    type: String,
+    select: false // Ne pas sélectionner par défaut pour protéger la vie privée
   },
   isAnonymized: {
     type: Boolean,
@@ -142,6 +147,18 @@ const paymentSchema: Schema = new Schema({
   },
   retentionExpiresAt: {
     type: Date
+  },
+  anonymized: {
+    type: Boolean,
+    default: false
+  },
+  gdprRetentionDate: {
+    type: Date,
+    default: () => {
+      const date = new Date();
+      date.setFullYear(date.getFullYear() + 3); // 3 ans par défaut
+      return date;
+    }
   }
 }, {
   timestamps: true
@@ -170,5 +187,28 @@ paymentSchema.pre('save', function(next) {
   }
   next();
 });
+
+// Middleware pour masquer les données sensibles dans les réponses JSON
+paymentSchema.methods.toJSON = function() {
+  const obj = this.toObject();
+  
+  // Supprimer les données sensibles
+  delete obj.ipAddress;
+  delete obj.userAgent;
+  delete obj.paymentMetadata;
+  
+  // Si anonymisé, supprimer encore plus de données
+  if (obj.anonymized) {
+    if (obj.buyerDetails) {
+      obj.buyerDetails = "Anonymized";
+    }
+    
+    if (obj.paypalEmail) {
+      obj.paypalEmail = "anonymized@example.com";
+    }
+  }
+  
+  return obj;
+};
 
 export default mongoose.models.Payment || mongoose.model<IPayment>('Payment', paymentSchema);

@@ -41,3 +41,20 @@ export const validateRefundRequest = (req: Request, res: Response, next: NextFun
   
   next(); // Si tout est valide, on passe à la suite
 };
+
+/**
+ * Vérifie que le mot de passe est présent dans la demande
+ */
+export const validatePassword = (req: Request, res: Response, next: NextFunction): void => {
+  const { password } = req.body;
+  
+  if (!password || typeof password !== 'string' || password.length === 0) {
+    res.status(400).json({
+      success: false,
+      message: 'Le mot de passe est requis pour cette action'
+    });
+    return;
+  }
+  
+  next();
+};
