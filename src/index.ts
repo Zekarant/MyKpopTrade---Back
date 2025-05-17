@@ -17,7 +17,6 @@ import env from './config/env';
 import { verificationRoutes } from './modules/verification';
 import logger from './commons/utils/logger';
 import path from 'path';
-import { startGdprCleanupTask } from './commons/tasks/gdprCleanupTask';
 
 // Initialisation de l'application Express
 const app = express();
@@ -63,12 +62,6 @@ app.use('*', notFoundHandler);
 
 // Middleware de gestion des erreurs
 app.use(errorHandler);
-
-if (process.env.NODE_ENV !== 'test') {
-  // Ne pas démarrer les tâches CRON en environnement de test
-  startGdprCleanupTask();
-  logger.info('Tâches CRON de maintenance RGPD démarrées');
-}
 
 // Connexion à MongoDB
 mongoose.connect(env.MONGODB_URI)
