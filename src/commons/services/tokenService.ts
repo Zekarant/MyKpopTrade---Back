@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import jwt, { SignOptions } from 'jsonwebtoken';
 import crypto from 'crypto';
 import { IUser } from '../../models/userModel';
 import RefreshToken from '../../models/tokenModel';
@@ -10,16 +10,17 @@ export const tokenBlacklist = new Set<string>();
  * Génère un token d'accès JWT (courte durée)
  */
 export const generateAccessToken = (user: any): string => {
-  return jwt.sign(
-    { 
-      id: user._id, 
-      email: user.email,
-      username: user.username,
-      role: user.role // Ajout du rôle dans le token
-    },
-    process.env.JWT_SECRET || 'default_secret',
-    { expiresIn: process.env.JWT_EXPIRE || '15m' }
-  );
+  const payload = { 
+    id: user._id, 
+    email: user.email,
+    username: user.username,
+    role: user.role
+  };
+  
+  const secret = process.env.JWT_SECRET || 'default_secret';
+  const options: SignOptions = { expiresIn: (process.env.JWT_EXPIRE || '15m') as jwt.SignOptions['expiresIn'] };
+  
+  return jwt.sign(payload, secret, options);
 };
 
 /**
