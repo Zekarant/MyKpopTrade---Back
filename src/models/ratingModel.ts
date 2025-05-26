@@ -5,6 +5,7 @@ export interface IRating extends Document {
   recipient: mongoose.Types.ObjectId;
   rating: number;
   review: string;
+  images: string[];
   transaction?: mongoose.Types.ObjectId;
   type: 'buyer' | 'seller';
   createdAt: Date;
@@ -34,6 +35,10 @@ const RatingSchema: Schema = new Schema({
     type: String,
     required: true,
     maxlength: 500
+  },
+  images: {
+    type: [String],
+    default: []
   },
   transaction: {
     type: mongoose.Schema.Types.ObjectId,

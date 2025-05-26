@@ -8,6 +8,7 @@ export interface IUser extends Document {
   password: string;
   isActive: boolean;
   profilePicture: string;
+  profileBanner?: string;
   createdAt: Date;
   updatedAt: Date;
   lastLoginAt?: Date;
@@ -110,6 +111,10 @@ const UserSchema: Schema = new Schema({
   profilePicture: {
     type: String,
     default: 'https://mykpoptrade.com/images/avatar-default.png'
+  },
+  profileBanner: {
+    type: String,
+    default: null
   },
   paypalEmail: {
     type: String,

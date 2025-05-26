@@ -275,3 +275,122 @@ export const deleteProfilePicture = asyncHandler(async (req: Request, res: Respo
     });
   }
 });
+
+/**
+ * Mettre à jour la bannière de profil
+ */
+export const updateProfileBanner = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  
+  console.log('Headers:', req.headers);
+  console.log('Files:', req.file || 'No file');
+  console.log('Form data:', req.body);
+  
+  if (!req.file) {
+    return res.status(400).json({ 
+      message: 'Aucune image n\'a été téléchargée',
+      debug: {
+        contentType: req.headers['content-type'],
+        hasFiles: !!req.files,
+        fileInfo: req.file
+      }
+    });
+  }
+  
+  try {
+    // Récupérer l'utilisateur pour vérifier s'il a déjà une bannière
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+    
+    // Chemin relatif pour stocker en base de données (sans le chemin absolu)
+    const relativePath = `/uploads/banners/${path.basename(req.file.path)}`;
+    
+    // Si l'utilisateur a déjà une bannière, supprimer l'ancienne
+    if (user.profileBanner) {
+      const oldBannerPath = path.join(
+        __dirname, 
+        '../../../../', 
+        user.profileBanner.replace(/^\//, '')
+      );
+      
+      // Vérifier si le fichier existe avant de le supprimer
+      if (fs.existsSync(oldBannerPath)) {
+        fs.unlinkSync(oldBannerPath);
+      }
+    }
+    
+    // Mettre à jour le profil avec le nouveau chemin de bannière
+    user.profileBanner = relativePath;
+    await user.save();
+    
+    return res.status(200).json({
+      message: 'Bannière de profil mise à jour avec succès',
+      profileBanner: user.profileBanner
+    });
+  } catch (error) {
+    // En cas d'erreur, supprimer le fichier téléchargé
+    if (req.file && req.file.path) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    logger.error('Erreur lors de la mise à jour de la bannière de profil', { 
+      error: error instanceof Error ? error.message : 'Erreur inconnue',
+      userId 
+    });
+    
+    return res.status(500).json({ 
+      message: 'Une erreur est survenue lors de la mise à jour de la bannière de profil' 
+    });
+  }
+});
+
+/**
+ * Supprimer la bannière de profil
+ */
+export const deleteProfileBanner = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  
+  try {
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+    
+    // Vérifier si l'utilisateur a une bannière de profil
+    if (!user.profileBanner) {
+      return res.status(400).json({ message: 'Aucune bannière de profil à supprimer' });
+    }
+    
+    // Supprimer le fichier
+    const bannerPath = path.join(
+      __dirname, 
+      '../../../../', 
+      user.profileBanner.replace(/^\//, '')
+    );
+    
+    if (fs.existsSync(bannerPath)) {
+      fs.unlinkSync(bannerPath);
+    }
+    
+    // Mettre à jour le profil
+    user.profileBanner = undefined;
+    await user.save();
+    
+    return res.status(200).json({
+      message: 'Bannière de profil supprimée avec succès'
+    });
+  } catch (error) {
+    logger.error('Erreur lors de la suppression de la bannière de profil', { 
+      error: error instanceof Error ? error.message : 'Erreur inconnue',
+      userId 
+    });
+    
+    return res.status(500).json({ 
+      message: 'Une erreur est survenue lors de la suppression de la bannière de profil' 
+    });
+  }
+});

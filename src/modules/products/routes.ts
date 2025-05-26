@@ -2,6 +2,9 @@ import { Router } from 'express';
 import * as productController from './controllers/productController';
 import * as inventoryController from './controllers/inventoryController';
 import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
+import * as productImageController from './controllers/productImageController';
+import { productImageUpload } from '../profiles/middleware/fileUploaderMiddleware';
+
 
 const router = Router();
 
@@ -22,5 +25,25 @@ router.get('/inventory/user/:userId', inventoryController.getUserInventory);
 router.get('/inventory/favorites', authenticateJWT, inventoryController.getUserFavorites);
 router.get('/recommendations/:productId?', inventoryController.getRecommendedProducts);
 router.get('/stats', inventoryController.getProductStats);
+
+// Routes pour les images de produits
+router.post(
+  '/:productId/images',
+  authenticateJWT,
+  productImageUpload.single('productImage'),
+  productImageController.uploadProductImage
+);
+
+router.delete(
+  '/:productId/images',
+  authenticateJWT,
+  productImageController.deleteProductImage
+);
+
+router.put(
+  '/:productId/images/reorder',
+  authenticateJWT,
+  productImageController.reorderProductImages
+);
 
 export default router;
