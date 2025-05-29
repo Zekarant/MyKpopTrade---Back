@@ -4,39 +4,121 @@ import Product, { IProduct } from '../../../models/productModel';
 import User from '../../../models/userModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { validateProductData } from '../services/productValidationService';
+import logger from '../../../commons/utils/logger';
+import path from 'path';
+import fs from 'fs';
 
 /**
  * Créer un nouveau produit
  */
 export const createProduct = asyncHandler(async (req: Request, res: Response) => {
   const sellerId = (req.user as any).id;
+  const productData = req.body;
   
-  // Valider les données du produit
-  const { error, value } = validateProductData(req.body);
-  if (error) {
-    return res.status(400).json({ message: error.details[0].message });
+  try {
+    // Traiter les images téléchargées
+    let imageUrls: string[] = [];
+    
+    // Si des fichiers ont été téléchargés
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      // Convertir les fichiers en URLs pour le stockage
+      imageUrls = (req.files as Express.Multer.File[]).map(file => 
+        `/uploads/products/${path.basename(file.path)}`
+      );
+    }
+    
+    // Si des URLs d'image ont été fournies directement dans la requête (compatibilité avec l'ancien format)
+    if (productData.images && Array.isArray(productData.images) && productData.images.length > 0) {
+      // Si ce sont des chaînes JSON, les parser
+      if (typeof productData.images === 'string') {
+        try {
+          const parsedImages = JSON.parse(productData.images);
+          if (Array.isArray(parsedImages)) {
+            imageUrls = [...imageUrls, ...parsedImages];
+          }
+        } catch (e) {
+          // Si ce n'est pas du JSON valide, considérer comme une seule URL
+          imageUrls.push(productData.images);
+        }
+      } else {
+        // Sinon ajouter les URLs directement
+        imageUrls = [...imageUrls, ...productData.images];
+      }
+    }
+    
+    // S'assurer qu'il y a au moins une image
+    if (imageUrls.length === 0) {
+      // Supprimer les fichiers téléchargés en cas d'erreur
+      if (req.files && Array.isArray(req.files)) {
+        (req.files as Express.Multer.File[]).forEach(file => {
+          if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+          }
+        });
+      }
+      
+      return res.status(400).json({ 
+        message: 'Au moins une image est requise pour créer un produit' 
+      });
+    }
+    
+    // Remplacer les images dans les données du produit
+    productData.images = imageUrls;
+    
+    // Valider les données du produit
+    const { error, value } = validateProductData(productData);
+    if (error) {
+      // Supprimer les fichiers téléchargés en cas d'erreur
+      if (req.files && Array.isArray(req.files)) {
+        (req.files as Express.Multer.File[]).forEach(file => {
+          if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+          }
+        });
+      }
+      
+      return res.status(400).json({ message: error.details[0].message });
+    }
+    
+    // Créer le produit
+    const product = new Product({
+      ...value,
+      seller: sellerId,
+      isAvailable: true,
+      views: 0,
+      favorites: 0
+    });
+    
+    await product.save();
+    
+    // Mettre à jour les statistiques du vendeur
+    await User.findByIdAndUpdate(sellerId, {
+      $inc: { 'statistics.totalListings': 1 }
+    });
+    
+    return res.status(201).json({
+      message: 'Produit créé avec succès',
+      product
+    });
+  } catch (error) {
+    // En cas d'erreur, supprimer les fichiers téléchargés
+    if (req.files && Array.isArray(req.files)) {
+      (req.files as Express.Multer.File[]).forEach(file => {
+        if (fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
+      });
+    }
+    
+    logger.error('Erreur lors de la création du produit', { 
+      error: error instanceof Error ? error.message : 'Erreur inconnue',
+      userId: sellerId 
+    });
+    
+    return res.status(500).json({ 
+      message: 'Une erreur est survenue lors de la création du produit' 
+    });
   }
-  
-  // Créer le produit
-  const product = new Product({
-    ...value,
-    seller: sellerId,
-    isAvailable: true,
-    views: 0,
-    favorites: 0
-  });
-  
-  await product.save();
-  
-  // Mettre à jour les statistiques du vendeur
-  await User.findByIdAndUpdate(sellerId, {
-    $inc: { 'statistics.totalListings': 1 }
-  });
-  
-  return res.status(201).json({
-    message: 'Produit créé avec succès',
-    product
-  });
 });
 
 /**

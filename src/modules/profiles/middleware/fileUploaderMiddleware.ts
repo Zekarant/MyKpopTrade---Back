@@ -117,10 +117,11 @@ export const profileBannerUpload = multer({
 });
 
 // Upload pour les images de produits
-export const productImageUpload = multer({ 
+export const productImagesUpload = multer({ 
   storage: productImageStorage,
   limits: {
-    fileSize: 8 * 1024 * 1024 // 8MB
+    fileSize: 8 * 1024 * 1024, // 8MB
+    files: 10
   },
   fileFilter
 });

@@ -56,12 +56,12 @@ export const productSchema = Joi.object({
   
   albumName: Joi.string().allow('', null),
   
-  images: Joi.array().items(Joi.string().uri()).min(1).max(10).required()
-    .messages({
-      'array.min': 'Au moins une image est requise',
-      'array.max': 'Maximum 10 images autorisées',
-      'any.required': 'Les images sont obligatoires'
-    }),
+  images: Joi.array().items(Joi.string()).min(1).max(10).required()
+  .messages({
+    'array.min': 'Au moins une image est requise',
+    'array.max': 'Maximum 10 images autorisées',
+    'any.required': 'Les images sont obligatoires'
+  }),
   
   shippingOptions: Joi.object({
     worldwide: Joi.boolean().default(false),

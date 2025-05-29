@@ -3,13 +3,17 @@ import * as productController from './controllers/productController';
 import * as inventoryController from './controllers/inventoryController';
 import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
 import * as productImageController from './controllers/productImageController';
-import { productImageUpload } from '../profiles/middleware/fileUploaderMiddleware';
+import { productImagesUpload } from '../profiles/middleware/fileUploaderMiddleware';
 
 
 const router = Router();
 
 // Routes de produits - création et mise à jour (protégées)
-router.post('/', authenticateJWT, productController.createProduct);
+router.post('/', 
+  authenticateJWT, 
+  productImagesUpload.array('productImages', 10), 
+  productController.createProduct
+);
 router.put('/:productId', authenticateJWT, productController.updateProduct);
 router.delete('/:productId', authenticateJWT, productController.deleteProduct);
 router.post('/:productId/sold', authenticateJWT, productController.markProductAsSold);
@@ -30,7 +34,7 @@ router.get('/stats', inventoryController.getProductStats);
 router.post(
   '/:productId/images',
   authenticateJWT,
-  productImageUpload.single('productImage'),
+  productImagesUpload.single('productImage'),
   productImageController.uploadProductImage
 );
 
