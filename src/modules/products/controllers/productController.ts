@@ -46,6 +46,7 @@ export const createProduct = asyncHandler(async (req: Request, res: Response) =>
       }
     }
     
+    
     // S'assurer qu'il y a au moins une image
     if (imageUrls.length === 0) {
       // Supprimer les fichiers téléchargés en cas d'erreur
@@ -64,6 +65,14 @@ export const createProduct = asyncHandler(async (req: Request, res: Response) =>
     
     // Remplacer les images dans les données du produit
     productData.images = imageUrls;
+    // Parse shippingOptions si besoin (toujours avant la validation)
+    if (typeof productData.shippingOptions === 'string') {
+      try {
+        productData.shippingOptions = JSON.parse(productData.shippingOptions);
+      } catch (e) {
+        return res.status(400).json({ message: 'shippingOptions est mal formé' });
+      }
+    }
     
     // Valider les données du produit
     const { error, value } = validateProductData(productData);
