@@ -77,6 +77,9 @@ export interface IUser extends Document {
   paypalEmail?: string;
   isSellerVerified?: boolean;
   sellerRating?: number;
+  
+  followedGroups?: mongoose.Types.ObjectId[];
+  followedGroupsCount?: number;
 }
 
 const UserSchema: Schema = new Schema({
@@ -273,7 +276,18 @@ const UserSchema: Schema = new Schema({
     min: 0,
     max: 5,
     default: 0
-  }
+  },
+
+  followedGroups: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'KpopGroup',
+    default: []
+  }],
+  followedGroupsCount: {
+    type: Number,
+    default: 0
+  },
+  
 }, {
   timestamps: true
 });

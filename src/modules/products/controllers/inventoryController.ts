@@ -50,7 +50,7 @@ export const getUserInventory = asyncHandler(async (req: Request, res: Response)
       { $group: {
         _id: null,
         totalProducts: { $sum: 1 },
-        availableProducts: { $sum: { $cond: [{ $eq: ['$isAvailable', true] }, 1, 0] } },
+        //availableProducts: { $sum: { $cond: [{ $eq: ['$isAvailable', true] }, 1, 0] } },
         soldProducts: { $sum: { $cond: [{ $eq: ['$isAvailable', false] }, 1, 0] } },
         reservedProducts: { 
           $sum: { 
@@ -177,7 +177,7 @@ export const getProductStats = asyncHandler(async (req: Request, res: Response) 
     { $group: {
       _id: null,
       totalProducts: { $sum: 1 },
-      availableProducts: { $sum: { $cond: [{ $eq: ['$isAvailable', true] }, 1, 0] } },
+      //availableProducts: { $sum: { $cond: [{ $eq: ['$isAvailable', true] }, 1, 0] } },
       averagePrice: { $avg: '$price' },
       totalViews: { $sum: '$views' },
       totalFavorites: { $sum: '$favorites' }
