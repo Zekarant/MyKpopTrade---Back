@@ -12,6 +12,10 @@ export interface IRating extends Document {
   updatedAt: Date;
   isVerifiedPurchase: boolean;
   isHidden: boolean;
+  response?: {
+    content: string;
+    createdAt: Date;
+  };
 }
 
 const RatingSchema: Schema = new Schema({
@@ -56,6 +60,16 @@ const RatingSchema: Schema = new Schema({
   isHidden: {
     type: Boolean,
     default: false
+  },
+  response: {
+    content: {
+      type: String,
+      maxlength: 500
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
   }
 }, {
   timestamps: true

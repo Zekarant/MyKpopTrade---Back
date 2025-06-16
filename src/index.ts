@@ -19,6 +19,7 @@ import { logAPIRequest } from './commons/utils/logger';
 import env from './config/env';
 import { verificationRoutes } from './modules/verification';
 import logger from './commons/utils/logger';
+import { reportRoutes } from './modules/reports';
 import path from 'path';
 import { startGdprCleanupTask } from './commons/tasks/gdprCleanupTask';
 
@@ -58,6 +59,7 @@ app.use('/api/accounts', accountsRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/albums', albumRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/reports', reportRoutes);
 
 // Route racine
 app.get('/', (req, res) => {

@@ -28,6 +28,25 @@ router.delete(
   ratingController.deleteRatingImage
 );
 
+// Routes pour les réponses aux évaluations
+router.post(
+  '/ratings/:ratingId/response',
+  authenticateJWT,
+  ratingController.respondToRating
+);
+
+router.put(
+  '/ratings/:ratingId/response',
+  authenticateJWT,
+  ratingController.updateRatingResponse
+);
+
+router.delete(
+  '/ratings/:ratingId/response',
+  authenticateJWT,
+  ratingController.deleteRatingResponse
+);
+
 // Routes de preuves de transaction
 router.get('/proofs/:userId', verificationController.getUserProofs);
 router.post('/proofs', authenticateJWT, verificationController.addTransactionProof);

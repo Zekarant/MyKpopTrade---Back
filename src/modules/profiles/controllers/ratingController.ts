@@ -408,3 +408,153 @@ export const addRatingImage = asyncHandler(async (req: Request, res: Response) =
   }
 });
 
+/**
+ * Répond à une évaluation (uniquement pour le destinataire de l'évaluation)
+ */
+export const respondToRating = asyncHandler(async (req: Request, res: Response) => {
+  const { ratingId } = req.params;
+  const userId = (req.user as any).id;
+  const { response } = req.body;
+  
+  if (!response || typeof response !== 'string' || response.trim() === '') {
+    return res.status(400).json({ message: 'Le contenu de la réponse est requis' });
+  }
+  
+  if (response.length > 500) {
+    return res.status(400).json({ message: 'La réponse ne peut pas dépasser 500 caractères' });
+  }
+  
+  const rating = await Rating.findById(ratingId);
+  
+  if (!rating) {
+    return res.status(404).json({ message: 'Évaluation non trouvée' });
+  }
+  
+  // Vérifier que l'utilisateur est bien le destinataire de l'évaluation
+  if (rating.recipient.toString() !== userId) {
+    return res.status(403).json({ 
+      message: 'Seul le destinataire de l\'évaluation peut y répondre'
+    });
+  }
+  
+  // Vérifier qu'une réponse n'a pas déjà été donnée
+  if (rating.response && rating.response.content) {
+    return res.status(400).json({ 
+      message: 'Vous avez déjà répondu à cette évaluation'
+    });
+  }
+  
+  // Ajouter la réponse
+  rating.response = {
+    content: response.trim(),
+    createdAt: new Date()
+  };
+  
+  await rating.save();
+  
+  logger.info('Réponse ajoutée à une évaluation', { 
+    userId,
+    ratingId
+  });
+  
+  return res.status(200).json({
+    message: 'Réponse ajoutée avec succès',
+    rating
+  });
+});
+
+/**
+ * Modifier sa réponse à une évaluation
+ */
+export const updateRatingResponse = asyncHandler(async (req: Request, res: Response) => {
+  const { ratingId } = req.params;
+  const userId = (req.user as any).id;
+  const { response } = req.body;
+  
+  if (!response || typeof response !== 'string' || response.trim() === '') {
+    return res.status(400).json({ message: 'Le contenu de la réponse est requis' });
+  }
+  
+  if (response.length > 500) {
+    return res.status(400).json({ message: 'La réponse ne peut pas dépasser 500 caractères' });
+  }
+  
+  const rating = await Rating.findById(ratingId);
+  
+  if (!rating) {
+    return res.status(404).json({ message: 'Évaluation non trouvée' });
+  }
+  
+  // Vérifier que l'utilisateur est bien le destinataire de l'évaluation
+  if (rating.recipient.toString() !== userId) {
+    return res.status(403).json({ 
+      message: 'Seul le destinataire de l\'évaluation peut modifier sa réponse'
+    });
+  }
+  
+  // Vérifier qu'une réponse existe déjà
+  if (!rating.response || !rating.response.content) {
+    return res.status(400).json({ 
+      message: 'Aucune réponse existante à modifier'
+    });
+  }
+  
+  // Mettre à jour la réponse
+  rating.response.content = response.trim();
+  // Note: nous ne modifions pas la date de création pour garder la trace
+  
+  await rating.save();
+  
+  logger.info('Réponse à une évaluation modifiée', { 
+    userId,
+    ratingId
+  });
+  
+  return res.status(200).json({
+    message: 'Réponse modifiée avec succès',
+    rating
+  });
+});
+
+/**
+ * Supprimer sa réponse à une évaluation
+ */
+export const deleteRatingResponse = asyncHandler(async (req: Request, res: Response) => {
+  const { ratingId } = req.params;
+  const userId = (req.user as any).id;
+  
+  const rating = await Rating.findById(ratingId);
+  
+  if (!rating) {
+    return res.status(404).json({ message: 'Évaluation non trouvée' });
+  }
+  
+  // Vérifier que l'utilisateur est bien le destinataire de l'évaluation
+  if (rating.recipient.toString() !== userId) {
+    return res.status(403).json({ 
+      message: 'Seul le destinataire de l\'évaluation peut supprimer sa réponse'
+    });
+  }
+  
+  // Vérifier qu'une réponse existe
+  if (!rating.response || !rating.response.content) {
+    return res.status(400).json({ 
+      message: 'Aucune réponse à supprimer'
+    });
+  }
+  
+  // Supprimer la réponse
+  rating.response = undefined;
+  
+  await rating.save();
+  
+  logger.info('Réponse à une évaluation supprimée', { 
+    userId,
+    ratingId
+  });
+  
+  return res.status(200).json({
+    message: 'Réponse supprimée avec succès'
+  });
+});
+
