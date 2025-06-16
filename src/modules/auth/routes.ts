@@ -34,6 +34,8 @@ router.post('/verify-phone', authenticateJWT, phoneVerificationController.verify
 router.get('/profile', authenticateJWT, profileController.getProfile);
 router.put('/profile', authenticateJWT, profileController.updateProfile);
 router.delete('/delete-account', authenticateJWT, profileController.deleteAccount);
+router.put('/profile/paypal-email', authenticateJWT, profileController.updatePayPalEmail);
+router.delete('/profile/paypal-email', authenticateJWT, profileController.removePayPalEmail);
 
 // Routes d'authentification sociale
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
