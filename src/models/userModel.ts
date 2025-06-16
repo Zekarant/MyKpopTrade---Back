@@ -80,6 +80,7 @@ export interface IUser extends Document {
   
   followedGroups?: mongoose.Types.ObjectId[];
   followedGroupsCount?: number;
+  phoneNumber?: string;
 }
 
 const UserSchema: Schema = new Schema({
@@ -287,7 +288,16 @@ const UserSchema: Schema = new Schema({
     type: Number,
     default: 0
   },
-  
+  phoneNumber: {
+    type: String,
+    validate: {
+      validator: function(v: string) {
+        // Format international E.164 ou format simplifié
+        return /^\+?[1-9]\d{1,14}$/.test(v);
+      },
+      message: 'Veuillez fournir un numéro de téléphone valide'
+    }
+  },
 }, {
   timestamps: true
 });

@@ -7,12 +7,13 @@ export const validateEmail = (email: string): boolean => {
 };
 
 /**
- * Valide un numéro de téléphone international
+ * Valide un numéro de téléphone au format international
+ * @param phoneNumber Le numéro de téléphone à valider
+ * @returns true si le numéro est valide, false sinon
  */
 export const validatePhoneNumber = (phoneNumber: string): boolean => {
-  // Format international: +[code pays][numéro]
-  const re = /^\+[1-9]\d{1,14}$/;
-  return re.test(phoneNumber);
+  // Format international E.164 ou format simplifié
+  return /^\+?[1-9]\d{1,14}$/.test(phoneNumber);
 };
 
 /**
