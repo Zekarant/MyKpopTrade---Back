@@ -45,14 +45,25 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
     currency,
     page = 1,
     limit = 20,
-    sortBy = 'relevance'
-  }: SearchFilters & { page?: number; limit?: number; sortBy?: string } = req.body;
+    sortBy = 'relevance',
+    includeOwnProducts = false // Nouveau paramètre
+  }: SearchFilters & { 
+    page?: number; 
+    limit?: number; 
+    sortBy?: string;
+    includeOwnProducts?: boolean;
+  } = req.body;
 
   const userId = (req.user as any)?.id;
 
   try {
     // Construire les filtres de recherche
     const searchFilters: any = { isAvailable: true };
+    
+    // Exclure les produits de l'utilisateur connecté sauf si explicitement demandé
+    if (userId && !includeOwnProducts) {
+      searchFilters.seller = { $ne: userId };
+    }
     
     // Recherche textuelle
     if (query && query.trim()) {
@@ -65,7 +76,7 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
       ];
     }
 
-    // Filtres spécifiques
+    // Filtres spécifiques (reste identique)
     if (groups?.length) {
       searchFilters.kpopGroup = { $in: groups };
     }
@@ -97,7 +108,7 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
       if (priceRange.max !== undefined) searchFilters.price.$lte = priceRange.max;
     }
 
-    // Option de tri avec typage correct
+    // Option de tri (reste identique)
     const getSortOption = (sortBy: string): Record<string, SortOrder> | Record<string, { $meta: string }> => {
       switch (sortBy) {
         case 'price_asc': 
@@ -157,7 +168,8 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
         query: query?.trim(),
         appliedFilters: { groups, members, albums, priceRange, condition, type, albumType, era, company },
         resultCount: total,
-        sortBy
+        sortBy,
+        excludedOwnProducts: userId && !includeOwnProducts
       }
     });
   } catch (error) {

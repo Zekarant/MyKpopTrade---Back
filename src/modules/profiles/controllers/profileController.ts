@@ -20,6 +20,7 @@ export const getPublicProfile = asyncHandler(async (req: Request, res: Response)
       _id: 1,
       username: 1,
       profilePicture: 1,
+      profileBanner: 1,
       bio: 1,
       location: 1,
       socialLinks: 1,
@@ -39,11 +40,21 @@ export const getPublicProfile = asyncHandler(async (req: Request, res: Response)
     isAvailable: true
   });
   
+  // Récupérer les derniers avis pour ce vendeur
+  const recentRatings = await Rating.find({ 
+    recipient: user._id 
+  })
+  .populate('reviewer', 'username profilePicture')
+  .sort({ createdAt: -1 })
+  .limit(3)
+  .select('rating review createdAt reviewer response');
+  
   return res.status(200).json({
     profile: {
       id: user._id,
       username: user.username,
       profilePicture: user.profilePicture,
+      profileBanner: user.profileBanner,
       bio: user.bio,
       location: user.location,
       socialLinks: user.socialLinks,
@@ -52,7 +63,8 @@ export const getPublicProfile = asyncHandler(async (req: Request, res: Response)
         ...user.statistics?.toObject(),
         activeListings
       },
-      memberSince: user.createdAt
+      memberSince: user.createdAt,
+      recentRatings
     }
   });
 });
@@ -90,6 +102,7 @@ export const getMyProfile = asyncHandler(async (req: Request, res: Response) => 
       username: user.username,
       email: user.email,
       profilePicture: user.profilePicture,
+      profileBanner: user.profileBanner,
       phoneNumber: user.phoneNumber,
       isEmailVerified: user.isEmailVerified,
       isPhoneVerified: user.isPhoneVerified,

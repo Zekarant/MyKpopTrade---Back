@@ -5,10 +5,16 @@ import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
 import * as productImageController from './controllers/productImageController';
 import { productImagesUpload } from '../profiles/middleware/fileUploaderMiddleware';
 
-
 const router = Router();
 
-// Routes de produits - création et mise à jour (protégées)
+router.get('/recommendations', authenticateJWT, inventoryController.getRecommendedProducts);
+router.get('/quick-recommendations', inventoryController.getQuickRecommendations);
+router.get('/stats', inventoryController.getProductStats);
+
+router.get('/inventory/me', authenticateJWT, inventoryController.getUserInventory);
+router.get('/inventory/user/:userId', inventoryController.getUserInventory);
+router.get('/inventory/favorites', authenticateJWT, inventoryController.getUserFavorites);
+
 router.post('/', 
   authenticateJWT, 
   productImagesUpload.array('productImages', 10), 
@@ -19,18 +25,6 @@ router.delete('/:productId', authenticateJWT, productController.deleteProduct);
 router.post('/:productId/sold', authenticateJWT, productController.markProductAsSold);
 router.post('/:productId/favorite', authenticateJWT, productController.toggleFavorite);
 
-// Routes de produits - consultation (publiques)
-router.get('/', productController.getProducts);
-router.get('/:productId', productController.getProductById);
-
-// Routes d'inventaire
-router.get('/inventory/me', authenticateJWT, inventoryController.getUserInventory);
-router.get('/inventory/user/:userId', inventoryController.getUserInventory);
-router.get('/inventory/favorites', authenticateJWT, inventoryController.getUserFavorites);
-router.get('/recommendations/:productId?', inventoryController.getRecommendedProducts);
-router.get('/stats', inventoryController.getProductStats);
-
-// Routes pour les images de produits
 router.post(
   '/:productId/images',
   authenticateJWT,
@@ -49,5 +43,8 @@ router.put(
   authenticateJWT,
   productImageController.reorderProductImages
 );
+
+router.get('/', productController.getProducts);
+router.get('/:productId', productController.getProductById);
 
 export default router;

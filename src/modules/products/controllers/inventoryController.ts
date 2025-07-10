@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
-import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
+import Product from '../../../models/productModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
+import logger from '../../../commons/utils/logger';
 
 /**
  * Récupérer l'inventaire d'un utilisateur (produits en vente)
@@ -50,7 +51,6 @@ export const getUserInventory = asyncHandler(async (req: Request, res: Response)
       { $group: {
         _id: null,
         totalProducts: { $sum: 1 },
-        //availableProducts: { $sum: { $cond: [{ $eq: ['$isAvailable', true] }, 1, 0] } },
         soldProducts: { $sum: { $cond: [{ $eq: ['$isAvailable', false] }, 1, 0] } },
         reservedProducts: { 
           $sum: { 
@@ -130,41 +130,154 @@ export const getUserFavorites = asyncHandler(async (req: Request, res: Response)
  * Récupérer les produits recommandés
  */
 export const getRecommendedProducts = asyncHandler(async (req: Request, res: Response) => {
-  const { productId } = req.params;
+  const userId = (req.user as any)?.id;
   const limit = parseInt(req.query.limit as string) || 8;
   
-  // Si l'ID du produit est fourni, rechercher des produits similaires
-  if (productId) {
-    const currentProduct = await Product.findById(productId);
-    
-    if (!currentProduct) {
-      return res.status(404).json({ message: 'Produit non trouvé' });
-    }
-    
-    // Trouver des produits similaires (même groupe ou même type)
-    const similarProducts = await Product.find({
-      _id: { $ne: productId }, // Exclure le produit actuel
-      isAvailable: true,
-      $or: [
-        { kpopGroup: currentProduct.kpopGroup },
-        { type: currentProduct.type }
-      ]
-    })
-    .sort('-createdAt')
-    .limit(limit);
-    
-    return res.status(200).json({
-      products: similarProducts
-    });
-  } 
+  let recommendedProducts: any[] = [];
   
-  // Sans ID de produit, retourner simplement les produits les plus populaires
-  const popularProducts = await Product.find({ isAvailable: true })
+  if (userId) {
+    // Récupérer l'utilisateur avec ses favoris et préférences
+    const user = await User.findById(userId, { 
+      favorites: 1, 
+      preferences: 1 
+    });
+    
+    if (user) {
+      // 1. Récupérer les groupes/types des favoris de l'utilisateur
+      const favoriteProducts = await Product.find({ 
+        _id: { $in: user.favorites || [] } 
+      }, { kpopGroup: 1, type: 1, kpopMember: 1 });
+      
+      // Extraire les groupes et types préférés
+      const preferredGroups = [...new Set(favoriteProducts.map(p => p.kpopGroup).filter(Boolean))];
+      const preferredTypes = [...new Set(favoriteProducts.map(p => p.type).filter(Boolean))];
+      const preferredMembers = [...new Set(favoriteProducts.map(p => p.kpopMember).filter(Boolean))];
+      
+      // 2. Ajouter les groupes des préférences utilisateur
+      const userPreferredGroups = user.preferences?.kpopGroups || [];
+      const allPreferredGroups = [...new Set([...preferredGroups, ...userPreferredGroups])];
+      
+      // 3. Construire la requête de recommandation
+      const recommendationQuery: any = {
+        isAvailable: true,
+        seller: { $ne: userId }, // Exclure les produits de l'utilisateur
+        _id: { $nin: user.favorites || [] } // Exclure les favoris déjà existants
+      };
+      
+      // Si on a des préférences, les utiliser
+      if (allPreferredGroups.length > 0 || preferredTypes.length > 0 || preferredMembers.length > 0) {
+        recommendationQuery.$or = [];
+        
+        if (allPreferredGroups.length > 0) {
+          recommendationQuery.$or.push({ kpopGroup: { $in: allPreferredGroups } });
+        }
+        
+        if (preferredTypes.length > 0) {
+          recommendationQuery.$or.push({ type: { $in: preferredTypes } });
+        }
+        
+        if (preferredMembers.length > 0) {
+          recommendationQuery.$or.push({ kpopMember: { $in: preferredMembers } });
+        }
+      }
+      
+      // 4. Récupérer les recommandations avec scoring
+      recommendedProducts = await Product.aggregate([
+        { $match: recommendationQuery },
+        {
+          $addFields: {
+            // Score basé sur les préférences
+            preferenceScore: {
+              $add: [
+                // +3 points si le groupe correspond aux favoris
+                { $cond: [{ $in: ['$kpopGroup', allPreferredGroups] }, 3, 0] },
+                // +2 points si le type correspond
+                { $cond: [{ $in: ['$type', preferredTypes] }, 2, 0] },
+                // +2 points si le membre correspond
+                { $cond: [{ $in: ['$kpopMember', preferredMembers] }, 2, 0] },
+                // +1 point pour la popularité (vues + favoris normalisés)
+                { $divide: [{ $add: ['$views', { $multiply: ['$favorites', 2] }] }, 100] }
+              ]
+            }
+          }
+        },
+        { $sort: { preferenceScore: -1, createdAt: -1 } },
+        { $limit: limit },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'seller',
+            foreignField: '_id',
+            as: 'seller'
+          }
+        },
+        {
+          $project: {
+            _id: 1,
+            title: 1,
+            price: 1,
+            currency: 1,
+            images: 1,
+            kpopGroup: 1,
+            kpopMember: 1,
+            type: 1,
+            condition: 1,
+            views: 1,
+            favorites: 1,
+            createdAt: 1,
+            'seller.username': 1,
+            'seller.profilePicture': 1,
+            preferenceScore: 1
+          }
+        }
+      ]);
+    }
+  }
+  
+  // Si pas assez de recommandations personnalisées, compléter avec des produits populaires
+  if (recommendedProducts.length < limit) {
+    const remainingLimit = limit - recommendedProducts.length;
+    const excludeIds = recommendedProducts.map(p => p._id);
+    if (userId) excludeIds.push(userId);
+    
+    const popularProducts = await Product.find({ 
+      isAvailable: true,
+      seller: { $ne: userId },
+      _id: { $nin: excludeIds }
+    })
+    .populate('seller', 'username profilePicture')
     .sort('-views -favorites -createdAt')
-    .limit(limit);
+    .limit(remainingLimit);
+    
+    recommendedProducts = [...recommendedProducts, ...popularProducts];
+  }
   
   return res.status(200).json({
-    products: popularProducts
+    products: recommendedProducts,
+    isPersonalized: userId && recommendedProducts.length > 0
+  });
+});
+
+/**
+ * Récupérer des recommandations rapides
+ */
+export const getQuickRecommendations = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any)?.id;
+  const limit = parseInt(req.query.limit as string) || 4;
+  
+  // Version simplifiée pour un chargement plus rapide
+  const quickRecommendations = await Product.find({
+    isAvailable: true,
+    seller: { $ne: userId },
+    views: { $gte: 10 }
+  })
+  .select('title price currency images kpopGroup type createdAt')
+  .sort('-views -createdAt')
+  .limit(limit)
+  .lean();
+  
+  return res.status(200).json({
+    products: quickRecommendations
   });
 });
 
