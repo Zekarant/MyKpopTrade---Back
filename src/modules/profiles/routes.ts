@@ -10,7 +10,7 @@ const router = Router();
 // Routes de profil
 router.get('/me', authenticateJWT, profileController.getMyProfile);
 router.put('/me', authenticateJWT, profileController.updateProfile);
-router.get('/user/:username', profileController.getPublicProfile);
+router.get('/user/:identifier', profileController.getPublicProfile);
 
 // Routes d'évaluation
 router.get('/ratings/:userId', ratingController.getUserRatings);

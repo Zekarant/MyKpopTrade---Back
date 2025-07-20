@@ -7,15 +7,27 @@ import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import fs from 'fs';
 import path from 'path';
 import logger from '../../../commons/utils/logger';
+import mongoose from 'mongoose';
 
 /**
  * Récupérer le profil public d'un utilisateur
  */
 export const getPublicProfile = asyncHandler(async (req: Request, res: Response) => {
-  const { username } = req.params;
+  const { identifier } = req.params;
+  
+  const isValidObjectId = mongoose.Types.ObjectId.isValid(identifier);
+  
+  let query: any = { accountStatus: 'active' };
+  
+  if (isValidObjectId) {
+    query._id = identifier;
+  } else {
+    // Sinon, chercher par username
+    query.username = identifier;
+  }
   
   const user = await User.findOne(
-    { username, accountStatus: 'active' },
+    query,
     {
       _id: 1,
       username: 1,
@@ -31,7 +43,11 @@ export const getPublicProfile = asyncHandler(async (req: Request, res: Response)
   );
   
   if (!user) {
-    return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    return res.status(404).json({ 
+      message: 'Utilisateur non trouvé',
+      searchedBy: isValidObjectId ? 'ID' : 'username',
+      searchedValue: identifier
+    });
   }
   
   // Récupérer les statistiques de produits

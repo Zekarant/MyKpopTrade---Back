@@ -49,7 +49,7 @@ export const getUserConversations = asyncHandler(async (req: Request, res: Respo
     .sort({ lastMessageAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
-    .populate('participants', 'username profilePicture')
+    .populate('participants', 'username profilePicture location bio preferences socialLinks statistics')
     .populate('productId', 'title price images')
     .lean();
   
