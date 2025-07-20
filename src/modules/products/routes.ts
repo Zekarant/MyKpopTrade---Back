@@ -45,6 +45,6 @@ router.put(
 );
 
 router.get('/', productController.getProducts);
-router.get('/:productId', productController.getProductById);
+router.get('/:productId', authenticateJWT, productController.getProductById);
 
 export default router;
