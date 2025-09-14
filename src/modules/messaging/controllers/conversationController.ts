@@ -1,20 +1,132 @@
+import path from 'path';
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import Conversation from '../../../models/conversationModel';
 import Message from '../../../models/messageModel';
-import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
+import Product from '../../../models/productModel';
+import { MessagingUtilsService } from '../services/messagingUtilsService';
+import logger from '../../../commons/utils/logger';
 import { 
-  createConversation, 
-  getConversationMessages 
-} from '../services/messageService';
-import { 
-  startNegotiation, 
-  respondToOffer, 
-  startPayWhatYouWant,
+  startPayWhatYouWant, 
   makePayWhatYouWantOffer 
 } from '../services/negotiationService';
-import logger from '../../../commons/utils/logger';
+
+/**
+ * Récupère une conversation spécifique avec ses messages
+ */
+export const getConversation = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  const conversationId = req.params.id;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 20;
+  
+  try {
+    console.log(`=== DEBUG getConversation ===`);
+    console.log(`Conversation ID: ${conversationId}`);
+    console.log(`User ID: ${userId}`);
+    console.log(`Page: ${page}, Limit: ${limit}`);
+    
+    // Utiliser le service utilitaire pour vérifier l'accès
+    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+    
+    // Récupérer la conversation avec toutes les relations
+    const conversation = await Conversation.findById(conversationId)
+      .populate('participants', 'username profilePicture email location bio preferences socialLinks statistics')
+      .populate({
+        path: 'productId',
+        select: 'title description price images seller category condition kpopGroup kpopMember albumName currency isAvailable allowOffers minOfferPercentage shippingOptions createdAt'
+      })
+      .lean();
+    
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation non trouvée' });
+    }
+    
+    // Enrichir les données produit si présent
+    if (conversation && !Array.isArray(conversation) && conversation.productId) {
+      (conversation as any).isOwner = conversation.productId.seller.toString() === userId;
+    }
+    
+    // ⚠️ CORRECTION PRINCIPALE : Récupérer les messages avec une requête plus explicite
+    const messageQuery = {
+      conversation: new mongoose.Types.ObjectId(conversationId),
+      isDeleted: false // Maintenant que le champ existe, on peut utiliser false directement
+    };
+    
+    console.log('Message query:', JSON.stringify(messageQuery, null, 2));
+    
+    // Compter le total de messages
+    const totalMessages = await Message.countDocuments(messageQuery);
+    console.log(`Total de messages trouvés: ${totalMessages}`);
+    
+    // Récupérer les messages avec pagination
+    const messages = await Message.find(messageQuery)
+      .sort({ createdAt: 1 }) // Ordre chronologique (du plus ancien au plus récent)
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate('sender', 'username profilePicture')
+      .lean();
+    
+    console.log(`Messages récupérés pour la page ${page}: ${messages.length}`);
+    console.log('IDs des messages:', messages.map(m => m._id));
+    console.log('Messages avec attachments:', messages.filter(m => m.attachments && m.attachments.length > 0).map(m => ({
+      id: m._id,
+      attachments: m.attachments
+    })));
+    
+    // Marquer comme lu en utilisant le service utilitaire
+    const markedCount = await MessagingUtilsService.markConversationAsRead(conversationId, userId);
+    console.log(`Messages marqués comme lus: ${markedCount}`);
+    
+    // Récupérer et formater les médias
+    const mediaQuery = {
+      conversation: new mongoose.Types.ObjectId(conversationId),
+      attachments: { $exists: true, $ne: [] },
+      isDeleted: false
+    };
+    
+    const mediaMessages = await Message.find(mediaQuery)
+      .select('attachments createdAt sender')
+      .populate('sender', 'username profilePicture')
+      .sort({ createdAt: -1 })
+      .lean();
+    
+    console.log(`Messages avec médias trouvés: ${mediaMessages.length}`);
+    
+    const media = MessagingUtilsService.formatConversationMedia(mediaMessages);
+    
+    return res.status(200).json({
+      conversation,
+      messages, // Maintenant dans l'ordre chronologique
+      media,
+      markedAsRead: markedCount,
+      debug: { // Informations de debug temporaires
+        totalMessages,
+        messagesRetrieved: messages.length,
+        conversationId,
+        userId,
+        page,
+        limit,
+        messageQuery
+      },
+      pagination: {
+        total: totalMessages,
+        page,
+        limit,
+        pages: Math.ceil(totalMessages / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Erreur détaillée dans getConversation:', error);
+    logger.error('Erreur lors de la récupération de la conversation', { error, conversationId, userId });
+    return res.status(500).json({ 
+      message: error instanceof Error ? error.message : 'Une erreur est survenue',
+      error: process.env.NODE_ENV === 'development' ? error : undefined
+    });
+  }
+});
 
 /**
  * Récupère la liste des conversations d'un utilisateur
@@ -111,48 +223,6 @@ export const getUserConversations = asyncHandler(async (req: Request, res: Respo
       limit,
       pages: Math.ceil(total / limit)
     }
-  });
-});
-
-/**
- * Récupère une conversation spécifique avec ses messages
- */
-export const getConversation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
-  const conversationId = req.params.id;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
-  
-  // Vérifier l'accès à la conversation
-  const conversation = await Conversation.findOne({
-    _id: conversationId,
-    participants: userId
-  })
-    .populate('participants', 'username profilePicture email')
-    .populate('productId', 'title price images seller')
-    .lean() as any; // Using type assertion to fix the TypeScript error
-  
-  if (!conversation) {
-    return res.status(404).json({ message: 'Conversation non trouvée' });
-  }
-  
-  // Si la conversation concerne un produit, vérifier si l'utilisateur est le vendeur
-  if (conversation.productId) {
-    conversation.isOwner = conversation.productId.seller.toString() === userId;
-  }
-  
-  // Récupérer les messages avec pagination
-  const result = await getConversationMessages({
-    conversationId,
-    userId,
-    page,
-    limit
-  });
-  
-  return res.status(200).json({
-    conversation,
-    messages: result.messages,
-    pagination: result.pagination
   });
 });
 
@@ -639,5 +709,57 @@ export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res:
   } catch (error: any) {
     logger.error('Erreur lors de la proposition d\'un prix PWYW', { error });
     return res.status(400).json({ message: error.message });
+  }
+});
+
+/**
+ * Récupère tous les médias d'une conversation - SIMPLIFIÉ
+ */
+export const getConversationMedia = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  const conversationId = req.params.id;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 20;
+  const type = req.query.type as string;
+  
+  try {
+    // Vérifier l'accès avec le service utilitaire
+    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+    
+    // Récupérer les messages avec médias
+    const mediaMessages = await Message.find({
+      conversation: conversationId,
+      attachments: { $exists: true, $ne: [] },
+      isDeleted: false
+    })
+      .select('attachments createdAt sender')
+      .populate('sender', 'username profilePicture')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+    
+    // Utiliser le service utilitaire pour formater
+    let media = MessagingUtilsService.formatConversationMedia(mediaMessages);
+    
+    // Filtrer par type si spécifié
+    if (type && type !== 'all') {
+      media = media.filter(item => item.type === type);
+    }
+    
+    return res.status(200).json({
+      media,
+      pagination: {
+        total: media.length,
+        page,
+        limit,
+        pages: Math.ceil(media.length / limit)
+      }
+    });
+  } catch (error) {
+    logger.error('Erreur lors de la récupération des médias', { error, conversationId });
+    return res.status(500).json({ 
+      message: error instanceof Error ? error.message : 'Une erreur est survenue' 
+    });
   }
 });

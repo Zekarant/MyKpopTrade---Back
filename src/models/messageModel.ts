@@ -8,6 +8,8 @@ export interface IMessage extends Document {
   contentType: 'text' | 'system_notification' | 'offer' | 'counter_offer' | 'shipping_update' | 'mixed';
   readBy: mongoose.Types.ObjectId[];
   isSystemMessage: boolean;
+  isDeleted: boolean; // ⚠️ AJOUTÉ
+  deletedAt?: Date; // ⚠️ AJOUTÉ
   createdAt: Date;
   updatedAt: Date;
 }
@@ -44,6 +46,13 @@ const MessageSchema: Schema = new Schema({
   isSystemMessage: {
     type: Boolean,
     default: false
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false
+  },
+  deletedAt: {
+    type: Date
   }
 }, {
   timestamps: true

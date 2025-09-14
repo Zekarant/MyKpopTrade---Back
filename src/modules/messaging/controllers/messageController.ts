@@ -2,13 +2,13 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import Message from '../../../models/messageModel';
 import Conversation from '../../../models/conversationModel';
-import { sendMessage } from '../services/messageService';
 import logger from '../../../commons/utils/logger';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { NotificationService } from '../../notifications/services/notificationService';
+import { MessagingUtilsService } from '../services/messagingUtilsService';
 
 // Configuration de multer pour les pièces jointes
 const storage = multer.diskStorage({
@@ -56,52 +56,50 @@ export const sendNewMessage = asyncHandler(async (req: Request, res: Response) =
   const conversationId = req.params.id;
   const { content, contentType = 'text' } = req.body;
   
-  // Améliorer la validation du contenu pour form-data
+  // Validation du contenu
   if (typeof content !== 'string' || content.trim() === '') {
-    logger.warn(`Tentative d'envoi de message avec contenu vide: ${JSON.stringify(req.body)}`);
     return res.status(400).json({ message: 'Le contenu du message ne peut pas être vide' });
   }
   
   try {
-    // Vérifier si la conversation existe et l'utilisateur en fait partie
-    const conversation = await Conversation.findOne({
-      _id: conversationId,
-      participants: userId,
-      isActive: true
-    });
+    // Vérifier l'accès avec le service utilitaire
+    const conversation = await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
     
-    if (!conversation) {
-      return res.status(404).json({ message: 'Conversation non trouvée ou accès non autorisé' });
-    }
-    
-    // Traiter les pièces jointes si présentes
+    // Traiter les pièces jointes
     let attachments: string[] = [];
     if (req.files && Array.isArray(req.files) && req.files.length > 0) {
-      logger.debug(`Fichiers reçus: ${req.files.length}`);
+      // Valider les types de fichiers
+      for (const file of req.files) {
+        if (!MessagingUtilsService.validateFileType(file.mimetype)) {
+          return res.status(400).json({ 
+            message: `Type de fichier non autorisé: ${file.mimetype}` 
+          });
+        }
+      }
+      
       attachments = req.files.map((file: Express.Multer.File) => file.filename);
-      logger.debug(`Noms de fichiers enregistrés: ${attachments.join(', ')}`);
+      logger.debug(`Fichiers traités: ${attachments.join(', ')}`);
     }
     
-    // Créer et sauvegarder le nouveau message
-    // Utiliser une valeur enum valide pour contentType
-    const usedContentType = ['text', 'system_notification', 'offer', 'counter_offer', 'shipping_update'].includes(contentType) 
-      ? contentType 
-      : 'text';
-    
+    // Créer le message
     const newMessage = await Message.create({
       conversation: conversationId,
       sender: userId,
       content,
-      contentType: usedContentType,
+      contentType: ['text', 'system_notification', 'offer', 'counter_offer', 'shipping_update'].includes(contentType) 
+        ? contentType : 'text',
       attachments: attachments.length > 0 ? attachments : undefined,
-      readBy: [userId] // Le message est déjà lu par l'expéditeur
+      readBy: [userId]
     });
     
-    // Notifier les autres participants de la conversation
+    // Mettre à jour la conversation avec le service utilitaire
+    await MessagingUtilsService.updateConversationLastMessage(conversationId, newMessage._id.toString());
+    
+    // Notifier les autres participants
     const otherParticipants = conversation.participants.filter(
       (p: any) => p.toString() !== userId
     );
-
+    
     const username = (req.user as any)?.username || 'Utilisateur';
     
     for (const recipientId of otherParticipants) {
@@ -110,24 +108,14 @@ export const sendNewMessage = asyncHandler(async (req: Request, res: Response) =
         type: 'message',
         title: 'Nouveau message',
         content: `Vous avez reçu un nouveau message de ${username}`,
-        link: `/conversations/${conversation._id}`,
+        link: `/conversations/${conversationId}`,
         data: { 
-          conversationId: conversation._id,
+          conversationId,
           messageId: newMessage._id,
-          sender: {
-            id: userId,
-            username: username
-          }
+          sender: { id: userId, username }
         }
       });
     }
-    
-    // Mettre à jour la conversation séparément (au lieu d'utiliser une transaction)
-    await Conversation.findByIdAndUpdate(conversationId, {
-      lastMessage: newMessage._id,
-      lastMessageAt: new Date(),
-      status: 'open' // Réouvrir la conversation si elle était fermée
-    });
     
     // Récupérer le message avec les relations
     const populatedMessage = await Message.findById(newMessage._id)
@@ -138,50 +126,74 @@ export const sendNewMessage = asyncHandler(async (req: Request, res: Response) =
       data: populatedMessage
     });
   } catch (error) {
-    logger.error('Erreur lors de l\'envoi d\'un message', { error });
+    logger.error('Erreur lors de l\'envoi d\'un message', { error, conversationId, userId });
     return res.status(500).json({ 
-      message: 'Une erreur est survenue lors de l\'envoi du message',
-      details: process.env.NODE_ENV === 'development' ? 
-        (error instanceof Error ? error.message : String(error)) : undefined
+      message: error instanceof Error ? error.message : 'Une erreur est survenue'
     });
   }
 });
 
 /**
- * Marque tous les messages d'une conversation comme lus
+ * Marque tous les messages d'une conversation comme lus - SIMPLIFIÉ
  */
 export const markConversationAsRead = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const conversationId = req.params.id;
   
   try {
-    // Vérifier si la conversation existe
+    // Vérifier l'accès avec le service utilitaire
+    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+    
+    // Marquer comme lu avec le service utilitaire
+    const markedCount = await MessagingUtilsService.markConversationAsRead(conversationId, userId);
+    
+    return res.status(200).json({
+      message: 'Messages marqués comme lus',
+      markedCount
+    });
+  } catch (error) {
+    logger.error('Erreur lors du marquage des messages comme lus', { error, conversationId, userId });
+    return res.status(500).json({ 
+      message: error instanceof Error ? error.message : 'Une erreur est survenue' 
+    });
+  }
+});
+
+/**
+ * Marque un message spécifique comme lu
+ */
+export const markMessageAsRead = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  const messageId = req.params.messageId;
+  
+  try {
+    const message = await Message.findById(messageId);
+    
+    if (!message) {
+      return res.status(404).json({ message: 'Message non trouvé' });
+    }
+    
     const conversation = await Conversation.findOne({
-      _id: conversationId,
+      _id: message.conversation,
       participants: userId
     });
     
     if (!conversation) {
-      return res.status(404).json({ message: 'Conversation non trouvée' });
+      return res.status(403).json({ message: 'Accès refusé à ce message' });
     }
     
-    // Marquer tous les messages non lus comme lus
-    await Message.updateMany(
-      { 
-        conversation: conversationId,
-        sender: { $ne: userId },
-        readBy: { $ne: userId }
-      },
-      {
-        $addToSet: { readBy: userId }
-      }
-    );
+    if (!message.readBy.includes(userId)) {
+      await Message.findByIdAndUpdate(
+        messageId,
+        { $addToSet: { readBy: userId } }
+      );
+    }
     
     return res.status(200).json({
-      message: 'Messages marqués comme lus'
+      message: 'Message marqué comme lu'
     });
   } catch (error) {
-    logger.error('Erreur lors du marquage des messages comme lus', { error });
+    logger.error('Erreur lors du marquage d\'un message comme lu', { error, userId, messageId });
     return res.status(500).json({ message: 'Une erreur est survenue' });
   }
 });

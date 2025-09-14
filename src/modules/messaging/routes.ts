@@ -81,6 +81,12 @@ router.put(
   messageController.markConversationAsRead
 );
 
+router.put(
+  '/messages/:messageId/read',
+  authenticateJWT,
+  messageController.markMessageAsRead
+);
+
 router.delete(
   '/messages/:id',
   authenticateJWT,
@@ -93,6 +99,14 @@ router.get(
   authenticateJWT,
   // Middleware de vérification des droits d'accès à la pièce jointe
   messageController.getMessageAttachment
+);
+
+// Ajouter cette route pour récupérer les médias d'une conversation
+router.get(
+  '/:id/media',
+  authenticateJWT,
+  verifyConversationAccess,
+  conversationController.getConversationMedia
 );
 
 export default router;
