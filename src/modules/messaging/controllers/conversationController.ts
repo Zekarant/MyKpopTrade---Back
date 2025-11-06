@@ -1,4 +1,3 @@
-import path from 'path';
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
@@ -12,6 +11,7 @@ import {
   startPayWhatYouWant,
   makePayWhatYouWantOffer
 } from '../services/negotiationService';
+import { LeanConversation } from '../types/conversationTypes';
 
 /**
  * Récupère une conversation spécifique avec ses messages
@@ -23,68 +23,72 @@ export const getConversation = asyncHandler(async (req: Request, res: Response) 
   const limit = parseInt(req.query.limit as string) || 20;
 
   try {
-    console.log(`=== DEBUG getConversation ===`);
-    console.log(`Conversation ID: ${conversationId}`);
-    console.log(`User ID: ${userId}`);
-    console.log(`Page: ${page}, Limit: ${limit}`);
-
-    // Utiliser le service utilitaire pour vérifier l'accès
     await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
 
-    // Récupérer la conversation avec toutes les relations
-    const conversation = await Conversation.findById(conversationId)
+    // Récupérer la conversation
+    const conversationRaw = await Conversation.findById(conversationId)
       .populate('participants', 'username profilePicture email location bio preferences socialLinks statistics')
       .populate({
         path: 'productId',
         select: 'title description price images seller category condition kpopGroup kpopMember albumName currency isAvailable allowOffers minOfferPercentage shippingOptions createdAt'
       })
+      .populate('offerHistory.offeredBy', 'username profilePicture')
       .lean();
 
-    if (!conversation) {
+    if (!conversationRaw) {
       return res.status(404).json({ message: 'Conversation non trouvée' });
     }
 
+    const conversation = conversationRaw as LeanConversation;
+
     // Enrichir les données produit si présent
-    if (conversation && !Array.isArray(conversation) && conversation.productId) {
+    if (conversation.productId) {
       (conversation as any).isOwner = conversation.productId.seller.toString() === userId;
 
       if (conversation.productId.category) {
-        (conversation.productId as any).categoryLabel = MessagingUtilsService.formatCategory(conversation.productId.category);
+        conversation.productId.categoryLabel = MessagingUtilsService.formatCategory(conversation.productId.category);
       }
     }
 
+    // Ajouter les métadonnées utilisateur
+    const isArchived = Array.isArray(conversation.archivedBy) &&
+      conversation.archivedBy.some((id: any) => id.toString() === userId);
+    const isFavorited = Array.isArray(conversation.favoritedBy) &&
+      conversation.favoritedBy.some((id: any) => id.toString() === userId);
+
+    (conversation as any).userMetadata = {
+      isArchived,
+      isFavorited
+    };
+
+    // Formater l'historique des offres
+    if (Array.isArray(conversation.offerHistory) && conversation.offerHistory.length > 0) {
+      (conversation as any).formattedOfferHistory = conversation.offerHistory.map((offer: any) => ({
+        ...offer,
+        isCurrentUserOffer: offer.offeredBy?._id?.toString() === userId,
+        formattedAmount: `${offer.amount} ${conversation.productId?.currency || 'EUR'}`
+      }));
+    }
+
+    // Récupérer les messages
     const messageQuery = {
       conversation: new mongoose.Types.ObjectId(conversationId),
       isDeleted: false,
       isActive: true
     };
 
-    console.log('Message query:', JSON.stringify(messageQuery, null, 2));
-
-    // Compter le total de messages
     const totalMessages = await Message.countDocuments(messageQuery);
-    console.log(`Total de messages trouvés: ${totalMessages}`);
 
-    // Récupérer les messages avec pagination
     const messages = await Message.find(messageQuery)
-      .sort({ createdAt: 1 }) // Ordre chronologique (du plus ancien au plus récent)
+      .sort({ createdAt: 1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .populate('sender', 'username profilePicture')
       .lean();
 
-    console.log(`Messages récupérés pour la page ${page}: ${messages.length}`);
-    console.log('IDs des messages:', messages.map(m => m._id));
-    console.log('Messages avec attachments:', messages.filter(m => m.attachments && m.attachments.length > 0).map(m => ({
-      id: m._id,
-      attachments: m.attachments
-    })));
-
-    // Marquer comme lu en utilisant le service utilitaire
     const markedCount = await MessagingUtilsService.markConversationAsRead(conversationId, userId);
-    console.log(`Messages marqués comme lus: ${markedCount}`);
 
-    // Récupérer et formater les médias
+    // Récupérer les médias
     const mediaQuery = {
       conversation: new mongoose.Types.ObjectId(conversationId),
       attachments: { $exists: true, $ne: [] },
@@ -97,24 +101,20 @@ export const getConversation = asyncHandler(async (req: Request, res: Response) 
       .sort({ createdAt: -1 })
       .lean();
 
-    console.log(`Messages avec médias trouvés: ${mediaMessages.length}`);
-
     const media = MessagingUtilsService.formatConversationMedia(mediaMessages);
 
     return res.status(200).json({
       conversation,
-      messages, // Maintenant dans l'ordre chronologique
+      messages,
       media,
       markedAsRead: markedCount,
-      debug: { // Informations de debug temporaires
-        totalMessages,
-        messagesRetrieved: messages.length,
-        conversationId,
-        userId,
-        page,
-        limit,
-        messageQuery
-      },
+      offersSummary: (conversation.type === 'negotiation' || conversation.type === 'pay_what_you_want') ? {
+        totalOffers: conversation.offerHistory.length,
+        currentStatus: conversation.type === 'negotiation'
+          ? conversation.negotiation?.status
+          : conversation.payWhatYouWant?.status,
+        latestOffer: conversation.offerHistory[0] || null
+      } : null,
       pagination: {
         total: totalMessages,
         page,
@@ -123,11 +123,9 @@ export const getConversation = asyncHandler(async (req: Request, res: Response) 
       }
     });
   } catch (error) {
-    console.error('Erreur détaillée dans getConversation:', error);
     logger.error('Erreur lors de la récupération de la conversation', { error, conversationId, userId });
     return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue',
-      error: process.env.NODE_ENV === 'development' ? error : undefined
+      message: error instanceof Error ? error.message : 'Une erreur est survenue'
     });
   }
 });
@@ -139,38 +137,42 @@ export const getUserConversations = asyncHandler(async (req: Request, res: Respo
   const userId = (req.user as any).id;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 10;
-  const filter = req.query.filter as string || 'all'; // all, unread, active
+  const filter = req.query.filter as string || 'all';
 
   const query: any = {
     participants: userId,
-    isActive: true
+    isActive: true,
+    deletedBy: { $ne: userId }
   };
 
   if (filter === 'unread') {
-    // Complexité: trouver les conversations avec des messages non lus
     const conversationsWithUnreadMessages = await Message.distinct('conversation', {
       conversation: { $in: await Conversation.find({ participants: userId }).distinct('_id') },
       readBy: { $ne: userId },
       isDeleted: false
     });
-
     query._id = { $in: conversationsWithUnreadMessages };
+  } else if (filter === 'archived') {
+    query.archivedBy = userId;
+  } else if (filter === 'favorites') {
+    query.favoritedBy = userId;
+  } else if (filter === 'active') {
+    query.archivedBy = { $ne: userId };
   }
 
-  // Compter le total de conversations
   const total = await Conversation.countDocuments(query);
 
-  // Récupérer les conversations avec pagination et tri par dernier message
-  const conversations = await Conversation.find(query)
+  const conversationsRaw = await Conversation.find(query)
     .sort({ lastMessageAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
     .populate('participants', 'username profilePicture location bio preferences socialLinks statistics')
-    .populate('productId', 'title price images')
+    .populate('productId', 'title price images currency')
     .lean();
 
-  // Calculer le nombre de messages non lus pour chaque conversation
-  const conversationsWithUnreadCount = await Promise.all(conversations.map(async (conversation) => {
+  const conversations = conversationsRaw as LeanConversation[];
+
+  const conversationsWithMetadata = await Promise.all(conversations.map(async (conversation) => {
     const unreadCount = await Message.countDocuments({
       conversation: conversation._id,
       sender: { $ne: userId },
@@ -178,7 +180,6 @@ export const getUserConversations = asyncHandler(async (req: Request, res: Respo
       isDeleted: false
     });
 
-    // Récupérer le dernier message pour l'aperçu
     const lastMessage = await Message.findOne({
       conversation: conversation._id,
       isDeleted: false
@@ -188,22 +189,17 @@ export const getUserConversations = asyncHandler(async (req: Request, res: Respo
       .populate('sender', 'username')
       .lean();
 
-    // Préparer un aperçu du message en fonction de son type
     let messagePreview = '';
     if (lastMessage && !Array.isArray(lastMessage)) {
-      if (lastMessage.isEncrypted) {
-        messagePreview = '[Message chiffré]';
-      } else if (lastMessage.contentType === 'system_notification') {
-        messagePreview = lastMessage.content;
-      } else if (lastMessage.contentType === 'offer' || lastMessage.contentType === 'counter_offer') {
-        messagePreview = lastMessage.content;
-      } else {
-        // Limiter l'aperçu à 50 caractères
-        messagePreview = lastMessage.content.length > 50
-          ? lastMessage.content.substring(0, 50) + '...'
-          : lastMessage.content;
-      }
+      messagePreview = MessagingUtilsService.generateMessagePreview(lastMessage);
     }
+
+    const isArchived = Array.isArray(conversation.archivedBy) &&
+      conversation.archivedBy.some((id: any) => id.toString() === userId);
+    const isFavorited = Array.isArray(conversation.favoritedBy) &&
+      conversation.favoritedBy.some((id: any) => id.toString() === userId);
+    const hasActiveOffer = conversation.type === 'negotiation' &&
+      conversation.negotiation?.status === 'pending';
 
     return {
       ...conversation,
@@ -212,15 +208,20 @@ export const getUserConversations = asyncHandler(async (req: Request, res: Respo
         ...lastMessage,
         preview: messagePreview
       } : null,
-      // Déterminer l'autre participant (pour les conversations à deux participants)
-      otherParticipant: conversation.participants.length === 2
+      otherParticipant: Array.isArray(conversation.participants) && conversation.participants.length === 2
         ? conversation.participants.find((p: any) => p._id.toString() !== userId)
-        : null
+        : null,
+      metadata: {
+        isArchived,
+        isFavorited,
+        hasActiveOffer,
+        offerCount: Array.isArray(conversation.offerHistory) ? conversation.offerHistory.length : 0
+      }
     };
   }));
 
   return res.status(200).json({
-    conversations: conversationsWithUnreadCount,
+    conversations: conversationsWithMetadata,
     pagination: {
       total,
       page,
@@ -229,6 +230,7 @@ export const getUserConversations = asyncHandler(async (req: Request, res: Respo
     }
   });
 });
+
 
 /**
  * Crée une nouvelle conversation
@@ -401,7 +403,7 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
       });
     }
 
-    // Créer une nouvelle conversation de type négociation
+    // Créer une nouvelle conversation de type négociation AVEC offerHistory
     const conversation = await Conversation.create({
       participants: [userId, product.seller],
       type: 'negotiation',
@@ -413,7 +415,15 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
         currentOffer: initialOffer,
         status: 'pending'
       },
-      title: `Négociation pour ${product.title}`
+      title: `Négociation pour ${product.title}`,
+      offerHistory: [{
+        offeredBy: userId,
+        amount: initialOffer,
+        offerType: 'initial',
+        status: 'pending',
+        message: message || '',
+        createdAt: new Date()
+      }]
     });
 
     // Créer un message système pour l'offre initiale
@@ -470,7 +480,8 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
     const populatedConversation = await Conversation.findById(conversation._id)
       .populate('participants', 'username profilePicture email')
       .populate('productId', 'title price images')
-      .populate('lastMessage');
+      .populate('lastMessage')
+      .populate('offerHistory.offeredBy', 'username profilePicture'); // ✅ Peupler l'historique
 
     return res.status(201).json({
       message: 'Négociation initiée avec succès',
@@ -762,6 +773,243 @@ export const getConversationMedia = asyncHandler(async (req: Request, res: Respo
     });
   } catch (error) {
     logger.error('Erreur lors de la récupération des médias', { error, conversationId });
+    return res.status(500).json({
+      message: error instanceof Error ? error.message : 'Une erreur est survenue'
+    });
+  }
+});
+
+/**
+ * Supprime une conversation pour l'utilisateur actuel
+ * (soft delete - la conversation reste pour les autres participants)
+ */
+export const deleteConversation = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  const conversationId = req.params.id;
+
+  try {
+    // Vérifier l'accès
+    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+
+    // Ajouter l'utilisateur à la liste deletedBy
+    const conversation = await Conversation.findByIdAndUpdate(
+      conversationId,
+      { $addToSet: { deletedBy: userId } },
+      { new: true }
+    );
+
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation non trouvée' });
+    }
+
+    // Si tous les participants ont supprimé la conversation, la marquer comme inactive
+    if (conversation.deletedBy.length === conversation.participants.length) {
+      await Conversation.findByIdAndUpdate(
+        conversationId,
+        { isActive: false, status: 'closed' }
+      );
+    }
+
+    logger.info(`Conversation ${conversationId} supprimée par l'utilisateur ${userId}`);
+
+    return res.status(200).json({
+      message: 'Conversation supprimée avec succès',
+      conversationId
+    });
+  } catch (error) {
+    logger.error('Erreur lors de la suppression de la conversation', { error, conversationId, userId });
+    return res.status(500).json({
+      message: error instanceof Error ? error.message : 'Une erreur est survenue'
+    });
+  }
+});
+
+/**
+ * Archive une conversation
+ */
+export const archiveConversation = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  const conversationId = req.params.id;
+
+  try {
+    // Vérifier l'accès
+    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+
+    // Ajouter l'utilisateur à la liste archivedBy
+    const conversation = await Conversation.findByIdAndUpdate(
+      conversationId,
+      { $addToSet: { archivedBy: userId } },
+      { new: true }
+    );
+
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation non trouvée' });
+    }
+
+    logger.info(`Conversation ${conversationId} archivée par l'utilisateur ${userId}`);
+
+    return res.status(200).json({
+      message: 'Conversation archivée avec succès',
+      conversationId,
+      isArchived: true
+    });
+  } catch (error) {
+    logger.error('Erreur lors de l\'archivage de la conversation', { error, conversationId, userId });
+    return res.status(500).json({
+      message: error instanceof Error ? error.message : 'Une erreur est survenue'
+    });
+  }
+});
+
+/**
+ * Désarchive une conversation
+ */
+export const unarchiveConversation = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  const conversationId = req.params.id;
+
+  try {
+    // Vérifier l'accès
+    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+
+    // Retirer l'utilisateur de la liste archivedBy
+    const conversation = await Conversation.findByIdAndUpdate(
+      conversationId,
+      { $pull: { archivedBy: userId } },
+      { new: true }
+    );
+
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation non trouvée' });
+    }
+
+    logger.info(`Conversation ${conversationId} désarchivée par l'utilisateur ${userId}`);
+
+    return res.status(200).json({
+      message: 'Conversation désarchivée avec succès',
+      conversationId,
+      isArchived: false
+    });
+  } catch (error) {
+    logger.error('Erreur lors du désarchivage de la conversation', { error, conversationId, userId });
+    return res.status(500).json({
+      message: error instanceof Error ? error.message : 'Une erreur est survenue'
+    });
+  }
+});
+
+/**
+ * Toggle favoris d'une conversation
+ */
+export const toggleFavoriteConversation = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  const conversationId = req.params.id;
+
+  try {
+    // Vérifier l'accès
+    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+
+    // Vérifier si déjà en favoris
+    const conversation = await Conversation.findById(conversationId);
+
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation non trouvée' });
+    }
+
+    const isFavorited = conversation.favoritedBy.some(
+      (id: mongoose.Types.ObjectId) => id.toString() === userId
+    );
+
+    let updatedConversation;
+    if (isFavorited) {
+      // Retirer des favoris
+      updatedConversation = await Conversation.findByIdAndUpdate(
+        conversationId,
+        { $pull: { favoritedBy: userId } },
+        { new: true }
+      );
+    } else {
+      // Ajouter aux favoris
+      updatedConversation = await Conversation.findByIdAndUpdate(
+        conversationId,
+        { $addToSet: { favoritedBy: userId } },
+        { new: true }
+      );
+    }
+
+    logger.info(`Conversation ${conversationId} ${isFavorited ? 'retirée des' : 'ajoutée aux'} favoris par l'utilisateur ${userId}`);
+
+    return res.status(200).json({
+      message: `Conversation ${isFavorited ? 'retirée des' : 'ajoutée aux'} favoris avec succès`,
+      conversationId,
+      isFavorited: !isFavorited
+    });
+  } catch (error) {
+    logger.error('Erreur lors du toggle favoris de la conversation', { error, conversationId, userId });
+    return res.status(500).json({
+      message: error instanceof Error ? error.message : 'Une erreur est survenue'
+    });
+  }
+});
+
+/**
+ * Récupère l'historique des offres d'une conversation
+ */
+export const getConversationOffers = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  const conversationId = req.params.id;
+
+  try {
+    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+
+    const conversationRaw = await Conversation.findById(conversationId)
+      .populate('offerHistory.offeredBy', 'username profilePicture')
+      .populate({
+        path: 'productId',
+        select: 'title price images currency seller'
+      })
+      .lean();
+
+    if (!conversationRaw) {
+      return res.status(404).json({ message: 'Conversation non trouvée' });
+    }
+
+    // ✅ Typage propre
+    const conversation = conversationRaw as LeanConversation;
+
+    const response: any = {
+      conversationId,
+      type: conversation.type,
+      offerHistory: conversation.offerHistory
+    };
+
+    if (conversation.type === 'negotiation' && conversation.negotiation) {
+      response.currentNegotiation = {
+        initialPrice: conversation.negotiation.initialPrice,
+        currentOffer: conversation.negotiation.currentOffer,
+        counterOffer: conversation.negotiation.counterOffer,
+        status: conversation.negotiation.status,
+        expiresAt: conversation.negotiation.expiresAt
+      };
+    }
+
+    if (conversation.type === 'pay_what_you_want' && conversation.payWhatYouWant) {
+      response.payWhatYouWant = {
+        minimumPrice: conversation.payWhatYouWant.minimumPrice,
+        maximumPrice: conversation.payWhatYouWant.maximumPrice,
+        proposedPrice: conversation.payWhatYouWant.proposedPrice,
+        status: conversation.payWhatYouWant.status
+      };
+    }
+
+    if (conversation.productId) {
+      response.product = conversation.productId;
+      response.isOwner = conversation.productId.seller.toString() === userId;
+    }
+
+    return res.status(200).json(response);
+  } catch (error) {
+    logger.error('Erreur lors de la récupération des offres', { error, conversationId, userId });
     return res.status(500).json({
       message: error instanceof Error ? error.message : 'Une erreur est survenue'
     });

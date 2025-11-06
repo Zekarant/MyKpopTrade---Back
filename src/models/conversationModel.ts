@@ -1,5 +1,16 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+// Interface pour l'historique des offres
+export interface IOfferHistory {
+  offeredBy: mongoose.Types.ObjectId;
+  amount: number;
+  offerType: 'initial' | 'counter';
+  status: 'pending' | 'accepted' | 'rejected' | 'expired';
+  message?: string;
+  createdAt: Date;
+  respondedAt?: Date;
+}
+
 export interface IConversation extends Document {
   participants: mongoose.Types.ObjectId[];
   productId?: mongoose.Types.ObjectId;
@@ -10,6 +21,9 @@ export interface IConversation extends Document {
   status: 'open' | 'closed' | 'archived';
   createdBy: mongoose.Types.ObjectId;
   title?: string;
+  deletedBy: mongoose.Types.ObjectId[];
+  archivedBy: mongoose.Types.ObjectId[];
+  favoritedBy: mongoose.Types.ObjectId[];
   negotiation?: {
     initialPrice: number;
     currentOffer: number;
@@ -23,6 +37,7 @@ export interface IConversation extends Document {
     proposedPrice?: number;
     status: 'pending' | 'accepted' | 'rejected';
   };
+  offerHistory: IOfferHistory[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -69,6 +84,21 @@ const ConversationSchema: Schema = new Schema({
     type: String,
     trim: true
   },
+  deletedBy: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: []
+  }],
+  archivedBy: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: []
+  }],
+  favoritedBy: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: []
+  }],
   negotiation: {
     initialPrice: {
       type: Number
@@ -103,7 +133,38 @@ const ConversationSchema: Schema = new Schema({
       enum: ['pending', 'accepted', 'rejected'],
       default: 'pending'
     }
-  }
+  },
+  offerHistory: [{
+    offeredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    amount: {
+      type: Number,
+      required: true
+    },
+    offerType: {
+      type: String,
+      enum: ['initial', 'counter'],
+      required: true
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'accepted', 'rejected', 'expired'],
+      default: 'pending'
+    },
+    message: {
+      type: String
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    },
+    respondedAt: {
+      type: Date
+    }
+  }]
 }, {
   timestamps: true
 });
@@ -113,5 +174,8 @@ ConversationSchema.index({ participants: 1 });
 ConversationSchema.index({ lastMessageAt: -1 });
 ConversationSchema.index({ createdAt: -1 });
 ConversationSchema.index({ 'negotiation.status': 1, 'negotiation.expiresAt': 1 });
+ConversationSchema.index({ deletedBy: 1 });
+ConversationSchema.index({ archivedBy: 1 });
+ConversationSchema.index({ favoritedBy: 1 });
 
 export default mongoose.models.Conversation || mongoose.model<IConversation>('Conversation', ConversationSchema);

@@ -34,7 +34,42 @@ router.post(
   conversationController.startConversation
 );
 
-// Routes des négociations
+// ✅ NOUVELLES ROUTES - Gestion des conversations
+router.delete(
+  '/:id',
+  authenticateJWT,
+  verifyConversationAccess,
+  conversationController.deleteConversation
+);
+
+router.put(
+  '/:id/archive',
+  authenticateJWT,
+  verifyConversationAccess,
+  conversationController.archiveConversation
+);
+
+router.put(
+  '/:id/unarchive',
+  authenticateJWT,
+  verifyConversationAccess,
+  conversationController.unarchiveConversation
+);
+
+router.put(
+  '/:id/favorite',
+  authenticateJWT,
+  verifyConversationAccess,
+  conversationController.toggleFavoriteConversation
+);
+
+router.get(
+  '/:id/offers',
+  authenticateJWT,
+  verifyConversationAccess,
+  conversationController.getConversationOffers
+);
+
 router.post(
   '/negotiate',
   authenticateJWT,
@@ -67,9 +102,7 @@ router.post(
   '/:id/messages',
   authenticateJWT,
   verifyConversationAccess,
-  // Important: le middleware de validation doit venir APRÈS l'upload pour que req.body soit correctement rempli
-  messageController.upload.array('attachments', 5), // Accepter jusqu'à 5 pièces jointes
-  // Ne pas utiliser validateMessageContent ici car il vérifie avant que multer n'ait traité les données
+  messageController.upload.array('attachments', 5),
   rateLimitMessages,
   messageController.sendNewMessage
 );
@@ -90,18 +123,15 @@ router.put(
 router.delete(
   '/messages/:id',
   authenticateJWT,
-  // Nous aurons besoin d'un middleware spécifique pour vérifier que l'utilisateur est bien le propriétaire du message
   messageController.deleteMessage
 );
 
 router.get(
   '/messages/:messageId/attachments/:attachment',
   authenticateJWT,
-  // Middleware de vérification des droits d'accès à la pièce jointe
   messageController.getMessageAttachment
 );
 
-// Ajouter cette route pour récupérer les médias d'une conversation
 router.get(
   '/:id/media',
   authenticateJWT,
