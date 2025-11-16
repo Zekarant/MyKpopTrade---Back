@@ -34,7 +34,6 @@ router.post(
   conversationController.startConversation
 );
 
-// ✅ NOUVELLES ROUTES - Gestion des conversations
 router.delete(
   '/:id',
   authenticateJWT,
@@ -83,7 +82,13 @@ router.post(
   conversationController.respondToNegotiation
 );
 
-// Routes Pay What You Want
+router.delete(
+  '/:id/cancel-offer',
+  authenticateJWT,
+  verifyConversationAccess,
+  conversationController.cancelOffer
+);
+
 router.post(
   '/pwyw',
   authenticateJWT,
@@ -97,7 +102,6 @@ router.post(
   conversationController.makePayWhatYouWantProposal
 );
 
-// Routes des messages
 router.post(
   '/:id/messages',
   authenticateJWT,

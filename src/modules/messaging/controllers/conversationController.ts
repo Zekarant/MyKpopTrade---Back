@@ -295,8 +295,6 @@ export const startConversation = asyncHandler(async (req: Request, res: Response
         contentType: 'text'
       });
 
-      // Mettre à jour la conversation avec le dernier message après sa création
-      // Utiliser findByIdAndUpdate au lieu de la méthode save()
       await Conversation.findByIdAndUpdate(
         conversation._id,
         {
@@ -325,7 +323,7 @@ export const startConversation = asyncHandler(async (req: Request, res: Response
       logger.error('Erreur lors de la création de la conversation', {
         error: error.message,
         stack: error.stack,
-        path: (error as any).path // Pour capturer le champ problématique
+        path: (error as any).path
       });
     } else {
       logger.error('Erreur inconnue lors de la création de la conversation', { error });
@@ -386,107 +384,179 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
       });
     }
 
-    // Vérifier si une négociation existe déjà pour cet utilisateur et ce produit
-    let existingNegotiation = product.negotiations?.find((n: any) =>
-      n.buyer.toString() === userId && ['pending', 'accepted'].includes(n.status)
-    );
-
-    // Si une négociation existe déjà, rediriger vers la conversation existante
-    if (existingNegotiation && existingNegotiation.conversationId) {
-      const conversation = await Conversation.findById(existingNegotiation.conversationId)
-        .populate('participants', 'username profilePicture email');
-
-      return res.status(200).json({
-        message: 'Une négociation existe déjà pour ce produit',
-        negotiation: existingNegotiation,
-        conversation
-      });
-    }
-
-    // Créer une nouvelle conversation de type négociation AVEC offerHistory
-    const conversation = await Conversation.create({
-      participants: [userId, product.seller],
+    // Vérifier si une conversation existe déjà entre l'acheteur et le vendeur pour ce produit
+    let conversation = await Conversation.findOne({
+      participants: { $all: [userId, product.seller] },
+      productId: productId,
       type: 'negotiation',
-      productId: product._id,
-      createdBy: userId,
-      status: 'open',
-      negotiation: {
-        initialPrice: product.price,
-        currentOffer: initialOffer,
-        status: 'pending'
-      },
-      title: `Négociation pour ${product.title}`,
-      offerHistory: [{
-        offeredBy: userId,
-        amount: initialOffer,
-        offerType: 'initial',
-        status: 'pending',
-        message: message || '',
-        createdAt: new Date()
-      }]
+      isActive: true
     });
 
-    // Créer un message système pour l'offre initiale
-    const systemMessage = await Message.create({
-      conversation: conversation._id,
-      sender: userId,
-      content: `Offre initiale de ${initialOffer} ${product.currency}`,
-      contentType: 'offer',
-      isSystemMessage: true,
-      readBy: [userId]
-    });
+    let isUpdatingOffer = false;
+    let oldOffer = null;
 
-    // Créer un message avec le texte de l'acheteur si fourni
-    if (message && message.trim()) {
-      const userMessage = await Message.create({
+    if (conversation) {
+      isUpdatingOffer = true;
+
+      // Récupérer l'ancienne offre pour l'afficher dans le message
+      const lastOffer = conversation.offerHistory.find(
+        (offer: any) => offer.offeredBy.toString() === userId && offer.status === 'pending'
+      );
+
+      if (lastOffer) {
+        oldOffer = lastOffer.amount;
+        
+        // Mettre à jour le statut de l'ancienne offre à "expired"
+        await Conversation.updateOne(
+          { 
+            _id: conversation._id,
+            'offerHistory._id': lastOffer._id
+          },
+          { 
+            $set: { 'offerHistory.$.status': 'expired' }
+          }
+        );
+      }
+
+      // Mettre à jour la conversation avec la nouvelle offre
+      await Conversation.updateOne(
+        { _id: conversation._id },
+        {
+          $set: {
+            'negotiation.currentOffer': initialOffer,
+            'negotiation.status': 'pending',
+            lastMessageAt: new Date()
+          },
+          $push: {
+            offerHistory: {
+              offeredBy: userId,
+              amount: initialOffer,
+              offerType: 'initial',
+              status: 'pending',
+              message: message || '',
+              createdAt: new Date()
+            }
+          }
+        }
+      );
+
+      // Créer un message système pour la mise à jour de l'offre
+      const systemMessage = await Message.create({
         conversation: conversation._id,
         sender: userId,
-        content: message,
-        contentType: 'text',
+        content: oldOffer 
+          ? `Offre mise à jour de ${oldOffer} ${product.currency} à ${initialOffer} ${product.currency}`
+          : `Nouvelle offre de ${initialOffer} ${product.currency}`,
+        contentType: 'offer',
+        isSystemMessage: true,
         readBy: [userId]
       });
+
+      // Créer un message avec le texte de l'acheteur si fourni
+      let lastMessageId = systemMessage._id;
+
+      if (message && message.trim()) {
+        const userMessage = await Message.create({
+          conversation: conversation._id,
+          sender: userId,
+          content: message,
+          contentType: 'text',
+          readBy: [userId]
+        });
+
+        lastMessageId = userMessage._id;
+      }
+
+      // Mettre à jour le dernier message
+      await Conversation.findByIdAndUpdate(
+        conversation._id,
+        { lastMessage: lastMessageId, lastMessageAt: new Date() }
+      );
+
+    } else {
+      conversation = await Conversation.create({
+        participants: [userId, product.seller],
+        type: 'negotiation',
+        productId: product._id,
+        createdBy: userId,
+        status: 'open',
+        negotiation: {
+          initialPrice: product.price,
+          currentOffer: initialOffer,
+          status: 'pending'
+        },
+        title: `Négociation pour ${product.title}`,
+        offerHistory: [{
+          offeredBy: userId,
+          amount: initialOffer,
+          offerType: 'initial',
+          status: 'pending',
+          message: message || '',
+          createdAt: new Date()
+        }]
+      });
+
+      // Créer un message système pour l'offre initiale
+      const systemMessage = await Message.create({
+        conversation: conversation._id,
+        sender: userId,
+        content: `Offre initiale de ${initialOffer} ${product.currency}`,
+        contentType: 'offer',
+        isSystemMessage: true,
+        readBy: [userId]
+      });
+
+      // Créer un message avec le texte de l'acheteur si fourni
+      let lastMessageId = systemMessage._id;
+
+      if (message && message.trim()) {
+        const userMessage = await Message.create({
+          conversation: conversation._id,
+          sender: userId,
+          content: message,
+          contentType: 'text',
+          readBy: [userId]
+        });
+
+        lastMessageId = userMessage._id;
+      }
 
       // Mettre à jour la conversation avec le dernier message
       await Conversation.findByIdAndUpdate(
         conversation._id,
-        { lastMessage: userMessage._id, lastMessageAt: new Date() }
+        { lastMessage: lastMessageId, lastMessageAt: new Date() }
       );
-    } else {
-      // Utiliser le message système comme dernier message
-      await Conversation.findByIdAndUpdate(
-        conversation._id,
-        { lastMessage: systemMessage._id, lastMessageAt: new Date() }
+
+      // Ajouter la négociation au produit
+      const negotiation = {
+        buyer: userId,
+        initialOffer,
+        currentOffer: initialOffer,
+        status: 'pending',
+        conversationId: conversation._id,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      await Product.findByIdAndUpdate(
+        productId,
+        { $push: { negotiations: negotiation } }
       );
     }
-
-    // Ajouter la négociation au produit
-    const negotiation = {
-      buyer: userId,
-      initialOffer,
-      currentOffer: initialOffer,
-      status: 'pending',
-      conversationId: conversation._id,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    // Utiliser $push pour ajouter à l'array de négociations
-    await Product.findByIdAndUpdate(
-      productId,
-      { $push: { negotiations: negotiation } }
-    );
 
     // Récupérer la conversation complète avec les relations
     const populatedConversation = await Conversation.findById(conversation._id)
       .populate('participants', 'username profilePicture email')
       .populate('productId', 'title price images')
       .populate('lastMessage')
-      .populate('offerHistory.offeredBy', 'username profilePicture'); // ✅ Peupler l'historique
+      .populate('offerHistory.offeredBy', 'username profilePicture');
 
-    return res.status(201).json({
-      message: 'Négociation initiée avec succès',
+    return res.status(isUpdatingOffer ? 200 : 201).json({
+      message: isUpdatingOffer ? 'Offre mise à jour avec succès' : 'Négociation initiée avec succès',
       conversation: populatedConversation,
-      initialOffer
+      initialOffer,
+      isUpdate: isUpdatingOffer,
+      previousOffer: oldOffer
     });
   } catch (error) {
     logger.error('Erreur lors de l\'initiation d\'une négociation', {
@@ -547,6 +617,15 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
       return res.status(403).json({ message: 'Seul le vendeur peut répondre à cette offre' });
     }
 
+    // Récupérer l'offre en attente
+    const pendingOffer = conversation.offerHistory.find(
+      (offer: any) => offer.status === 'pending'
+    );
+
+    if (!pendingOffer) {
+      return res.status(404).json({ message: 'Aucune offre en attente' });
+    }
+
     // Trouver la négociation dans le produit
     const productDoc = await Product.findById(product._id);
     const negotiationIndex = productDoc.negotiations.findIndex(
@@ -569,31 +648,77 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
         negotiation.status = 'accepted';
         statusMessage = `Offre de ${negotiation.currentOffer} ${product.currency} acceptée`;
 
-        // Mettre à jour la conversation
-        conversation.negotiation.status = 'accepted';
-        await conversation.save();
+        // Mettre à jour la conversation et l'historique
+        await Conversation.updateOne(
+          { 
+            _id: conversationId,
+            'offerHistory._id': pendingOffer._id
+          },
+          { 
+            $set: { 
+              'negotiation.status': 'accepted',
+              'offerHistory.$.status': 'accepted',
+              'offerHistory.$.respondedAt': new Date()
+            }
+          }
+        );
         break;
 
       case 'reject':
         // Rejeter l'offre
         negotiation.status = 'rejected';
-        statusMessage = `Offre de ${negotiation.currentOffer} ${product.currency} rejetée`;
+        statusMessage = `Offre de ${negotiation.currentOffer} ${product.currency} refusée`;
+        
+        if (message && message.trim()) {
+          statusMessage += `\nRaison : ${message}`;
+        }
 
-        // Mettre à jour la conversation
-        conversation.negotiation.status = 'rejected';
-        await conversation.save();
+        // Mettre à jour la conversation et l'historique
+        await Conversation.updateOne(
+          { 
+            _id: conversationId,
+            'offerHistory._id': pendingOffer._id
+          },
+          { 
+            $set: { 
+              'negotiation.status': 'rejected',
+              'offerHistory.$.status': 'rejected',
+              'offerHistory.$.respondedAt': new Date()
+            }
+          }
+        );
         break;
 
       case 'counter':
         // Faire une contre-offre
         negotiation.counterOffer = counterOffer;
         negotiation.updatedAt = new Date();
-        statusMessage = `Contre-offre de ${counterOffer} ${product.currency}`;
+        statusMessage = `🔄 Contre-offre de ${counterOffer} ${product.currency}`;
         contentType = 'counter_offer';
 
-        // Mettre à jour la conversation
-        conversation.negotiation.counterOffer = counterOffer;
-        await conversation.save();
+        // Mettre à jour la conversation et ajouter la contre-offre à l'historique
+        await Conversation.updateOne(
+          { 
+            _id: conversationId,
+            'offerHistory._id': pendingOffer._id
+          },
+          { 
+            $set: { 
+              'negotiation.counterOffer': counterOffer,
+              'offerHistory.$.status': 'rejected'
+            },
+            $push: {
+              offerHistory: {
+                offeredBy: userId,
+                amount: counterOffer,
+                offerType: 'counter',
+                status: 'pending',
+                message: message || '',
+                createdAt: new Date()
+              }
+            }
+          }
+        );
         break;
     }
 
@@ -611,10 +736,10 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
       readBy: [userId]
     });
 
-    // Créer un message avec le texte du vendeur si fourni
+    // Créer un message avec le texte du vendeur si fourni ET si ce n'est pas déjà inclus dans le refus
     let lastMessageId = systemMessage._id;
 
-    if (message && message.trim()) {
+    if (action !== 'reject' && message && message.trim()) {
       const userMessage = await Message.create({
         conversation: conversationId,
         sender: userId,
@@ -636,7 +761,8 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
     const updatedConversation = await Conversation.findById(conversationId)
       .populate('participants', 'username profilePicture email')
       .populate('productId', 'title price images')
-      .populate('lastMessage');
+      .populate('lastMessage')
+      .populate('offerHistory.offeredBy', 'username profilePicture');
 
     return res.status(200).json({
       message: 'Réponse à la négociation envoyée avec succès',
@@ -974,7 +1100,6 @@ export const getConversationOffers = asyncHandler(async (req: Request, res: Resp
       return res.status(404).json({ message: 'Conversation non trouvée' });
     }
 
-    // ✅ Typage propre
     const conversation = conversationRaw as LeanConversation;
 
     const response: any = {
@@ -1010,6 +1135,107 @@ export const getConversationOffers = asyncHandler(async (req: Request, res: Resp
     return res.status(200).json(response);
   } catch (error) {
     logger.error('Erreur lors de la récupération des offres', { error, conversationId, userId });
+    return res.status(500).json({
+      message: error instanceof Error ? error.message : 'Une erreur est survenue'
+    });
+  }
+});
+
+/**
+ * Annule une offre en cours
+ */
+export const cancelOffer = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  const conversationId = req.params.id;
+
+  try {
+    // Récupérer la conversation
+    const conversation = await Conversation.findById(conversationId)
+      .populate({
+        path: 'productId',
+        select: 'title price currency seller'
+      });
+
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation non trouvée' });
+    }
+
+    if (conversation.type !== 'negotiation' && conversation.type !== 'pay_what_you_want') {
+      return res.status(400).json({ message: 'Cette conversation ne contient pas d\'offre' });
+    }
+
+    // Vérifier que l'utilisateur a bien fait une offre
+    const userOffer = conversation.offerHistory.find(
+      (offer: any) => offer.offeredBy.toString() === userId && offer.status === 'pending'
+    );
+
+    if (!userOffer) {
+      return res.status(404).json({ message: 'Aucune offre en cours à annuler' });
+    }
+
+    const product = conversation.productId as any;
+
+    // Mettre à jour l'offre dans l'historique
+    await Conversation.updateOne(
+      { 
+        _id: conversationId,
+        'offerHistory._id': userOffer._id
+      },
+      { 
+        $set: { 
+          'offerHistory.$.status': 'expired',
+          'offerHistory.$.respondedAt': new Date()
+        }
+      }
+    );
+
+    // Mettre à jour le statut de la négociation si applicable
+    if (conversation.type === 'negotiation' && conversation.negotiation) {
+      await Conversation.updateOne(
+        { _id: conversationId },
+        { 
+          $set: { 'negotiation.status': 'expired' }
+        }
+      );
+    }
+
+    if (conversation.type === 'pay_what_you_want' && conversation.payWhatYouWant) {
+      await Conversation.updateOne(
+        { _id: conversationId },
+        { 
+          $set: { 'payWhatYouWant.status': 'rejected' }
+        }
+      );
+    }
+
+    // Créer un message système pour l'annulation
+    const systemMessage = await Message.create({
+      conversation: conversationId,
+      sender: userId,
+      content: `Offre de ${userOffer.amount} ${product?.currency || 'EUR'} annulée`,
+      contentType: 'system_notification',
+      isSystemMessage: true,
+      readBy: [userId]
+    });
+
+    // Mettre à jour le dernier message
+    await Conversation.findByIdAndUpdate(
+      conversationId,
+      { lastMessage: systemMessage._id, lastMessageAt: new Date() }
+    );
+
+    logger.info(`Offre annulée pour la conversation ${conversationId} par l'utilisateur ${userId}`);
+
+    return res.status(200).json({
+      message: 'Offre annulée avec succès',
+      conversationId,
+      cancelledOffer: {
+        amount: userOffer.amount,
+        cancelledAt: new Date()
+      }
+    });
+  } catch (error) {
+    logger.error('Erreur lors de l\'annulation de l\'offre', { error, conversationId, userId });
     return res.status(500).json({
       message: error instanceof Error ? error.message : 'Une erreur est survenue'
     });
