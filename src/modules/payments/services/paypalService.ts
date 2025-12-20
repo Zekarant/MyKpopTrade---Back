@@ -74,8 +74,13 @@ export class PayPalService {
         throw new Error('Le vendeur n\'a pas configuré son email PayPal');
       }
 
-      // Arrondir le prix pour éviter les problèmes de précision
-      const roundedPrice = parseFloat(product.price.toFixed(2));
+      // Déterminer le montant à payer : offre acceptée ou prix initial
+      let amountToPay = product.price;
+      // Si le produit est lié à une conversation de négociation, récupérer l'offre acceptée
+      if (product.currentOffer && typeof product.currentOffer === 'number' && product.currentOffer > 0) {
+        amountToPay = product.currentOffer;
+      }
+      const roundedPrice = parseFloat(amountToPay.toFixed(2));
 
       // Obtenir le token d'accès
       const accessToken = await this.getAccessToken();
@@ -525,7 +530,7 @@ export class PayPalService {
         // Remboursement partiel - Formater correctement le montant
         // Conversion du montant en string avec 2 décimales exactement
         const formattedAmount = parseFloat(amount.toString()).toFixed(2);
-        
+
         requestBody = {
           amount: {
             value: formattedAmount,
@@ -533,7 +538,7 @@ export class PayPalService {
           },
           note_to_payer: reason || 'Remboursement partiel'
         };
-        
+
         // Vérifier que le montant de remboursement n'est pas supérieur au montant capturé
         if (parseFloat(formattedAmount) > captureDetails.amount) {
           throw new Error(`Le montant du remboursement (${formattedAmount} ${captureDetails.currency}) est supérieur au montant capturé (${captureDetails.amount} ${captureDetails.currency})`);
@@ -596,7 +601,7 @@ export class PayPalService {
         if (errorDetails.some((detail: any) => detail.issue === 'CAPTURE_FULLY_REFUNDED')) {
           throw new Error('Cette transaction a déjà été entièrement remboursée');
         }
-        
+
         if (errorDetails.some((detail: any) => detail.issue === 'AMOUNT_MISMATCH' || detail.issue === 'INVALID_CURRENCY_CODE')) {
           throw new Error('Le montant ou la devise du remboursement est invalide');
         }

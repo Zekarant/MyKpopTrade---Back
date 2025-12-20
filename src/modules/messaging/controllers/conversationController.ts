@@ -113,7 +113,16 @@ export const getConversation = asyncHandler(async (req: Request, res: Response) 
         currentStatus: conversation.type === 'negotiation'
           ? conversation.negotiation?.status
           : conversation.payWhatYouWant?.status,
-        latestOffer: conversation.offerHistory[0] || null
+        latestOffer: (() => {
+          if (!conversation.offerHistory.length) return null;
+          // Cherche la dernière offre acceptée
+          const accepted = conversation.offerHistory.filter(o => o.status === 'accepted');
+          if (accepted.length > 0) {
+            return accepted[accepted.length - 1];
+          }
+          // Sinon, retourne la plus récente
+          return conversation.offerHistory[conversation.offerHistory.length - 1];
+        })()
       } : null,
       pagination: {
         total: totalMessages,
@@ -405,14 +414,14 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
 
       if (lastOffer) {
         oldOffer = lastOffer.amount;
-        
+
         // Mettre à jour le statut de l'ancienne offre à "expired"
         await Conversation.updateOne(
-          { 
+          {
             _id: conversation._id,
             'offerHistory._id': lastOffer._id
           },
-          { 
+          {
             $set: { 'offerHistory.$.status': 'expired' }
           }
         );
@@ -444,7 +453,7 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
       const systemMessage = await Message.create({
         conversation: conversation._id,
         sender: userId,
-        content: oldOffer 
+        content: oldOffer
           ? `Offre mise à jour de ${oldOffer} ${product.currency} à ${initialOffer} ${product.currency}`
           : `Nouvelle offre de ${initialOffer} ${product.currency}`,
         contentType: 'offer',
@@ -650,12 +659,12 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
 
         // Mettre à jour la conversation et l'historique
         await Conversation.updateOne(
-          { 
+          {
             _id: conversationId,
             'offerHistory._id': pendingOffer._id
           },
-          { 
-            $set: { 
+          {
+            $set: {
               'negotiation.status': 'accepted',
               'offerHistory.$.status': 'accepted',
               'offerHistory.$.respondedAt': new Date()
@@ -668,19 +677,19 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
         // Rejeter l'offre
         negotiation.status = 'rejected';
         statusMessage = `Offre de ${negotiation.currentOffer} ${product.currency} refusée`;
-        
+
         if (message && message.trim()) {
           statusMessage += `\nRaison : ${message}`;
         }
 
         // Mettre à jour la conversation et l'historique
         await Conversation.updateOne(
-          { 
+          {
             _id: conversationId,
             'offerHistory._id': pendingOffer._id
           },
-          { 
-            $set: { 
+          {
+            $set: {
               'negotiation.status': 'rejected',
               'offerHistory.$.status': 'rejected',
               'offerHistory.$.respondedAt': new Date()
@@ -698,12 +707,12 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
 
         // Mettre à jour la conversation et ajouter la contre-offre à l'historique
         await Conversation.updateOne(
-          { 
+          {
             _id: conversationId,
             'offerHistory._id': pendingOffer._id
           },
-          { 
-            $set: { 
+          {
+            $set: {
               'negotiation.counterOffer': counterOffer,
               'offerHistory.$.status': 'rejected'
             },
@@ -1177,12 +1186,12 @@ export const cancelOffer = asyncHandler(async (req: Request, res: Response) => {
 
     // Mettre à jour l'offre dans l'historique
     await Conversation.updateOne(
-      { 
+      {
         _id: conversationId,
         'offerHistory._id': userOffer._id
       },
-      { 
-        $set: { 
+      {
+        $set: {
           'offerHistory.$.status': 'expired',
           'offerHistory.$.respondedAt': new Date()
         }
@@ -1193,7 +1202,7 @@ export const cancelOffer = asyncHandler(async (req: Request, res: Response) => {
     if (conversation.type === 'negotiation' && conversation.negotiation) {
       await Conversation.updateOne(
         { _id: conversationId },
-        { 
+        {
           $set: { 'negotiation.status': 'expired' }
         }
       );
@@ -1202,7 +1211,7 @@ export const cancelOffer = asyncHandler(async (req: Request, res: Response) => {
     if (conversation.type === 'pay_what_you_want' && conversation.payWhatYouWant) {
       await Conversation.updateOne(
         { _id: conversationId },
-        { 
+        {
           $set: { 'payWhatYouWant.status': 'rejected' }
         }
       );
