@@ -58,6 +58,48 @@ export class PayPalService {
     buyerId: string
   ): Promise<any> {
     try {
+      // Vérifier s'il existe déjà un paiement en attente pour ce produit et cet acheteur
+      const existingPayment = await Payment.findOne({
+        product: productId,
+        buyer: buyerId,
+        status: 'pending'
+      }).sort({ createdAt: -1 });
+
+      // Si un paiement existe et est toujours valide (< 24h), le réutiliser
+      if (existingPayment &&
+        new Date().getTime() - new Date(existingPayment.createdAt).getTime() < 24 * 60 * 60 * 1000) {
+
+        // Vérifier le statut du paiement PayPal
+        const paymentStatus = await this.checkPaymentStatus(existingPayment.paymentIntentId);
+
+        if (paymentStatus === 'CREATED' || paymentStatus === 'APPROVED') {
+          // Le paiement est toujours valide, retourner les informations existantes
+          const accessToken = await this.getAccessToken();
+
+          const response = await axios({
+            method: 'get',
+            url: `${this.apiBaseUrl}/v2/checkout/orders/${existingPayment.paymentIntentId}`,
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`
+            }
+          });
+
+          const approvalUrl = response.data.links.find(
+            (link: any) => link.rel === 'approve'
+          )?.href;
+
+          return {
+            orderId: existingPayment.paymentIntentId,
+            approvalUrl,
+            paymentId: existingPayment._id,
+            amount: existingPayment.amount,
+            currency: existingPayment.currency,
+            resumed: true
+          };
+        }
+      }
+
       // Récupérer les informations du produit et du vendeur
       const product = await Product.findById(productId);
       if (!product) {
@@ -74,12 +116,21 @@ export class PayPalService {
         throw new Error('Le vendeur n\'a pas configuré son email PayPal');
       }
 
-      // Déterminer le montant à payer : offre acceptée ou prix initial
+      // Déterminer le montant à payer : dernière offre acceptée ou prix initial
       let amountToPay = product.price;
-      // Si le produit est lié à une conversation de négociation, récupérer l'offre acceptée
-      if (product.currentOffer && typeof product.currentOffer === 'number' && product.currentOffer > 0) {
-        amountToPay = product.currentOffer;
+
+      // Vérifier s'il existe une négociation acceptée pour ce produit
+      if (product.negotiations && product.negotiations.length > 0) {
+        const acceptedNegotiation = product.negotiations.find(
+          (neg: any) => neg.buyer.toString() === buyerId && neg.status === 'accepted'
+        );
+
+        if (acceptedNegotiation) {
+          // Utiliser le montant de l'offre acceptée (currentOffer si pas de contre-offre, sinon counterOffer)
+          amountToPay = acceptedNegotiation.counterOffer || acceptedNegotiation.currentOffer;
+        }
       }
+
       const roundedPrice = parseFloat(amountToPay.toFixed(2));
 
       // Obtenir le token d'accès

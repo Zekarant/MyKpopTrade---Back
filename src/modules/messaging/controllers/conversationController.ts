@@ -301,14 +301,15 @@ export const startConversation = asyncHandler(async (req: Request, res: Response
         conversation: conversation._id,
         sender: userId,
         content: initialMessage,
-        contentType: 'text'
+        contentType: 'text',
+        readBy: [userId]
       });
 
       await Conversation.findByIdAndUpdate(
         conversation._id,
         {
           lastMessage: message._id,
-          updatedAt: new Date()
+          lastMessageAt: new Date()
         }
       );
 
