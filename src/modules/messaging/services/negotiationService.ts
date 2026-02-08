@@ -156,6 +156,18 @@ export const respondToOffer = async ({
       throw new Error('Seul le vendeur peut répondre à cette offre');
     }
 
+    // Récupérer la dernière offre en attente
+    const pendingOffer = conversation.offerHistory
+      .filter((offer: any) => offer.status === 'pending')
+      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+    if (!pendingOffer && (action === 'accept' || action === 'reject')) {
+      throw new Error('Aucune offre en attente à traiter');
+    }
+
+    // Utiliser le montant de la dernière offre en attente
+    const currentOfferAmount = pendingOffer ? pendingOffer.amount : conversation.negotiation!.currentOffer;
+
     // Traiter l'action demandée
     let content = '';
     let contentType: 'text' | 'system_notification' | 'offer' | 'counter_offer' | 'shipping_update' = 'system_notification';
@@ -164,13 +176,14 @@ export const respondToOffer = async ({
 
     switch (action) {
       case 'accept':
-        content = `Offre de ${conversation.negotiation!.currentOffer} € acceptée !`;
+        content = `Offre de ${currentOfferAmount} € acceptée !`;
         metadata = {
-          offerAmount: conversation.negotiation!.currentOffer,
+          offerAmount: currentOfferAmount,
           negotiationAction: 'accept'
         };
         updateData = {
           'negotiation.status': 'accepted',
+          'negotiation.currentOffer': currentOfferAmount,
           'offerHistory.$[elem].status': 'accepted',
           'offerHistory.$[elem].respondedAt': new Date()
         };
@@ -181,7 +194,7 @@ export const respondToOffer = async ({
           throw new Error('Contre-offre invalide');
         }
 
-        if (counterOffer <= conversation.negotiation!.currentOffer) {
+        if (counterOffer <= currentOfferAmount) {
           throw new Error('La contre-offre doit être supérieure à l\'offre actuelle');
         }
 
@@ -197,6 +210,7 @@ export const respondToOffer = async ({
         };
         updateData = {
           'negotiation.counterOffer': counterOffer,
+          'negotiation.currentOffer': counterOffer,
           'negotiation.expiresAt': new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
           $push: {
             offerHistory: {

@@ -285,13 +285,14 @@ export const startConversation = asyncHandler(async (req: Request, res: Response
     let conversation = await Conversation.findOne(query);
 
     if (!conversation) {
-      // Créer une conversation sans lastMessage pour l'instant
+      // Créer une conversation avec lastMessageAt initialisé
+      const now = new Date();
       conversation = await Conversation.create({
         participants: [userId, recipientId],
         type,
         productId: productId || null,
-        createdBy: userId
-        // Ne pas inclure lastMessage ici
+        createdBy: userId,
+        lastMessageAt: now
       });
     }
 
@@ -314,6 +315,9 @@ export const startConversation = asyncHandler(async (req: Request, res: Response
       );
 
       // Récupérer la conversation mise à jour
+      conversation = await Conversation.findById(conversation._id);
+    } else {
+      // S'assurer que la conversation est bien récupérée même sans message
       conversation = await Conversation.findById(conversation._id);
     }
 

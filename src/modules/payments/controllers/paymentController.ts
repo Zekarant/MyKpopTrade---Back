@@ -14,34 +14,34 @@ import { GdprLogger } from '../../../commons/utils/gdprLogger';
  */
 export const generateConnectUrl = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  
+
   try {
     // Vérifier si le vendeur existe
     const seller = await User.findById(userId);
     if (!seller) {
       return res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
-    
+
     // Générer l'URL de connexion
     const connectUrl = PayPalService.generateConnectUrl(userId);
-    
+
     // Journaliser la demande sans données personnelles
     logger.info('URL de connexion PayPal générée', { userId: userId });
-    
+
     return res.status(200).json({
       success: true,
       connectUrl,
       message: 'URL de connexion PayPal générée avec succès'
     });
   } catch (error) {
-    logger.error('Erreur lors de la génération de l\'URL de connexion PayPal', { 
+    logger.error('Erreur lors de la génération de l\'URL de connexion PayPal', {
       error: error instanceof Error ? error.message : String(error),
       userId: userId.substring(0, 5) + '...'
     });
-    return res.status(500).json({ 
+    return res.status(500).json({
       message: 'Une erreur est survenue lors de la génération de l\'URL de connexion PayPal',
-      error: process.env.NODE_ENV === 'development' 
-        ? (error instanceof Error ? error.message : String(error)) 
+      error: process.env.NODE_ENV === 'development'
+        ? (error instanceof Error ? error.message : String(error))
         : undefined
     });
   }
@@ -52,30 +52,30 @@ export const generateConnectUrl = asyncHandler(async (req: Request, res: Respons
  */
 export const handleConnectCallback = asyncHandler(async (req: Request, res: Response) => {
   const { code, state } = req.query;
-  
+
   if (!code || !state) {
     return res.status(400).redirect(`${process.env.FRONTEND_URL}/account/seller/settings?error=missing_parameters`);
   }
-  
+
   try {
     // Le state contient l'ID du vendeur
     const sellerId = state as string;
-    
+
     // Vérifier que l'utilisateur existe
     const seller = await User.findById(sellerId);
     if (!seller) {
       return res.status(404).redirect(`${process.env.FRONTEND_URL}/account/seller/settings?error=user_not_found`);
     }
-    
+
     // Traiter le callback et obtenir les tokens
     const success = await PayPalService.handleConnectCallback(code as string, sellerId);
-    
+
     if (success) {
       // Journaliser sans données personnelles
       logger.info('Compte PayPal connecté avec succès', {
         userId: sellerId.substring(0, 5) + '...'
       });
-      
+
       // Rediriger vers la page de paramètres du vendeur avec un message de succès
       return res.redirect(`${process.env.FRONTEND_URL}/account/seller/settings?paypal_connected=true`);
     } else {
@@ -83,7 +83,7 @@ export const handleConnectCallback = asyncHandler(async (req: Request, res: Resp
     }
   } catch (error) {
     const sellerId = state as string;
-    logger.error('Erreur lors du callback de connexion PayPal', { 
+    logger.error('Erreur lors du callback de connexion PayPal', {
       error: error instanceof Error ? error.message : String(error),
       userId: sellerId.substring(0, 5) + '...'
     });
@@ -96,35 +96,35 @@ export const handleConnectCallback = asyncHandler(async (req: Request, res: Resp
  */
 export const checkPayPalConnection = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  
+
   try {
     // Récupérer l'utilisateur et ses informations PayPal
     const user = await User.findById(userId).select('paypalConnected paypalTokens.expiresAt');
-    
+
     if (!user) {
       return res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
-    
+
     // Vérifier si les tokens sont expirés
     let tokensValid = false;
     if (user.paypalTokens && user.paypalTokens.expiresAt) {
       tokensValid = new Date(user.paypalTokens.expiresAt) > new Date();
     }
-    
+
     return res.status(200).json({
       success: true,
       connected: user.paypalConnected && tokensValid,
       expiresAt: user.paypalTokens?.expiresAt || null
     });
   } catch (error) {
-    logger.error('Erreur lors de la vérification de la connexion PayPal', { 
+    logger.error('Erreur lors de la vérification de la connexion PayPal', {
       error: error instanceof Error ? error.message : String(error),
       userId: userId.substring(0, 5) + '...'
     });
-    return res.status(500).json({ 
+    return res.status(500).json({
       message: 'Une erreur est survenue lors de la vérification de la connexion PayPal',
-      error: process.env.NODE_ENV === 'development' 
-        ? (error instanceof Error ? error.message : String(error)) 
+      error: process.env.NODE_ENV === 'development'
+        ? (error instanceof Error ? error.message : String(error))
         : undefined
     });
   }
@@ -135,33 +135,33 @@ export const checkPayPalConnection = asyncHandler(async (req: Request, res: Resp
  */
 export const disconnectPayPal = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  
+
   try {
     // Mettre à jour l'utilisateur pour supprimer les informations de connexion PayPal
     const user = await User.findByIdAndUpdate(userId, {
       paypalConnected: false,
       $unset: { paypalTokens: 1 }  // Supprimer complètement les tokens pour respecter le RGPD
     }, { new: true });
-    
+
     if (!user) {
       return res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
-    
+
     logger.info('Compte PayPal déconnecté', { userId: userId.substring(0, 5) + '...' });
-    
+
     return res.status(200).json({
       success: true,
       message: 'Compte PayPal déconnecté avec succès'
     });
   } catch (error) {
-    logger.error('Erreur lors de la déconnexion du compte PayPal', { 
+    logger.error('Erreur lors de la déconnexion du compte PayPal', {
       error: error instanceof Error ? error.message : String(error),
-      userId: userId.substring(0, 5) + '...' 
+      userId: userId.substring(0, 5) + '...'
     });
-    return res.status(500).json({ 
+    return res.status(500).json({
       message: 'Une erreur est survenue lors de la déconnexion du compte PayPal',
-      error: process.env.NODE_ENV === 'development' 
-        ? (error instanceof Error ? error.message : String(error)) 
+      error: process.env.NODE_ENV === 'development'
+        ? (error instanceof Error ? error.message : String(error))
         : undefined
     });
   }
@@ -173,35 +173,64 @@ export const disconnectPayPal = asyncHandler(async (req: Request, res: Response)
 export const initiatePayPalPayment = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const { productId } = req.body;
-  
+
   if (!productId) {
     return res.status(400).json({ message: 'ID du produit requis' });
   }
-  
+
   try {
-    // Vérifier que le produit existe et est disponible
+    // Vérifier s'il existe déjà un paiement en attente pour ce produit et cet utilisateur
+    const existingPayment = await Payment.findOne({
+      product: productId,
+      buyer: userId,
+      status: 'pending'
+    });
+
+    // Si un paiement en attente existe, retourner ses informations
+    if (existingPayment) {
+      logger.info('Paiement en attente récupéré', {
+        paymentId: existingPayment._id,
+        userId: userId.substring(0, 5) + '...'
+      });
+
+      return res.status(200).json({
+        success: true,
+        payment: {
+          id: existingPayment._id,
+          paypalOrderId: existingPayment.paymentIntentId,
+          amount: existingPayment.amount,
+          currency: existingPayment.currency,
+          approvalUrl: existingPayment.approvalUrl
+        },
+        message: 'Paiement en attente récupéré'
+      });
+    }
+
+    // Vérifier que le produit existe et est disponible (ou réservé par l'utilisateur actuel)
     const product = await Product.findOne({
       _id: productId,
-      isAvailable: true,
       isSold: false,
-      isReserved: false
+      $or: [
+        { isAvailable: true, isReserved: false },
+        { isReserved: true, reservedFor: userId }
+      ]
     });
-    
+
     if (!product) {
       return res.status(404).json({ message: 'Produit non trouvé ou non disponible' });
     }
-    
+
     // Vérifier que l'utilisateur n'est pas le vendeur
     if (product.seller.toString() === userId) {
       return res.status(400).json({ message: 'Vous ne pouvez pas acheter votre propre produit' });
     }
-    
+
     // Créer le paiement direct
     const paymentResponse = await PayPalService.createDirectPayment(
-      productId, 
+      productId,
       userId
     );
-    
+
     return res.status(200).json({
       success: true,
       payment: {
@@ -214,15 +243,15 @@ export const initiatePayPalPayment = asyncHandler(async (req: Request, res: Resp
       message: 'Paiement initié avec succès'
     });
   } catch (error) {
-    logger.error('Erreur lors de l\'initiation du paiement PayPal', { 
+    logger.error('Erreur lors de l\'initiation du paiement PayPal', {
       error: error instanceof Error ? error.message : String(error),
       productId,
       userId: userId.substring(0, 5) + '...'
     });
-    return res.status(500).json({ 
+    return res.status(500).json({
       message: 'Une erreur est survenue lors de la création du paiement',
-      error: process.env.NODE_ENV === 'development' 
-        ? (error instanceof Error ? error.message : String(error)) 
+      error: process.env.NODE_ENV === 'development'
+        ? (error instanceof Error ? error.message : String(error))
         : undefined
     });
   }
@@ -234,44 +263,44 @@ export const initiatePayPalPayment = asyncHandler(async (req: Request, res: Resp
 export const capturePayPalPayment = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const { orderId } = req.body;
-  
+
   if (!orderId) {
     return res.status(400).json({ message: 'ID de commande PayPal requis' });
   }
-  
+
   try {
     // Rechercher le paiement dans notre base
-    const payment = await Payment.findOne({ 
+    const payment = await Payment.findOne({
       paymentIntentId: orderId,
       buyer: userId,
       status: 'pending'
     });
-    
+
     if (!payment) {
       return res.status(404).json({ message: 'Paiement non trouvé ou déjà traité' });
     }
-    
+
     // Récupérer le vendeur pour utiliser son token
     const seller = await User.findById(payment.seller);
     if (!seller || !seller.paypalConnected) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: 'Vendeur non disponible ou non connecté à PayPal',
         code: 'SELLER_UNAVAILABLE'
       });
     }
-    
+
     // Capturer le paiement avec les tokens du vendeur
     const captureResult = await PayPalService.captureConnectedPayment(
       orderId,
       payment.seller.toString()
     );
-    
+
     // Mettre à jour le statut du paiement
     payment.status = 'completed';
     payment.completedAt = new Date();
     payment.captureId = captureResult.captureId;
     await payment.save();
-    
+
     // Mettre à jour le produit
     await Product.findByIdAndUpdate(payment.product, {
       isAvailable: false,
@@ -279,7 +308,7 @@ export const capturePayPalPayment = asyncHandler(async (req: Request, res: Respo
       soldAt: new Date(),
       soldTo: payment.buyer
     });
-    
+
     // Notifier le vendeur de manière RGPD compliant (sans données personnelles de l'acheteur)
     await NotificationService.createNotification({
       recipientId: payment.seller,
@@ -294,7 +323,7 @@ export const capturePayPalPayment = asyncHandler(async (req: Request, res: Respo
         currency: payment.currency
       }
     });
-    
+
     return res.status(200).json({
       success: true,
       payment: {
@@ -307,15 +336,15 @@ export const capturePayPalPayment = asyncHandler(async (req: Request, res: Respo
       message: 'Paiement capturé avec succès'
     });
   } catch (error) {
-    logger.error('Erreur lors de la capture du paiement PayPal', { 
+    logger.error('Erreur lors de la capture du paiement PayPal', {
       error: error instanceof Error ? error.message : String(error),
       orderId,
-      userId: userId.substring(0, 5) + '...' 
+      userId: userId.substring(0, 5) + '...'
     });
-    return res.status(500).json({ 
+    return res.status(500).json({
       message: 'Une erreur est survenue lors de la capture du paiement',
-      error: process.env.NODE_ENV === 'development' 
-        ? (error instanceof Error ? error.message : String(error)) 
+      error: process.env.NODE_ENV === 'development'
+        ? (error instanceof Error ? error.message : String(error))
         : undefined
     });
   }
@@ -326,27 +355,27 @@ export const capturePayPalPayment = asyncHandler(async (req: Request, res: Respo
  */
 export const confirmPayPalPayment = asyncHandler(async (req: Request, res: Response) => {
   const { orderId } = req.query;
-  
+
   if (!orderId) {
     return res.redirect(`${process.env.FRONTEND_URL}/payment/error?code=missing_order_id`);
   }
-  
+
   try {
     // Rechercher le paiement
     const payment = await Payment.findOne({ paymentIntentId: orderId });
     if (!payment) {
       return res.redirect(`${process.env.FRONTEND_URL}/payment/error?code=payment_not_found`);
     }
-    
+
     // Récupérer le vendeur
     const seller = await User.findById(payment.seller);
     if (!seller) {
       return res.redirect(`${process.env.FRONTEND_URL}/payment/error?code=seller_unavailable`);
     }
-    
+
     // Vérifier l'état du paiement - Utiliser checkPaymentStatus au lieu de getPaymentStatus
     const paymentStatus = await PayPalService.checkPaymentStatus(orderId as string);
-    
+
     if (paymentStatus === 'APPROVED') {
       // Si approuvé mais pas encore capturé, rediriger vers la page de confirmation
       return res.redirect(
@@ -358,7 +387,7 @@ export const confirmPayPalPayment = asyncHandler(async (req: Request, res: Respo
         payment.status = 'completed';
         payment.completedAt = new Date();
         await payment.save();
-        
+
         // Mettre à jour le produit
         await Product.findByIdAndUpdate(payment.product, {
           isAvailable: false,
@@ -367,7 +396,7 @@ export const confirmPayPalPayment = asyncHandler(async (req: Request, res: Respo
           soldTo: payment.buyer
         });
       }
-      
+
       return res.redirect(`${process.env.FRONTEND_URL}/payment/success?paymentId=${payment._id}`);
     } else {
       // Autres statuts
@@ -376,7 +405,7 @@ export const confirmPayPalPayment = asyncHandler(async (req: Request, res: Respo
       );
     }
   } catch (error) {
-    logger.error('Erreur lors de la confirmation du paiement', { 
+    logger.error('Erreur lors de la confirmation du paiement', {
       error: error instanceof Error ? error.message : String(error),
       orderId: String(orderId)
     });
@@ -396,47 +425,47 @@ export const handleWebhook = asyncHandler(async (req: Request, res: Response) =>
   try {
     // Récupérer l'événement du corps de la requête
     const event = req.body;
-    
+
     // Vérifier que l'événement est valide
     if (!event || !event.event_type) {
       logger.warn('Webhook PayPal reçu avec un format invalide');
       return res.status(400).json({ message: 'Format de webhook invalide' });
     }
-    
+
     // Journaliser l'événement reçu pour le débogage (sans données sensibles)
     logger.debug('Webhook PayPal reçu', {
       eventType: event.event_type,
       eventId: event.id,
       resourceType: event.resource_type || 'non spécifié'
     });
-    
+
     // En environnement de production, vérifier l'authenticité du webhook
     if (process.env.NODE_ENV === 'production') {
       // La vérification de la signature serait implémentée ici
       // Pour l'instant, on accepte tous les webhooks en développement
       logger.debug('Vérification de la signature du webhook ignorée en développement');
     }
-    
+
     // Traiter l'événement avec le service PayPal
     await PayPalService.handleWebhook(event);
-    
+
     // Renvoyer un succès à PayPal pour éviter les retentatives
-    return res.status(200).json({ 
+    return res.status(200).json({
       received: true,
       eventType: event.event_type
     });
   } catch (error) {
     // En cas d'erreur, journaliser mais renvoyer quand même un succès à PayPal
     // pour éviter les retentatives (les erreurs seront traitées en interne)
-    logger.error('Erreur lors du traitement du webhook PayPal', { 
+    logger.error('Erreur lors du traitement du webhook PayPal', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined
     });
-    
+
     // Renvoyer 200 OK même en cas d'erreur pour éviter les retentatives de PayPal
-    return res.status(200).json({ 
+    return res.status(200).json({
       received: true,
-      processingError: process.env.NODE_ENV === 'development' 
+      processingError: process.env.NODE_ENV === 'development'
         ? (error instanceof Error ? error.message : String(error))
         : 'Une erreur est survenue lors du traitement'
     });
@@ -469,15 +498,15 @@ export const checkPaymentStatus = asyncHandler(async (req: Request, res: Respons
     }
 
     // Vérifier si l'utilisateur est autorisé à accéder à ce paiement
-    const isAuthorized = 
-      payment.buyer.toString() === userId || 
+    const isAuthorized =
+      payment.buyer.toString() === userId ||
       payment.seller.toString() === userId;
 
     // Si l'utilisateur n'est pas autorisé, vérifier s'il est admin
     if (!isAuthorized) {
       // Récupérer l'utilisateur pour vérifier son rôle
       const user = await User.findById(userId).select('role');
-      
+
       if (!user || user.role !== 'admin') {
         // Journaliser la tentative d'accès non autorisée
         GdprLogger.logPaymentAction('unauthorized_access_attempt', {
@@ -485,7 +514,7 @@ export const checkPaymentStatus = asyncHandler(async (req: Request, res: Respons
           targetPaymentBuyer: payment.buyer.toString(),
           targetPaymentSeller: payment.seller.toString()
         }, userId);
-        
+
         return res.status(403).json({
           success: false,
           message: 'Vous n\'êtes pas autorisé à accéder à ce paiement',
@@ -506,7 +535,7 @@ export const checkPaymentStatus = asyncHandler(async (req: Request, res: Respons
     });
   } catch (error) {
     GdprLogger.logPaymentError(error, userId, { action: 'check_payment_status', paymentId });
-    
+
     return res.status(500).json({
       success: false,
       message: 'Une erreur est survenue lors de la vérification du statut du paiement'
@@ -549,14 +578,14 @@ export const refundPayment = asyncHandler(async (req: Request, res: Response) =>
       // Si l'utilisateur n'est pas le vendeur, vérifier s'il est admin
       const user = await User.findById(userId).select('role');
       isAdmin = user && user.role === 'admin';
-      
+
       if (!isAdmin) {
         // Journaliser la tentative non autorisée
         GdprLogger.logPaymentAction('unauthorized_refund_attempt', {
           paymentId,
           targetPaymentSeller: payment.seller.toString()
         }, userId);
-        
+
         return res.status(403).json({
           success: false,
           message: 'Seul le vendeur ou un administrateur peut effectuer un remboursement',
@@ -580,11 +609,11 @@ export const refundPayment = asyncHandler(async (req: Request, res: Response) =>
 export const getMyPayments = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const { role = 'all', status, page = 1, limit = 10 } = req.query;
-  
+
   try {
     // Construire le filtre
     const filter: any = {};
-    
+
     // Filtrer par rôle (acheteur/vendeur)
     if (role === 'buyer') {
       filter.buyer = userId;
@@ -594,17 +623,17 @@ export const getMyPayments = asyncHandler(async (req: Request, res: Response) =>
       // Par défaut, montrer tous les paiements de l'utilisateur
       filter.$or = [{ buyer: userId }, { seller: userId }];
     }
-    
+
     // Filtrer par statut si spécifié
     if (status) {
       filter.status = status;
     }
-    
+
     // Pagination
     const pageNum = parseInt(String(page), 10) || 1;
     const limitNum = parseInt(String(limit), 10) || 10;
     const skip = (pageNum - 1) * limitNum;
-    
+
     // Récupérer les paiements avec les relations
     const payments = await Payment.find(filter)
       .populate('product', 'title images price currency')
@@ -613,34 +642,34 @@ export const getMyPayments = asyncHandler(async (req: Request, res: Response) =>
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum);
-    
+
     // Compter le total pour la pagination
     const total = await Payment.countDocuments(filter);
-    
+
     // Traiter les données pour la réponse (conformité RGPD)
     const processedPayments = payments.map(payment => {
       const paymentObj = payment.toObject();
-      
+
       // Supprimer les données techniques et personnelles sensibles
       delete paymentObj.ipAddress;
       delete paymentObj.userAgent;
-      
+
       // Déchiffrer les métadonnées si présentes
       if (paymentObj.paymentMetadata) {
         try {
           (paymentObj as any).metadata = JSON.parse(EncryptionService.decrypt(paymentObj.paymentMetadata));
           delete paymentObj.paymentMetadata;
         } catch (error) {
-          logger.warn('Erreur lors du déchiffrement des métadonnées', { 
-            error: error instanceof Error ? error.message : String(error), 
-            paymentId: payment._id 
+          logger.warn('Erreur lors du déchiffrement des métadonnées', {
+            error: error instanceof Error ? error.message : String(error),
+            paymentId: payment._id
           });
         }
       }
-      
+
       return paymentObj;
     });
-    
+
     return res.status(200).json({
       success: true,
       data: processedPayments,
@@ -652,14 +681,14 @@ export const getMyPayments = asyncHandler(async (req: Request, res: Response) =>
       }
     });
   } catch (error) {
-    logger.error('Erreur lors de la récupération des paiements', { 
+    logger.error('Erreur lors de la récupération des paiements', {
       error: error instanceof Error ? error.message : String(error),
       userId: userId.substring(0, 5) + '...'
     });
-    return res.status(500).json({ 
+    return res.status(500).json({
       message: 'Une erreur est survenue lors de la récupération des paiements',
-      error: process.env.NODE_ENV === 'development' 
-        ? (error instanceof Error ? error.message : String(error)) 
+      error: process.env.NODE_ENV === 'development'
+        ? (error instanceof Error ? error.message : String(error))
         : undefined
     });
   }
@@ -697,15 +726,15 @@ export const getPayment = asyncHandler(async (req: Request, res: Response) => {
 
     // Vérifier si l'utilisateur est autorisé à accéder à ce paiement
     // L'utilisateur doit être soit l'acheteur, soit le vendeur, soit un administrateur
-    const isAuthorized = 
-      payment.buyer._id.toString() === userId || 
+    const isAuthorized =
+      payment.buyer._id.toString() === userId ||
       payment.seller._id.toString() === userId;
 
     // Si l'utilisateur n'est pas autorisé, vérifier s'il est admin
     if (!isAuthorized) {
       // Récupérer l'utilisateur pour vérifier son rôle
       const user = await User.findById(userId).select('role');
-      
+
       if (!user || user.role !== 'admin') {
         // Journaliser la tentative d'accès non autorisée
         GdprLogger.logPaymentAction('unauthorized_access_attempt', {
@@ -713,7 +742,7 @@ export const getPayment = asyncHandler(async (req: Request, res: Response) => {
           targetPaymentBuyer: payment.buyer._id.toString(),
           targetPaymentSeller: payment.seller._id.toString()
         }, userId);
-        
+
         return res.status(403).json({
           success: false,
           message: 'Vous n\'êtes pas autorisé à accéder à ce paiement',
@@ -733,7 +762,7 @@ export const getPayment = asyncHandler(async (req: Request, res: Response) => {
     });
   } catch (error) {
     GdprLogger.logPaymentError(error, userId, { action: 'get_payment_details', paymentId });
-    
+
     return res.status(500).json({
       success: false,
       message: 'Une erreur est survenue lors de la récupération du paiement'
