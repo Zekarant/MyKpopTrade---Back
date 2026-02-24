@@ -14,6 +14,57 @@ import {
 import { LeanConversation } from '../types/conversationTypes';
 
 /**
+ * Retourne la dernière offre pertinente de l'historique :
+ * la plus récente acceptée si elle existe, sinon la toute dernière.
+ */
+function resolveLatestOffer(offerHistory: any[]): any | null {
+  if (!offerHistory.length) return null;
+  const accepted = offerHistory.filter(o => o.status === 'accepted');
+  return accepted.length > 0
+    ? accepted[accepted.length - 1]
+    : offerHistory[offerHistory.length - 1];
+}
+
+/**
+ * Crée un message système pour une action d'offre, puis un message texte optionnel,
+ * et met à jour le champ lastMessage / lastMessageAt de la conversation.
+ */
+async function createOfferMessages(
+  conversationId: any,
+  senderId: string,
+  systemContent: string,
+  contentType: 'offer' | 'counter_offer' | 'system_notification',
+  optionalUserMessage?: string
+): Promise<void> {
+  const systemMessage = await Message.create({
+    conversation: conversationId,
+    sender: senderId,
+    content: systemContent,
+    contentType,
+    isSystemMessage: true,
+    readBy: [senderId]
+  });
+
+  let lastMessageId: any = systemMessage._id;
+
+  if (optionalUserMessage && optionalUserMessage.trim()) {
+    const userMessage = await Message.create({
+      conversation: conversationId,
+      sender: senderId,
+      content: optionalUserMessage,
+      contentType: 'text',
+      readBy: [senderId]
+    });
+    lastMessageId = userMessage._id;
+  }
+
+  await Conversation.findByIdAndUpdate(
+    conversationId,
+    { lastMessage: lastMessageId, lastMessageAt: new Date() }
+  );
+}
+
+/**
  * Récupère une conversation spécifique avec ses messages
  */
 export const getConversation = asyncHandler(async (req: Request, res: Response) => {
@@ -80,7 +131,7 @@ export const getConversation = asyncHandler(async (req: Request, res: Response) 
     const totalMessages = await Message.countDocuments(messageQuery);
 
     const messages = await Message.find(messageQuery)
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .populate('sender', 'username profilePicture')
@@ -113,16 +164,7 @@ export const getConversation = asyncHandler(async (req: Request, res: Response) 
         currentStatus: conversation.type === 'negotiation'
           ? conversation.negotiation?.status
           : conversation.payWhatYouWant?.status,
-        latestOffer: (() => {
-          if (!conversation.offerHistory.length) return null;
-          // Cherche la dernière offre acceptée
-          const accepted = conversation.offerHistory.filter(o => o.status === 'accepted');
-          if (accepted.length > 0) {
-            return accepted[accepted.length - 1];
-          }
-          // Sinon, retourne la plus récente
-          return conversation.offerHistory[conversation.offerHistory.length - 1];
-        })()
+        latestOffer: resolveLatestOffer(conversation.offerHistory)
       } : null,
       pagination: {
         total: totalMessages,
@@ -454,38 +496,11 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
         }
       );
 
-      // Créer un message système pour la mise à jour de l'offre
-      const systemMessage = await Message.create({
-        conversation: conversation._id,
-        sender: userId,
-        content: oldOffer
-          ? `Offre mise à jour de ${oldOffer} ${product.currency} à ${initialOffer} ${product.currency}`
-          : `Nouvelle offre de ${initialOffer} ${product.currency}`,
-        contentType: 'offer',
-        isSystemMessage: true,
-        readBy: [userId]
-      });
+      const systemContent = oldOffer
+        ? `Offre mise à jour de ${oldOffer} ${product.currency} à ${initialOffer} ${product.currency}`
+        : `Nouvelle offre de ${initialOffer} ${product.currency}`;
 
-      // Créer un message avec le texte de l'acheteur si fourni
-      let lastMessageId = systemMessage._id;
-
-      if (message && message.trim()) {
-        const userMessage = await Message.create({
-          conversation: conversation._id,
-          sender: userId,
-          content: message,
-          contentType: 'text',
-          readBy: [userId]
-        });
-
-        lastMessageId = userMessage._id;
-      }
-
-      // Mettre à jour le dernier message
-      await Conversation.findByIdAndUpdate(
-        conversation._id,
-        { lastMessage: lastMessageId, lastMessageAt: new Date() }
-      );
+      await createOfferMessages(conversation._id, userId, systemContent, 'offer', message);
 
     } else {
       conversation = await Conversation.create({
@@ -510,35 +525,12 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
         }]
       });
 
-      // Créer un message système pour l'offre initiale
-      const systemMessage = await Message.create({
-        conversation: conversation._id,
-        sender: userId,
-        content: `Offre initiale de ${initialOffer} ${product.currency}`,
-        contentType: 'offer',
-        isSystemMessage: true,
-        readBy: [userId]
-      });
-
-      // Créer un message avec le texte de l'acheteur si fourni
-      let lastMessageId = systemMessage._id;
-
-      if (message && message.trim()) {
-        const userMessage = await Message.create({
-          conversation: conversation._id,
-          sender: userId,
-          content: message,
-          contentType: 'text',
-          readBy: [userId]
-        });
-
-        lastMessageId = userMessage._id;
-      }
-
-      // Mettre à jour la conversation avec le dernier message
-      await Conversation.findByIdAndUpdate(
+      await createOfferMessages(
         conversation._id,
-        { lastMessage: lastMessageId, lastMessageAt: new Date() }
+        userId,
+        `Offre initiale de ${initialOffer} ${product.currency}`,
+        'offer',
+        message
       );
 
       // Ajouter la négociation au produit
@@ -740,36 +732,8 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
     productDoc.negotiations[negotiationIndex] = negotiation;
     await productDoc.save();
 
-    // Créer un message système pour l'action
-    const systemMessage = await Message.create({
-      conversation: conversationId,
-      sender: userId,
-      content: statusMessage,
-      contentType,
-      isSystemMessage: true,
-      readBy: [userId]
-    });
-
-    // Créer un message avec le texte du vendeur si fourni ET si ce n'est pas déjà inclus dans le refus
-    let lastMessageId = systemMessage._id;
-
-    if (action !== 'reject' && message && message.trim()) {
-      const userMessage = await Message.create({
-        conversation: conversationId,
-        sender: userId,
-        content: message,
-        contentType: 'text',
-        readBy: [userId]
-      });
-
-      lastMessageId = userMessage._id;
-    }
-
-    // Mettre à jour la conversation avec le dernier message
-    await Conversation.findByIdAndUpdate(
-      conversationId,
-      { lastMessage: lastMessageId, lastMessageAt: new Date() }
-    );
+    const optionalMsg = action !== 'reject' ? message : undefined;
+    await createOfferMessages(conversationId, userId, statusMessage, contentType as any, optionalMsg);
 
     // Récupérer la conversation mise à jour
     const updatedConversation = await Conversation.findById(conversationId)
@@ -778,11 +742,16 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
       .populate('lastMessage')
       .populate('offerHistory.offeredBy', 'username profilePicture');
 
+    const freshProduct = await Product.findById(product._id).lean() as any;
+    const updatedNegotiation = freshProduct?.negotiations?.find(
+      (n: any) => n.conversationId?.toString() === conversationId
+    );
+
     return res.status(200).json({
       message: 'Réponse à la négociation envoyée avec succès',
       action,
       conversation: updatedConversation,
-      negotiation: productDoc.negotiations[negotiationIndex]
+      negotiation: updatedNegotiation
     });
   } catch (error) {
     logger.error('Erreur lors de la réponse à une négociation', {

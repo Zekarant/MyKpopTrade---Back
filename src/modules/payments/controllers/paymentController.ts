@@ -179,33 +179,6 @@ export const initiatePayPalPayment = asyncHandler(async (req: Request, res: Resp
   }
 
   try {
-    // Vérifier s'il existe déjà un paiement en attente pour ce produit et cet utilisateur
-    const existingPayment = await Payment.findOne({
-      product: productId,
-      buyer: userId,
-      status: 'pending'
-    });
-
-    // Si un paiement en attente existe, retourner ses informations
-    if (existingPayment) {
-      logger.info('Paiement en attente récupéré', {
-        paymentId: existingPayment._id,
-        userId: userId.substring(0, 5) + '...'
-      });
-
-      return res.status(200).json({
-        success: true,
-        payment: {
-          id: existingPayment._id,
-          paypalOrderId: existingPayment.paymentIntentId,
-          amount: existingPayment.amount,
-          currency: existingPayment.currency,
-          approvalUrl: existingPayment.approvalUrl
-        },
-        message: 'Paiement en attente récupéré'
-      });
-    }
-
     // Vérifier que le produit existe et est disponible (ou réservé par l'utilisateur actuel)
     const product = await Product.findOne({
       _id: productId,

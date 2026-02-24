@@ -170,7 +170,12 @@ export class PayPalService {
         }
       });
 
-      // Créer l'enregistrement de paiement
+      // Trouver le lien d'approbation
+      const approvalUrl = response.data.links.find(
+        (link: any) => link.rel === 'approve'
+      )?.href;
+
+      // Créer l'enregistrement de paiement en persistant l'approvalUrl
       const payment = new Payment({
         product: productId,
         buyer: buyerId,
@@ -179,6 +184,7 @@ export class PayPalService {
         platformFee: 0, // Pas de commission dans ce modèle
         currency: product.currency || 'EUR',
         paymentIntentId: response.data.id,
+        approvalUrl,
         status: 'pending',
         paymentMethod: 'paypal',
         paymentType: 'direct'
@@ -192,11 +198,6 @@ export class PayPalService {
         reservedFor: buyerId,
         reservedUntil: new Date(Date.now() + 60 * 60 * 1000) // 1 heure
       });
-
-      // Trouver le lien d'approbation
-      const approvalUrl = response.data.links.find(
-        (link: any) => link.rel === 'approve'
-      )?.href;
 
       return {
         orderId: response.data.id,

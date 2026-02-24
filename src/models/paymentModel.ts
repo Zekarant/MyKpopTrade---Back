@@ -46,6 +46,7 @@ export interface IPayment extends Document {
   isAnonymized: boolean;
   completedAt?: Date;
   // Ajout des propriétés pour les remboursements
+  approvalUrl?: string;
   refundAmount?: number;
   refundReason?: string;
   refundedAt?: Date;
@@ -96,6 +97,9 @@ const paymentSchema: Schema = new Schema({
     type: String
   },
   captureIdEncrypted: {
+    type: String
+  },
+  approvalUrl: {
     type: String
   },
   status: {
