@@ -29,7 +29,7 @@ export const getMyNotifications = asyncHandler(async (req: Request, res: Respons
  */
 export const markNotificationAsRead = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const { id } = req.params;
+  const id = req.params.id as string;
   
   try {
     const notification = await NotificationService.markAsRead(id, userId);
@@ -63,7 +63,7 @@ export const markAllNotificationsAsRead = asyncHandler(async (req: Request, res:
  */
 export const deleteNotification = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const { id } = req.params;
+  const id = req.params.id as string;
   
   try {
     await NotificationService.deleteNotification(id, userId);

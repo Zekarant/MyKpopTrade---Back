@@ -10,7 +10,7 @@ import logger from '../../../commons/utils/logger';
  * Télécharger une image pour un produit
  */
 export const uploadProductImage = asyncHandler(async (req: Request, res: Response) => {
-  const { productId } = req.params;
+  const productId = req.params.productId as string;
   const userId = (req.user as any).id;
   
   if (!mongoose.Types.ObjectId.isValid(productId)) {
@@ -82,7 +82,7 @@ export const uploadProductImage = asyncHandler(async (req: Request, res: Respons
  * Supprimer une image d'un produit
  */
 export const deleteProductImage = asyncHandler(async (req: Request, res: Response) => {
-  const { productId } = req.params;
+  const productId = req.params.productId as string;
   const { imageIndex } = req.body;
   const userId = (req.user as any).id;
   
@@ -156,7 +156,7 @@ export const deleteProductImage = asyncHandler(async (req: Request, res: Respons
  * Réorganiser les images d'un produit
  */
 export const reorderProductImages = asyncHandler(async (req: Request, res: Response) => {
-  const { productId } = req.params;
+  const productId = req.params.productId as string;
   const { imageOrder } = req.body;
   const userId = (req.user as any).id;
   

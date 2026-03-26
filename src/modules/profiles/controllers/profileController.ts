@@ -13,7 +13,7 @@ import mongoose from 'mongoose';
  * Récupérer le profil public d'un utilisateur
  */
 export const getPublicProfile = asyncHandler(async (req: Request, res: Response) => {
-  const { identifier } = req.params;
+  const identifier = req.params.identifier as string;
   
   const isValidObjectId = mongoose.Types.ObjectId.isValid(identifier);
   

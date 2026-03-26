@@ -128,7 +128,7 @@ export const getAlbums = asyncHandler(async (req: Request, res: Response) => {
  * Récupérer un album par son ID avec produits disponibles
  */
 export const getAlbumById = asyncHandler(async (req: Request, res: Response) => {
-  const { albumId } = req.params;
+  const albumId = req.params.albumId as string;
   
   if (!mongoose.Types.ObjectId.isValid(albumId)) {
     return res.status(400).json({ message: 'ID d\'album invalide' });
@@ -182,7 +182,7 @@ export const getAlbumById = asyncHandler(async (req: Request, res: Response) => 
  * Récupérer les albums d'un groupe
  */
 export const getAlbumsByGroup = asyncHandler(async (req: Request, res: Response) => {
-  const { groupId } = req.params;
+  const groupId = req.params.groupId as string;
   
   if (!mongoose.Types.ObjectId.isValid(groupId)) {
     return res.status(400).json({ message: 'ID de groupe invalide' });
@@ -304,7 +304,7 @@ export const searchAlbums = asyncHandler(async (req: Request, res: Response) => 
  * Mettre à jour un album (Admin uniquement)
  */
 export const updateAlbum = asyncHandler(async (req: Request, res: Response) => {
-  const { albumId } = req.params;
+  const albumId = req.params.albumId as string;
   const updates = req.body;
   
   if (!mongoose.Types.ObjectId.isValid(albumId)) {
@@ -360,7 +360,7 @@ export const updateAlbum = asyncHandler(async (req: Request, res: Response) => {
  * Supprimer un album (Admin uniquement)
  */
 export const deleteAlbum = asyncHandler(async (req: Request, res: Response) => {
-  const { albumId } = req.params;
+  const albumId = req.params.albumId as string;
   
   if (!mongoose.Types.ObjectId.isValid(albumId)) {
     return res.status(400).json({ message: 'ID d\'album invalide' });

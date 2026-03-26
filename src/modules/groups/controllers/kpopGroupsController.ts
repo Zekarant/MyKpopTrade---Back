@@ -271,7 +271,7 @@ export const getPopularGroups = asyncHandler(async (req: Request, res: Response)
  * Récupérer un groupe K-pop par son ID avec ses albums et statistiques
  */
 export const getKpopGroupById = asyncHandler(async (req: Request, res: Response) => {
-  const { groupId } = req.params;
+  const groupId = req.params.groupId as string;
   
   if (!mongoose.Types.ObjectId.isValid(groupId)) {
     return res.status(400).json({ message: 'ID de groupe invalide' });
@@ -344,7 +344,7 @@ export const getKpopGroupById = asyncHandler(async (req: Request, res: Response)
  * Mettre à jour un groupe K-pop (Admin uniquement)
  */
 export const updateKpopGroup = asyncHandler(async (req: Request, res: Response) => {
-  const { groupId } = req.params;
+  const groupId = req.params.groupId as string;
   const updates = req.body;
   
   if (!mongoose.Types.ObjectId.isValid(groupId)) {
@@ -399,7 +399,7 @@ export const updateKpopGroup = asyncHandler(async (req: Request, res: Response) 
  * Supprimer un groupe (Admin uniquement)
  */
 export const deleteKpopGroup = asyncHandler(async (req: Request, res: Response) => {
-  const { groupId } = req.params;
+  const groupId = req.params.groupId as string;
   
   if (!mongoose.Types.ObjectId.isValid(groupId)) {
     return res.status(400).json({ message: 'ID de groupe invalide' });

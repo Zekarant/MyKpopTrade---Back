@@ -131,7 +131,8 @@ export const getUserReports = asyncHandler(async (req: Request, res: Response) =
  */
 export const checkUserReport = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const { targetType, targetId } = req.params;
+  const targetType = req.params.targetType as string;
+  const targetId = req.params.targetId as string;
   
   if (!targetType || !targetId) {
     return res.status(400).json({ 
@@ -212,7 +213,7 @@ export const getAllReports = asyncHandler(async (req: Request, res: Response) =>
  * Mettre à jour le statut d'un signalement (admin)
  */
 export const updateReportStatus = asyncHandler(async (req: Request, res: Response) => {
-  const { reportId } = req.params;
+  const reportId = req.params.reportId as string;
   const { status, adminNotes } = req.body;
   const adminId = (req.user as any).id;
   

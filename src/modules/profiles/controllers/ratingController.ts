@@ -12,7 +12,7 @@ import logger from '../../../commons/utils/logger';
  * Récupérer les évaluations d'un utilisateur
  */
 export const getUserRatings = asyncHandler(async (req: Request, res: Response) => {
-  const { userId } = req.params;
+  const userId = req.params.userId as string;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 10;
   const type = req.query.type as string;
@@ -248,7 +248,7 @@ export const createRating = asyncHandler(async (req: Request, res: Response) => 
  * Signaler une évaluation
  */
 export const reportRating = asyncHandler(async (req: Request, res: Response) => {
-  const { ratingId } = req.params;
+  const ratingId = req.params.ratingId as string;
   const userId = (req.user as any).id;
   const { reason } = req.body;
   
@@ -279,7 +279,7 @@ export const reportRating = asyncHandler(async (req: Request, res: Response) => 
  * Supprimer une image d'un avis
  */
 export const deleteRatingImage = asyncHandler(async (req: Request, res: Response) => {
-  const { ratingId } = req.params;
+  const ratingId = req.params.ratingId as string;
   const { imageIndex } = req.body;
   const userId = (req.user as any).id;
   
@@ -344,7 +344,7 @@ export const deleteRatingImage = asyncHandler(async (req: Request, res: Response
  * Ajouter une image à un avis existant
  */
 export const addRatingImage = asyncHandler(async (req: Request, res: Response) => {
-  const { ratingId } = req.params;
+  const ratingId = req.params.ratingId as string;
   const userId = (req.user as any).id;
   
   if (!req.file) {
@@ -412,7 +412,7 @@ export const addRatingImage = asyncHandler(async (req: Request, res: Response) =
  * Répond à une évaluation (uniquement pour le destinataire de l'évaluation)
  */
 export const respondToRating = asyncHandler(async (req: Request, res: Response) => {
-  const { ratingId } = req.params;
+  const ratingId = req.params.ratingId as string;
   const userId = (req.user as any).id;
   const { response } = req.body;
   
@@ -467,7 +467,7 @@ export const respondToRating = asyncHandler(async (req: Request, res: Response) 
  * Modifier sa réponse à une évaluation
  */
 export const updateRatingResponse = asyncHandler(async (req: Request, res: Response) => {
-  const { ratingId } = req.params;
+  const ratingId = req.params.ratingId as string;
   const userId = (req.user as any).id;
   const { response } = req.body;
   
@@ -520,7 +520,7 @@ export const updateRatingResponse = asyncHandler(async (req: Request, res: Respo
  * Supprimer sa réponse à une évaluation
  */
 export const deleteRatingResponse = asyncHandler(async (req: Request, res: Response) => {
-  const { ratingId } = req.params;
+  const ratingId = req.params.ratingId as string;
   const userId = (req.user as any).id;
   
   const rating = await Rating.findById(ratingId);

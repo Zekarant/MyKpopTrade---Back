@@ -53,7 +53,7 @@ export const upload = multer({
  */
 export const sendNewMessage = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const conversationId = req.params.id;
+  const conversationId = req.params.id as string;
   const { content, contentType = 'text' } = req.body;
   
   // Validation du contenu
@@ -138,7 +138,7 @@ export const sendNewMessage = asyncHandler(async (req: Request, res: Response) =
  */
 export const markConversationAsRead = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const conversationId = req.params.id;
+  const conversationId = req.params.id as string;
   
   try {
     // Vérifier l'accès avec le service utilitaire
@@ -164,7 +164,7 @@ export const markConversationAsRead = asyncHandler(async (req: Request, res: Res
  */
 export const markMessageAsRead = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const messageId = req.params.messageId;
+  const messageId = req.params.messageId as string;
   
   try {
     const message = await Message.findById(messageId);
@@ -203,7 +203,7 @@ export const markMessageAsRead = asyncHandler(async (req: Request, res: Response
  */
 export const deleteMessage = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const messageId = req.params.id;
+  const messageId = req.params.id as string;
   
   try {
     // Récupérer le message et vérifier qu'il appartient à l'utilisateur
@@ -257,8 +257,8 @@ export const deleteMessage = asyncHandler(async (req: Request, res: Response) =>
  */
 export const getMessageAttachment = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const messageId = req.params.messageId;
-  const attachmentName = req.params.attachment;
+  const messageId = req.params.messageId as string;
+  const attachmentName = req.params.attachment as string;
   
   try {
     // Vérifier que l'utilisateur a accès au message

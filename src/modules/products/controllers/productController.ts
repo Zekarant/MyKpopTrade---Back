@@ -134,7 +134,7 @@ export const createProduct = asyncHandler(async (req: Request, res: Response) =>
  * Récupérer un produit par son ID
  */
 export const getProductById = asyncHandler(async (req: Request, res: Response) => {
-  const { productId } = req.params;
+  const productId = req.params.productId as string;
 
   if (!mongoose.Types.ObjectId.isValid(productId)) {
     return res.status(400).json({ message: 'ID de produit invalide' });
@@ -334,7 +334,7 @@ export const getProducts = asyncHandler(async (req: Request, res: Response) => {
  * Mettre à jour un produit
  */
 export const updateProduct = asyncHandler(async (req: Request, res: Response) => {
-  const { productId } = req.params;
+  const productId = req.params.productId as string;
   const userId = (req.user as any).id;
 
   if (!mongoose.Types.ObjectId.isValid(productId)) {
@@ -395,7 +395,7 @@ export const updateProduct = asyncHandler(async (req: Request, res: Response) =>
  * Supprimer un produit
  */
 export const deleteProduct = asyncHandler(async (req: Request, res: Response) => {
-  const { productId } = req.params;
+  const productId = req.params.productId as string;
   const userId = (req.user as any).id;
 
   if (!mongoose.Types.ObjectId.isValid(productId)) {
@@ -435,7 +435,7 @@ export const deleteProduct = asyncHandler(async (req: Request, res: Response) =>
  * Marquer un produit comme vendu
  */
 export const markProductAsSold = asyncHandler(async (req: Request, res: Response) => {
-  const { productId } = req.params;
+  const productId = req.params.productId as string;
   const userId = (req.user as any).id;
   const { buyerId } = req.body;
 
@@ -490,7 +490,7 @@ export const markProductAsSold = asyncHandler(async (req: Request, res: Response
  * Ajouter/Retirer un produit des favoris
  */
 export const toggleFavorite = asyncHandler(async (req: Request, res: Response) => {
-  const { productId } = req.params;
+  const productId = req.params.productId as string;
   const userId = (req.user as any).id;
 
   if (!mongoose.Types.ObjectId.isValid(productId)) {

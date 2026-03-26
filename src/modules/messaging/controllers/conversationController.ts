@@ -69,7 +69,7 @@ async function createOfferMessages(
  */
 export const getConversation = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const conversationId = req.params.id;
+  const conversationId = req.params.id as string;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
 
@@ -584,7 +584,7 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
  */
 export const respondToNegotiation = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const conversationId = req.params.id;
+  const conversationId = req.params.id as string;
   const { action, counterOffer, message } = req.body;
 
   // Validation des entrées
@@ -806,7 +806,7 @@ export const initiatePayWhatYouWant = asyncHandler(async (req: Request, res: Res
  */
 export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const conversationId = req.params.id;
+  const conversationId = req.params.id as string;
   const { proposedPrice, message } = req.body;
 
   if (!proposedPrice || isNaN(parseFloat(proposedPrice)) || parseFloat(proposedPrice) <= 0) {
@@ -836,7 +836,7 @@ export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res:
  */
 export const getConversationMedia = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const conversationId = req.params.id;
+  const conversationId = req.params.id as string;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
   const type = req.query.type as string;
@@ -889,7 +889,7 @@ export const getConversationMedia = asyncHandler(async (req: Request, res: Respo
  */
 export const deleteConversation = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const conversationId = req.params.id;
+  const conversationId = req.params.id as string;
 
   try {
     // Vérifier l'accès
@@ -933,7 +933,7 @@ export const deleteConversation = asyncHandler(async (req: Request, res: Respons
  */
 export const archiveConversation = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const conversationId = req.params.id;
+  const conversationId = req.params.id as string;
 
   try {
     // Vérifier l'accès
@@ -970,7 +970,7 @@ export const archiveConversation = asyncHandler(async (req: Request, res: Respon
  */
 export const unarchiveConversation = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const conversationId = req.params.id;
+  const conversationId = req.params.id as string;
 
   try {
     // Vérifier l'accès
@@ -1007,7 +1007,7 @@ export const unarchiveConversation = asyncHandler(async (req: Request, res: Resp
  */
 export const toggleFavoriteConversation = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const conversationId = req.params.id;
+  const conversationId = req.params.id as string;
 
   try {
     // Vérifier l'accès
@@ -1061,7 +1061,7 @@ export const toggleFavoriteConversation = asyncHandler(async (req: Request, res:
  */
 export const getConversationOffers = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const conversationId = req.params.id;
+  const conversationId = req.params.id as string;
 
   try {
     await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
@@ -1124,7 +1124,7 @@ export const getConversationOffers = asyncHandler(async (req: Request, res: Resp
  */
 export const cancelOffer = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const conversationId = req.params.id;
+  const conversationId = req.params.id as string;
 
   try {
     // Récupérer la conversation

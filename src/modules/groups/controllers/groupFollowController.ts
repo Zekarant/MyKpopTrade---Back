@@ -40,7 +40,7 @@ interface UserFollowedGroupsResponse {
  * Suivre ou arrêter de suivre un groupe
  */
 export const toggleFollowGroup = asyncHandler(async (req: AuthenticatedRequest, res: Response<FollowResponse>) => {
-  const { groupId } = req.params;
+  const groupId = req.params.groupId as string;
   const userId = req.user?.id;
   
   if (!userId) {
@@ -194,7 +194,7 @@ export const toggleFollowGroup = asyncHandler(async (req: AuthenticatedRequest, 
  * Vérifier si l'utilisateur suit un groupe
  */
 export const getFollowStatus = asyncHandler(async (req: AuthenticatedRequest, res: Response<FollowStatusResponse>) => {
-  const { groupId } = req.params;
+  const groupId = req.params.groupId as string;
   const userId = req.user?.id;
   
   if (!userId) {
@@ -334,7 +334,7 @@ export const getUserFollowedGroups = asyncHandler(async (req: AuthenticatedReque
  * Récupérer les followers d'un groupe
  */
 export const getGroupFollowers = asyncHandler(async (req: Request, res: Response) => {
-  const { groupId } = req.params;
+  const groupId = req.params.groupId as string;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
   
