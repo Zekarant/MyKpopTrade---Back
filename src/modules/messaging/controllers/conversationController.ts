@@ -735,23 +735,18 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
     const optionalMsg = action !== 'reject' ? message : undefined;
     await createOfferMessages(conversationId, userId, statusMessage, contentType as any, optionalMsg);
 
-    // Récupérer la conversation mise à jour
+    // Récupérer la conversation mise à jour (source de vérité pour la négo entre ces 2 utilisateurs)
     const updatedConversation = await Conversation.findById(conversationId)
       .populate('participants', 'username profilePicture email')
       .populate('productId', 'title price images')
       .populate('lastMessage')
       .populate('offerHistory.offeredBy', 'username profilePicture');
 
-    const freshProduct = await Product.findById(product._id).lean() as any;
-    const updatedNegotiation = freshProduct?.negotiations?.find(
-      (n: any) => n.conversationId?.toString() === conversationId
-    );
-
     return res.status(200).json({
       message: 'Réponse à la négociation envoyée avec succès',
       action,
       conversation: updatedConversation,
-      negotiation: updatedNegotiation
+      negotiation: updatedConversation?.negotiation
     });
   } catch (error) {
     logger.error('Erreur lors de la réponse à une négociation', {
