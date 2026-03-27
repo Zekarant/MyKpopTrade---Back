@@ -623,7 +623,7 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
       return res.status(403).json({ message: 'Seul le vendeur peut répondre à cette offre' });
     }
 
-    // Récupérer l'offre en attente
+    // Récupérer l'offre en attente depuis l'historique de la CONVERSATION (source de vérité)
     const pendingOffer = conversation.offerHistory.find(
       (offer: any) => offer.status === 'pending'
     );
@@ -648,11 +648,17 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
     let statusMessage = '';
     let contentType = 'system_notification';
 
+    // ✅ FIX: Utiliser pendingOffer.amount (conversation) au lieu de negotiation.currentOffer (product)
+    // Le Product n'est pas toujours synchronisé lors des mises à jour d'offre,
+    // alors que l'offerHistory de la Conversation contient toujours le bon montant.
+    const offerAmount = pendingOffer.amount;
+
     switch (action) {
       case 'accept':
         // Accepter l'offre
         negotiation.status = 'accepted';
-        statusMessage = `Offre de ${negotiation.currentOffer} ${product.currency} acceptée`;
+        negotiation.currentOffer = offerAmount; // ✅ Synchroniser le Product aussi
+        statusMessage = `Offre de ${offerAmount} ${product.currency} acceptée`;
 
         // Mettre à jour la conversation et l'historique
         await Conversation.updateOne(
@@ -663,6 +669,7 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
           {
             $set: {
               'negotiation.status': 'accepted',
+              'negotiation.currentOffer': offerAmount, // ✅ S'assurer que la conversation est aussi à jour
               'offerHistory.$.status': 'accepted',
               'offerHistory.$.respondedAt': new Date()
             }
@@ -673,7 +680,7 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
       case 'reject':
         // Rejeter l'offre
         negotiation.status = 'rejected';
-        statusMessage = `Offre de ${negotiation.currentOffer} ${product.currency} refusée`;
+        statusMessage = `Offre de ${offerAmount} ${product.currency} refusée`;
 
         if (message && message.trim()) {
           statusMessage += `\nRaison : ${message}`;
@@ -728,7 +735,7 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
         break;
     }
 
-    // Sauvegarder les changements dans le produit
+    // Sauvegarder les changements dans le produit (maintenant synchronisé)
     productDoc.negotiations[negotiationIndex] = negotiation;
     await productDoc.save();
 
