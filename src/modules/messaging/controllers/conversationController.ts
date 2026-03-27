@@ -648,16 +648,13 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
     let statusMessage = '';
     let contentType = 'system_notification';
 
-    // ✅ FIX: Utiliser pendingOffer.amount (conversation) au lieu de negotiation.currentOffer (product)
-    // Le Product n'est pas toujours synchronisé lors des mises à jour d'offre,
-    // alors que l'offerHistory de la Conversation contient toujours le bon montant.
     const offerAmount = pendingOffer.amount;
 
     switch (action) {
       case 'accept':
         // Accepter l'offre
         negotiation.status = 'accepted';
-        negotiation.currentOffer = offerAmount; // ✅ Synchroniser le Product aussi
+        negotiation.currentOffer = offerAmount;
         statusMessage = `Offre de ${offerAmount} ${product.currency} acceptée`;
 
         // Mettre à jour la conversation et l'historique
@@ -669,7 +666,7 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
           {
             $set: {
               'negotiation.status': 'accepted',
-              'negotiation.currentOffer': offerAmount, // ✅ S'assurer que la conversation est aussi à jour
+              'negotiation.currentOffer': offerAmount,
               'offerHistory.$.status': 'accepted',
               'offerHistory.$.respondedAt': new Date()
             }
