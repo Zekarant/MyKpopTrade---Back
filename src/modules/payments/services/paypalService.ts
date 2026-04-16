@@ -6,6 +6,8 @@ import logger from '../../../commons/utils/logger';
 import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
 import Payment from '../../../models/paymentModel';
+import Conversation from '../../../models/conversationModel';
+import Message from '../../../models/messageModel';
 import { NotificationService } from '../../notifications/services/notificationService';
 
 /**
@@ -385,6 +387,34 @@ export class PayPalService {
             currency: payment.currency
           }
         });
+
+        // Poster un message système dans la conversation acheteur/vendeur
+        const conversation = await Conversation.findOne({
+          productId: payment.product,
+          participants: { $all: [payment.buyer, payment.seller] },
+          isActive: true
+        });
+
+        if (conversation) {
+          await Message.create({
+            conversation: conversation._id,
+            sender: payment.seller,
+            content: 'Paiement validé ☑️ — nous vous laissons organiser l\'envoi du colis avec le vendeur.',
+            contentType: 'system_notification',
+            isSystemMessage: true,
+            readBy: []
+          });
+
+          await Conversation.updateOne(
+            { _id: conversation._id },
+            { lastMessageAt: new Date() }
+          );
+        } else {
+          logger.warn('Aucune conversation trouvée pour poster le message de paiement validé', {
+            paymentId: payment._id,
+            productId: payment.product
+          });
+        }
       }
     } catch (error) {
       logger.error('Erreur lors du traitement de l\'événement de paiement complété', { error });
