@@ -62,6 +62,7 @@ export const productSchema = Joi.object({
     'array.max': 'Maximum 10 images autorisées',
     'any.required': 'Les images sont obligatoires'
   }),
+  allowOffers: Joi.boolean().default(false),
   
   shippingOptions: Joi.object({
     worldwide: Joi.boolean().default(false),
