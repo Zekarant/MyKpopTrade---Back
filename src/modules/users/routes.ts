@@ -1,6 +1,5 @@
 import express from 'express';
 import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
-import { addEmail } from './controllers/userEmailController';
 import { searchUsers } from './controllers/userSearchController';
 import * as userPrivacyController from './controllers/userPrivacyController';
 

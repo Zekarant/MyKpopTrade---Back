@@ -19,6 +19,9 @@ yarn.lock
 dist/
 build/
 
+# Test coverage
+coverage/
+
 # IDE specific files
 .idea/
 .vscode/

@@ -41,8 +41,6 @@ export const register: RequestHandler = async (req: Request, res: Response, next
 };
 
 export const login: RequestHandler = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const { username, email, password } = req.body;
-
     try {
         const user = await User.findOne({
             $or: [{ email: req.body.email }, { username: req.body.username }]

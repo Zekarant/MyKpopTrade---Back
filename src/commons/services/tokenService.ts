@@ -1,6 +1,5 @@
 import jwt, { SignOptions } from 'jsonwebtoken';
 import crypto from 'crypto';
-import { IUser } from '../../models/userModel';
 import RefreshToken from '../../models/tokenModel';
 
 // Liste des tokens d'accès révoqués (utiliser Redis en production)

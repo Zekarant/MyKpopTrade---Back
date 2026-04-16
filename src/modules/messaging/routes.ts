@@ -5,8 +5,7 @@ import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
 import { sanitizeInputs } from '../../commons/middlewares/sanitizeMiddleware';
 import {
   rateLimitMessages,
-  verifyConversationAccess,
-  validateMessageContent
+  verifyConversationAccess
 } from './middleware/messageSecurityMiddleware';
 
 const router = express.Router();

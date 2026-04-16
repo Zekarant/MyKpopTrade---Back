@@ -1,5 +1,4 @@
-import { IConversation, IOfferHistory } from '../../../models/conversationModel';
-import mongoose from 'mongoose';
+import { IOfferHistory } from '../../../models/conversationModel';
 
 /**
  * Type pour les produits dans les conversations

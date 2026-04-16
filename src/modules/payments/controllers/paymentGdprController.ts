@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import Payment from '../../../models/paymentModel';
-import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
 import { EncryptionService } from '../../../commons/utils/encryptionService';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';

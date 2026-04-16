@@ -1,54 +1,41 @@
 import { Request, Response } from 'express';
-import mongoose from 'mongoose';
-import Album from '../../../models/albumModel';
-import KpopGroup from '../../../models/kpopGroupModel';
-import Product from '../../../models/productModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import logger from '../../../commons/utils/logger';
+import { mapHttpError } from '../../../commons/utils/httpErrorMapper';
+import {
+  createAlbumForGroup,
+  listAlbums,
+  fetchAlbumById,
+  fetchAlbumsByGroup,
+  fetchRecentAlbums,
+  searchAlbumsByQuery,
+  updateAlbumById,
+  deleteAlbumById,
+  fetchAlbumBySpotifyId
+} from '../services/albumsService';
 
 /**
  * Créer un nouvel album (Admin uniquement)
  */
 export const createAlbum = asyncHandler(async (req: Request, res: Response) => {
   const albumData = req.body;
-  
+
   try {
-    // Vérifier que le groupe existe
-    const group = await KpopGroup.findById(albumData.artistId);
-    if (!group) {
-      return res.status(400).json({ message: 'Groupe non trouvé' });
-    }
-    
-    // AJOUTER LE NOM DE L'ARTISTE AUTOMATIQUEMENT
-    albumData.artistName = group.name;
-    albumData.discoverySource = albumData.discoverySource;
-    albumData.lastScraped = new Date();
-    
-    const album = new Album(albumData);
-    await album.save();
-    
-    // Populer les données du groupe pour la réponse
-    await album.populate('artistId', 'name description profileImage');
-    
-    logger.info('Nouvel album créé', { 
-      albumId: album._id, 
-      albumName: album.name,
-      groupName: group.name,
-      spotifyId: album.spotifyId
-    });
-    
+    const album = await createAlbumForGroup(albumData);
     return res.status(201).json({
       message: 'Album créé avec succès',
       album
     });
   } catch (error) {
-    logger.error('Erreur lors de la création de l\'album', { 
+    const mapped = mapHttpError(res, error);
+    if (mapped) return mapped;
+
+    logger.error('Erreur lors de la création de l\'album', {
       error: error instanceof Error ? error.message : 'Erreur inconnue',
       albumData: albumData.name
     });
-    
-    return res.status(500).json({ 
-      message: 'Une erreur est survenue lors de la création de l\'album' 
+    return res.status(500).json({
+      message: 'Une erreur est survenue lors de la création de l\'album'
     });
   }
 });
@@ -57,69 +44,15 @@ export const createAlbum = asyncHandler(async (req: Request, res: Response) => {
  * Récupérer tous les albums avec pagination et filtres
  */
 export const getAlbums = asyncHandler(async (req: Request, res: Response) => {
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
-  const sortBy = req.query.sortBy as string || 'releaseDate';
-  const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
-  
-  // Construction des filtres
-  const filters: any = {};
-  
-  if (req.query.artistId) {
-    filters.artistId = req.query.artistId;
-  }
-  
-  if (req.query.artistName) {
-    filters.artistName = { $regex: req.query.artistName, $options: 'i' };
-  }
-  
-  if (req.query.search) {
-    filters.$or = [
-      { name: { $regex: req.query.search, $options: 'i' } },
-      { artistName: { $regex: req.query.search, $options: 'i' } }
-    ];
-  }
-  
-  if (req.query.minTracks) {
-    const minTracks = parseInt(req.query.minTracks as string);
-    filters.totalTracks = { $gte: minTracks };
-  }
-  
-  if (req.query.year) {
-    const year = parseInt(req.query.year as string);
-    filters.releaseDate = {
-      $gte: new Date(`${year}-01-01`),
-      $lt: new Date(`${year + 1}-01-01`)
-    };
-  }
-  
   try {
-    const [albums, total] = await Promise.all([
-      Album.find(filters)
-        .populate('artistId', 'name profileImage')
-        .sort({ [sortBy]: sortOrder })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean(),
-      Album.countDocuments(filters)
-    ]);
-    
-    return res.status(200).json({
-      albums,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    });
+    const result = await listAlbums(req.query);
+    return res.status(200).json(result);
   } catch (error) {
-    logger.error('Erreur lors de la récupération des albums', { 
+    logger.error('Erreur lors de la récupération des albums', {
       error: error instanceof Error ? error.message : 'Erreur inconnue'
     });
-    
-    return res.status(500).json({ 
-      message: 'Une erreur est survenue lors de la récupération des albums' 
+    return res.status(500).json({
+      message: 'Une erreur est survenue lors de la récupération des albums'
     });
   }
 });
@@ -129,51 +62,20 @@ export const getAlbums = asyncHandler(async (req: Request, res: Response) => {
  */
 export const getAlbumById = asyncHandler(async (req: Request, res: Response) => {
   const albumId = req.params.albumId as string;
-  
-  if (!mongoose.Types.ObjectId.isValid(albumId)) {
-    return res.status(400).json({ message: 'ID d\'album invalide' });
-  }
-  
+
   try {
-    const album = await Album.findById(albumId)
-      .populate('artistId', 'name description profileImage socialLinks');
-    
-    if (!album) {
-      return res.status(404).json({ message: 'Album non trouvé' });
-    }
-    
-    const availableProducts = await Product.find({
-      $or: [
-        { albumName: album.name },
-        { kpopGroup: album.artistName }
-      ],
-      isAvailable: true
-    })
-    .populate('seller', 'username profilePicture statistics.averageRating')
-    .sort({ price: 1 })
-    .limit(10);
-    
-    return res.status(200).json({
-      album,
-      availableProducts,
-      stats: {
-        totalProducts: availableProducts.length,
-        totalTracks: album.totalTracks,
-        releaseYear: album.releaseDate ? new Date(album.releaseDate).getFullYear() : null,
-        priceRange: availableProducts.length > 0 ? {
-          min: Math.min(...availableProducts.map(p => p.price)),
-          max: Math.max(...availableProducts.map(p => p.price))
-        } : null
-      }
-    });
+    const result = await fetchAlbumById(albumId);
+    return res.status(200).json(result);
   } catch (error) {
-    logger.error('Erreur lors de la récupération de l\'album', { 
+    const mapped = mapHttpError(res, error);
+    if (mapped) return mapped;
+
+    logger.error('Erreur lors de la récupération de l\'album', {
       error: error instanceof Error ? error.message : 'Erreur inconnue',
       albumId
     });
-    
-    return res.status(500).json({ 
-      message: 'Une erreur est survenue lors de la récupération de l\'album' 
+    return res.status(500).json({
+      message: 'Une erreur est survenue lors de la récupération de l\'album'
     });
   }
 });
@@ -183,51 +85,28 @@ export const getAlbumById = asyncHandler(async (req: Request, res: Response) => 
  */
 export const getAlbumsByGroup = asyncHandler(async (req: Request, res: Response) => {
   const groupId = req.params.groupId as string;
-  
-  if (!mongoose.Types.ObjectId.isValid(groupId)) {
-    return res.status(400).json({ message: 'ID de groupe invalide' });
-  }
-  
+
   try {
-    const albums = await Album.find({ artistId: groupId })
-      .sort({ releaseDate: -1 })
-      .lean();
-    
-    if (albums.length === 0) {
+    const { albums, empty } = await fetchAlbumsByGroup(groupId);
+
+    if (empty) {
       return res.status(200).json({
         albums: [],
         message: 'Aucun album trouvé pour ce groupe'
       });
     }
-    
-    const albumsWithProducts = await Promise.all(
-      albums.map(async (album) => {
-        const productCount = await Product.countDocuments({
-          $or: [
-            { albumName: album.name },
-            { kpopGroup: album.artistName }
-          ],
-          isAvailable: true
-        });
-        
-        return {
-          ...album,
-          availableProducts: productCount
-        };
-      })
-    );
-    
-    return res.status(200).json({
-      albums: albumsWithProducts
-    });
+
+    return res.status(200).json({ albums });
   } catch (error) {
-    logger.error('Erreur lors de la récupération des albums du groupe', { 
+    const mapped = mapHttpError(res, error);
+    if (mapped) return mapped;
+
+    logger.error('Erreur lors de la récupération des albums du groupe', {
       error: error instanceof Error ? error.message : 'Erreur inconnue',
       groupId
     });
-    
-    return res.status(500).json({ 
-      message: 'Une erreur est survenue lors de la récupération des albums' 
+    return res.status(500).json({
+      message: 'Une erreur est survenue lors de la récupération des albums'
     });
   }
 });
@@ -237,25 +116,19 @@ export const getAlbumsByGroup = asyncHandler(async (req: Request, res: Response)
  */
 export const getRecentAlbums = asyncHandler(async (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 50;
-  
+
   try {
-    const albums = await Album.find({})
-      .sort({ releaseDate: -1 })
-      .limit(limit)
-      .populate('artistId', 'name profileImage')
-      .lean();
-    
+    const albums = await fetchRecentAlbums(limit);
     return res.status(200).json({
       albums,
       message: `${albums.length} albums les plus récents`
     });
   } catch (error) {
-    logger.error('Erreur lors de la récupération des albums récents', { 
+    logger.error('Erreur lors de la récupération des albums récents', {
       error: error instanceof Error ? error.message : 'Erreur inconnue'
     });
-    
-    return res.status(500).json({ 
-      message: 'Une erreur est survenue lors de la récupération des albums récents' 
+    return res.status(500).json({
+      message: 'Une erreur est survenue lors de la récupération des albums récents'
     });
   }
 });
@@ -266,36 +139,20 @@ export const getRecentAlbums = asyncHandler(async (req: Request, res: Response) 
 export const searchAlbums = asyncHandler(async (req: Request, res: Response) => {
   const { query } = req.query;
   const limit = parseInt(req.query.limit as string) || 20;
-  
-  if (!query || typeof query !== 'string') {
-    return res.status(400).json({ message: 'Paramètre de recherche requis' });
-  }
-  
+
   try {
-    const albums = await Album.find({
-      $or: [
-        { name: { $regex: query, $options: 'i' } },
-        { artistName: { $regex: query, $options: 'i' } }
-      ]
-    })
-    .sort({ releaseDate: -1 })
-    .limit(limit)
-    .populate('artistId', 'name profileImage')
-    .lean();
-    
-    return res.status(200).json({
-      albums,
-      query,
-      found: albums.length
-    });
+    const result = await searchAlbumsByQuery({ query, limit });
+    return res.status(200).json(result);
   } catch (error) {
-    logger.error('Erreur lors de la recherche d\'albums', { 
+    const mapped = mapHttpError(res, error);
+    if (mapped) return mapped;
+
+    logger.error('Erreur lors de la recherche d\'albums', {
       error: error instanceof Error ? error.message : 'Erreur inconnue',
       query
     });
-    
-    return res.status(500).json({ 
-      message: 'Une erreur est survenue lors de la recherche' 
+    return res.status(500).json({
+      message: 'Une erreur est survenue lors de la recherche'
     });
   }
 });
@@ -305,53 +162,23 @@ export const searchAlbums = asyncHandler(async (req: Request, res: Response) => 
  */
 export const updateAlbum = asyncHandler(async (req: Request, res: Response) => {
   const albumId = req.params.albumId as string;
-  const updates = req.body;
-  
-  if (!mongoose.Types.ObjectId.isValid(albumId)) {
-    return res.status(400).json({ message: 'ID d\'album invalide' });
-  }
-  
+
   try {
-    // Si on change l'artistId, mettre à jour aussi artistName
-    if (updates.artistId) {
-      const group = await KpopGroup.findById(updates.artistId);
-      if (!group) {
-        return res.status(400).json({ message: 'Groupe non trouvé' });
-      }
-      updates.artistName = group.name;
-    }
-    
-    updates.lastScraped = new Date();
-    
-    const album = await Album.findByIdAndUpdate(
-      albumId,
-      { $set: updates },
-      { new: true, runValidators: true }
-    ).populate('artistId', 'name description profileImage');
-    
-    if (!album) {
-      return res.status(404).json({ message: 'Album non trouvé' });
-    }
-    
-    logger.info('Album mis à jour', { 
-      albumId,
-      albumName: album.name,
-      artistName: album.artistName,
-      spotifyId: album.spotifyId
-    });
-    
+    const album = await updateAlbumById(albumId, req.body);
     return res.status(200).json({
       message: 'Album mis à jour avec succès',
       album
     });
   } catch (error) {
-    logger.error('Erreur lors de la mise à jour de l\'album', { 
+    const mapped = mapHttpError(res, error);
+    if (mapped) return mapped;
+
+    logger.error('Erreur lors de la mise à jour de l\'album', {
       error: error instanceof Error ? error.message : 'Erreur inconnue',
       albumId
     });
-    
-    return res.status(500).json({ 
-      message: 'Une erreur est survenue lors de la mise à jour de l\'album' 
+    return res.status(500).json({
+      message: 'Une erreur est survenue lors de la mise à jour de l\'album'
     });
   }
 });
@@ -361,36 +188,22 @@ export const updateAlbum = asyncHandler(async (req: Request, res: Response) => {
  */
 export const deleteAlbum = asyncHandler(async (req: Request, res: Response) => {
   const albumId = req.params.albumId as string;
-  
-  if (!mongoose.Types.ObjectId.isValid(albumId)) {
-    return res.status(400).json({ message: 'ID d\'album invalide' });
-  }
-  
+
   try {
-    const album = await Album.findByIdAndDelete(albumId);
-    
-    if (!album) {
-      return res.status(404).json({ message: 'Album non trouvé' });
-    }
-    
-    logger.info('Album supprimé', { 
-      albumId,
-      albumName: album.name,
-      artistName: album.artistName,
-      spotifyId: album.spotifyId
-    });
-    
+    await deleteAlbumById(albumId);
     return res.status(200).json({
       message: 'Album supprimé avec succès'
     });
   } catch (error) {
-    logger.error('Erreur lors de la suppression de l\'album', { 
+    const mapped = mapHttpError(res, error);
+    if (mapped) return mapped;
+
+    logger.error('Erreur lors de la suppression de l\'album', {
       error: error instanceof Error ? error.message : 'Erreur inconnue',
       albumId
     });
-    
-    return res.status(500).json({ 
-      message: 'Une erreur est survenue lors de la suppression de l\'album' 
+    return res.status(500).json({
+      message: 'Une erreur est survenue lors de la suppression de l\'album'
     });
   }
 });
@@ -400,24 +213,20 @@ export const deleteAlbum = asyncHandler(async (req: Request, res: Response) => {
  */
 export const getAlbumBySpotifyId = asyncHandler(async (req: Request, res: Response) => {
   const { spotifyId } = req.params;
-  
+
   try {
-    const album = await Album.findOne({ spotifyId })
-      .populate('artistId', 'name description profileImage');
-    
-    if (!album) {
-      return res.status(404).json({ message: 'Album non trouvé' });
-    }
-    
+    const album = await fetchAlbumBySpotifyId(String(spotifyId));
     return res.status(200).json({ album });
   } catch (error) {
-    logger.error('Erreur lors de la récupération de l\'album par Spotify ID', { 
+    const mapped = mapHttpError(res, error);
+    if (mapped) return mapped;
+
+    logger.error('Erreur lors de la récupération de l\'album par Spotify ID', {
       error: error instanceof Error ? error.message : 'Erreur inconnue',
       spotifyId
     });
-    
-    return res.status(500).json({ 
-      message: 'Une erreur est survenue lors de la récupération de l\'album' 
+    return res.status(500).json({
+      message: 'Une erreur est survenue lors de la récupération de l\'album'
     });
   }
 });

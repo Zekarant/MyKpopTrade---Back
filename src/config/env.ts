@@ -44,9 +44,31 @@ const envSchema = z.object({
   DISCORD_CLIENT_ID: z.string().optional(),
   DISCORD_CLIENT_SECRET: z.string().optional(),
   
+  // PayPal
+  PAYPAL_CLIENT_ID: z.string().optional(),
+  PAYPAL_CLIENT_SECRET: z.string().optional(),
+
+  // Chiffrement des messages
+  MESSAGE_ENCRYPTION_KEY: z.string().min(32).optional(),
+
   // Logs
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
-});
+}).refine(
+  (data) => {
+    // En production, les secrets sensibles sont obligatoires
+    if (data.NODE_ENV !== 'production') return true;
+    return (
+      Boolean(data.PAYPAL_CLIENT_ID) &&
+      Boolean(data.PAYPAL_CLIENT_SECRET) &&
+      Boolean(data.MESSAGE_ENCRYPTION_KEY) &&
+      data.JWT_SECRET !== 'this_is_a_development_secret_key_do_not_use_in_production'
+    );
+  },
+  {
+    message:
+      'En production, PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, MESSAGE_ENCRYPTION_KEY et un JWT_SECRET custom sont requis.'
+  }
+);
 
 // Vérifier qu'un fichier .env existe et alerter en mode développement s'il manque
 if (process.env.NODE_ENV !== 'production') {
