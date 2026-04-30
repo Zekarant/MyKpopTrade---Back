@@ -7,6 +7,7 @@ import * as phoneVerificationController from './controllers/phoneVerificationCon
 import * as passwordController from './controllers/passwordController';
 import * as profileController from './controllers/profileController';
 import * as socialAuthController from './controllers/socialAuthController';
+import { betterAuthBridge } from './controllers/betterAuthBridgeController';
 import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
 
 const router = Router();
@@ -51,9 +52,14 @@ router.get('/facebook/callback',
 );
 
 router.get('/discord', passport.authenticate('discord', { scope: ['identify', 'email'] }));
-router.get('/discord/callback', 
+router.get('/discord/callback',
   passport.authenticate('discord', { session: false, failureRedirect: '/login?error=discord' }),
   socialAuthController.oauthCallback
 );
+
+// Pont better-auth → JWT historique : appelé par better-auth après l'OAuth Google.
+// À noter : le path ne doit PAS commencer par /better/ car ce préfixe est catchall
+// par le handler better-auth monté dans index.ts.
+router.get('/oauth-bridge', betterAuthBridge);
 
 export default router;
