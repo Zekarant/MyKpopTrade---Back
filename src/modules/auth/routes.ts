@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request } from 'express';
 import passport from 'passport';
 import * as loginController from './controllers/loginController';
 import * as registerController from './controllers/registerController';
@@ -7,7 +7,6 @@ import * as phoneVerificationController from './controllers/phoneVerificationCon
 import * as passwordController from './controllers/passwordController';
 import * as profileController from './controllers/profileController';
 import * as socialAuthController from './controllers/socialAuthController';
-import { betterAuthBridge } from './controllers/betterAuthBridgeController';
 import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
 
 const router = Router();
@@ -40,10 +39,17 @@ router.delete('/profile/paypal-email', authenticateJWT, profileController.remove
 
 // Routes d'authentification sociale
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-router.get('/google/callback', 
-  passport.authenticate('google', { session: false, failureRedirect: '/login?error=google' }),
-  socialAuthController.oauthCallback
-);
+router.get('/google/callback', (req, res, next) => {
+  passport.authenticate('google', { session: false }, (err, user, info) => {
+    if (err || !user) {
+      const code = info?.message || 'google_auth_failed';
+      return res.redirect(`${process.env.FRONTEND_URL}/login?error=${code}`);
+    }
+    req.user = user;
+    (req as Request & { isNewUser?: boolean }).isNewUser = info?.isNew === true;
+    return socialAuthController.oauthCallback(req, res);
+  })(req, res, next);
+});
 
 router.get('/facebook', passport.authenticate('facebook', { scope: ['email'] }));
 router.get('/facebook/callback', 
@@ -56,10 +62,5 @@ router.get('/discord/callback',
   passport.authenticate('discord', { session: false, failureRedirect: '/login?error=discord' }),
   socialAuthController.oauthCallback
 );
-
-// Pont better-auth → JWT historique : appelé par better-auth après l'OAuth Google.
-// À noter : le path ne doit PAS commencer par /better/ car ce préfixe est catchall
-// par le handler better-auth monté dans index.ts.
-router.get('/oauth-bridge', betterAuthBridge);
 
 export default router;

@@ -42,16 +42,16 @@ export const initializePassport = (): void => {
         async (accessToken, refreshToken, profile, done) => {
           try {
             const email = profile.emails?.[0]?.value;
-            
+
             if (!email) {
-              return done(new Error('Email non fourni par Google'), false);
+              return done(null, false, { message: 'google_no_email' });
             }
 
-            // Vérifier si un utilisateur existe déjà avec cet email
             let user = await User.findOne({ email });
+            const isNew = !user;
 
             if (user) {
-              // Mettre à jour les informations Google si nécessaire
+              // Lier le compte Google à un utilisateur existant si pas encore fait.
               if (!user.socialAuth?.google?.id) {
                 user.socialAuth = user.socialAuth || {};
                 user.socialAuth.google = {
@@ -59,15 +59,13 @@ export const initializePassport = (): void => {
                   email,
                   name: profile.displayName
                 };
-                user.isEmailVerified = true; // L'email est vérifié via Google
-                await user.save();
+                user.isEmailVerified = true;
               }
             } else {
-              // Créer un nouvel utilisateur
               user = new User({
-                username: `user_${Date.now()}`, // Nom d'utilisateur temporaire unique
+                username: `user_${Date.now()}`,
                 email,
-                password: Math.random().toString(36).substring(2), // Mot de passe aléatoire
+                password: Math.random().toString(36).substring(2),
                 isEmailVerified: true,
                 socialAuth: {
                   google: {
@@ -77,12 +75,11 @@ export const initializePassport = (): void => {
                   }
                 }
               });
-              await user.save();
             }
 
             user.lastLogin = new Date();
             await user.save();
-            return done(null, user);
+            return done(null, user, { isNew });
           } catch (error) {
             return done(error, false);
           }
