@@ -24,8 +24,8 @@ export const findOrCreateSocialUser = async (
           email: email,
           ...additionalData
         };
-        user.isEmailVerified = true; // L'email est vérifié via le fournisseur d'authentification
-        await user.save();
+        user.isEmailVerified = true;
+        await user.save({ validateBeforeSave: false });
       }
     } else {
       // Créer un nouvel utilisateur
@@ -34,7 +34,7 @@ export const findOrCreateSocialUser = async (
       user = new User({
         username,
         email,
-        password: Math.random().toString(36).substring(2), // Mot de passe aléatoire
+        password: Math.random().toString(36).substring(2),
         isEmailVerified: true,
         socialAuth: {
           [provider]: {
@@ -45,12 +45,12 @@ export const findOrCreateSocialUser = async (
         }
       });
       
-      await user.save();
+      await user.save({ validateBeforeSave: false });
     }
     
     // Mettre à jour la date de dernière connexion
     user.lastLogin = new Date();
-    await user.save();
+    await user.save({ validateBeforeSave: false });
     
     return user;
   } catch (error) {

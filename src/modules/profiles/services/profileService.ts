@@ -83,6 +83,8 @@ export async function fetchPublicProfile(identifier: string) {
       socialLinks: 1,
       preferences: { kpopGroups: 1 },
       statistics: 1,
+      isIdentityVerified: 1,
+      isSellerVerified: 1,
       createdAt: 1
     }
   );
@@ -116,6 +118,8 @@ export async function fetchPublicProfile(identifier: string) {
       bio: user.bio,
       location: user.location,
       socialLinks: user.socialLinks,
+      isIdentityVerified: user.isIdentityVerified,
+      isSellerVerified: user.isSellerVerified,
       kpopGroups: user.preferences?.kpopGroups || [],
       statistics: {
         ...user.statistics?.toObject(),
@@ -152,6 +156,7 @@ export async function fetchMyProfile(userId: string) {
       id: user._id,
       username: user.username,
       email: user.email,
+      role: user.role,
       profilePicture: user.profilePicture,
       profileBanner: user.profileBanner,
       phoneNumber: user.phoneNumber,

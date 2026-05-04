@@ -8,6 +8,17 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Custom state store that bypasses session-based state verification
+// We handle state verification manually via JWT linkToken
+class NoopStateStore {
+  store(req: any, state: any, meta: any, callback: any) {
+    callback(null, state);
+  }
+  verify(req: any, providedState: any, callback: any) {
+    callback(null, true, providedState);
+  }
+}
+
 export const initializePassport = (): void => {
   // Configuration JWT
   passport.use(
@@ -37,48 +48,83 @@ export const initializePassport = (): void => {
         {
           clientID: process.env.GOOGLE_CLIENT_ID,
           clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-          callbackURL: `${process.env.API_URL}/api/auth/google/callback`
+          callbackURL: `${process.env.API_URL}/api/auth/google/callback`,
+          passReqToCallback: true
         },
-        async (accessToken, refreshToken, profile, done) => {
+        async (req: any, accessToken: string, refreshToken: string, profile: any, done: any) => {
           try {
+            const linkUserId = req.linkUserId;
             const email = profile.emails?.[0]?.value;
 
             if (!email) {
               return done(null, false, { message: 'google_no_email' });
             }
 
-            let user = await User.findOne({ email });
-            const isNew = !user;
+            // MODE LIAISON : l'utilisateur connecté lie son compte Google
+            if (linkUserId) {
+              const user = await User.findById(linkUserId);
+              if (!user) {
+                return done(null, false, { message: 'user_not_found' });
+              }
+
+              // Vérifier que ce compte Google n'est pas déjà lié à un AUTRE utilisateur
+              const existingLink = await User.findOne({ 'socialAuth.google.id': profile.id });
+              if (existingLink && existingLink._id.toString() !== linkUserId) {
+                return done(null, false, { message: 'account_already_linked' });
+              }
+
+              user.socialAuth = user.socialAuth || {};
+              user.socialAuth.google = {
+                id: profile.id,
+                email,
+                name: profile.displayName
+              };
+              await user.save({ validateBeforeSave: false });
+              return done(null, user, { isLink: true });
+            }
+
+            // MODE LOGIN/REGISTER : flow normal
+            // D'abord vérifier si ce Google ID est déjà lié à un compte
+            let user = await User.findOne({ 'socialAuth.google.id': profile.id });
+            let isNew = false;
 
             if (user) {
-              // Lier le compte Google à un utilisateur existant si pas encore fait.
-              if (!user.socialAuth?.google?.id) {
-                user.socialAuth = user.socialAuth || {};
-                user.socialAuth.google = {
-                  id: profile.id,
-                  email,
-                  name: profile.displayName
-                };
-                user.isEmailVerified = true;
-              }
+              // Ce Google est déjà lié → connexion au compte propriétaire
             } else {
-              user = new User({
-                username: `user_${Date.now()}`,
-                email,
-                password: Math.random().toString(36).substring(2),
-                isEmailVerified: true,
-                socialAuth: {
-                  google: {
+              user = await User.findOne({ email });
+
+              if (user) {
+                if (!user.socialAuth?.google?.id) {
+                  user.socialAuth = user.socialAuth || {};
+                  user.socialAuth.google = {
                     id: profile.id,
                     email,
                     name: profile.displayName
-                  }
+                  };
+                  user.isEmailVerified = true;
+                } else if (user.socialAuth.google.id !== profile.id) {
+                  return done(null, false, { message: 'email_linked_other_google' });
                 }
-              });
+              } else {
+                isNew = true;
+                user = new User({
+                  username: `user_${Date.now()}`,
+                  email,
+                  password: Math.random().toString(36).substring(2),
+                  isEmailVerified: true,
+                  socialAuth: {
+                    google: {
+                      id: profile.id,
+                      email,
+                      name: profile.displayName
+                    }
+                  }
+                });
+              }
             }
 
             user.lastLogin = new Date();
-            await user.save();
+            await user.save({ validateBeforeSave: false });
             return done(null, user, { isNew });
           } catch (error) {
             return done(error, false);
@@ -106,7 +152,6 @@ export const initializePassport = (): void => {
               return done(new Error('Email non fourni par Facebook'), false);
             }
 
-            // Même logique que pour Google
             let user = await User.findOne({ email });
 
             if (user) {
@@ -118,7 +163,7 @@ export const initializePassport = (): void => {
                   name: profile.displayName
                 };
                 user.isEmailVerified = true;
-                await user.save();
+                await user.save({ validateBeforeSave: false });
               }
             } else {
               user = new User({
@@ -134,11 +179,11 @@ export const initializePassport = (): void => {
                   }
                 }
               });
-              await user.save();
+              await user.save({ validateBeforeSave: false });
             }
 
             user.lastLogin = new Date();
-            await user.save();
+            await user.save({ validateBeforeSave: false });
             return done(null, user);
           } catch (error) {
             return done(error, false);
@@ -156,49 +201,99 @@ export const initializePassport = (): void => {
           clientID: process.env.DISCORD_CLIENT_ID,
           clientSecret: process.env.DISCORD_CLIENT_SECRET,
           callbackURL: `${process.env.API_URL}/api/auth/discord/callback`,
-          scope: ['identify', 'email']
-        },
-        async (accessToken, refreshToken, profile, done) => {
+          scope: ['identify', 'email'],
+          passReqToCallback: true,
+          store: new NoopStateStore()
+        } as any,
+        async (req: any, accessToken: string, refreshToken: string, profile: any, done: any) => {
           try {
+            const linkUserId = req.linkUserId;
             const email = profile.email;
             
             if (!email) {
               return done(new Error('Email non fourni par Discord'), false);
             }
 
-            // Même logique que pour les autres providers
-            let user = await User.findOne({ email });
+            // MODE LIAISON : l'utilisateur connecté lie son compte Discord
+            if (linkUserId) {
+              const user = await User.findById(linkUserId);
+              if (!user) {
+                return done(new Error('Utilisateur non trouvé'), false);
+              }
+
+              // Vérifier que ce compte Discord n'est pas déjà lié à un AUTRE utilisateur
+              const existingLink = await User.findOne({ 'socialAuth.discord.id': profile.id });
+              if (existingLink && existingLink._id.toString() !== linkUserId) {
+                return done(new Error('Ce compte Discord est déjà lié à un autre utilisateur'), false);
+              }
+
+              user.socialAuth = user.socialAuth || {};
+              user.socialAuth.discord = {
+                id: profile.id,
+                email,
+                username: profile.username
+              };
+              // Auto-fill socialLinks.discord with the Discord username
+              user.socialLinks = user.socialLinks || {};
+              if (!user.socialLinks.discord) {
+                user.socialLinks.discord = profile.username;
+              }
+              await user.save({ validateBeforeSave: false });
+              return done(null, user, { isLink: true });
+            }
+
+            // MODE LOGIN/REGISTER : flow normal
+            // D'abord vérifier si ce Discord ID est déjà lié à un compte
+            let user = await User.findOne({ 'socialAuth.discord.id': profile.id });
 
             if (user) {
-              if (!user.socialAuth?.discord?.id) {
-                user.socialAuth = user.socialAuth || {};
-                user.socialAuth.discord = {
-                  id: profile.id,
-                  email,
-                  username: profile.username
-                };
-                user.isEmailVerified = true;
-                await user.save();
-              }
+              // Ce Discord est déjà lié → connexion au compte propriétaire
             } else {
-              user = new User({
-                username: `user_${Date.now()}`,
-                email,
-                password: Math.random().toString(36).substring(2),
-                isEmailVerified: true,
-                socialAuth: {
-                  discord: {
+              // Pas de liaison existante → chercher par email
+              user = await User.findOne({ email });
+
+              if (user) {
+                if (!user.socialAuth?.discord?.id) {
+                  user.socialAuth = user.socialAuth || {};
+                  user.socialAuth.discord = {
                     id: profile.id,
                     email,
                     username: profile.username
+                  };
+                  user.isEmailVerified = true;
+                  // Auto-fill socialLinks.discord
+                  user.socialLinks = user.socialLinks || {};
+                  if (!user.socialLinks.discord) {
+                    user.socialLinks.discord = profile.username;
                   }
+                  await user.save({ validateBeforeSave: false });
+                } else if (user.socialAuth.discord.id !== profile.id) {
+                  // Cet email est lié à un AUTRE Discord → refuser la connexion
+                  return done(null, false, { message: 'email_linked_other_discord' });
                 }
-              });
-              await user.save();
+              } else {
+                user = new User({
+                  username: `user_${Date.now()}`,
+                  email,
+                  password: Math.random().toString(36).substring(2),
+                  isEmailVerified: true,
+                  socialAuth: {
+                    discord: {
+                      id: profile.id,
+                      email,
+                      username: profile.username
+                    }
+                  },
+                  socialLinks: {
+                    discord: profile.username
+                  }
+                });
+                await user.save({ validateBeforeSave: false });
+              }
             }
 
             user.lastLogin = new Date();
-            await user.save();
+            await user.save({ validateBeforeSave: false });
             return done(null, user);
           } catch (error) {
             return done(error, false);

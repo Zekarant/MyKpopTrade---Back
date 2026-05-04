@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import * as productController from './controllers/productController';
 import * as inventoryController from './controllers/inventoryController';
-import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
+import { authenticateJWT, requireAdmin } from '../../commons/middlewares/authMiddleware';
 import * as productImageController from './controllers/productImageController';
 import { productImagesUpload } from '../profiles/middleware/fileUploaderMiddleware';
+import * as productAdminController from './controllers/productAdminController';
 
 const router = Router();
 
@@ -45,6 +46,12 @@ router.put(
 );
 
 router.get('/', productController.getProducts);
+
+// Admin routes (MUST be before /:productId to avoid matching 'admin' as productId)
+router.get('/admin/list', authenticateJWT, requireAdmin, productAdminController.getAllProducts);
+router.get('/admin/stats', authenticateJWT, requireAdmin, productAdminController.getProductAdminStats);
+router.delete('/admin/:productId', authenticateJWT, requireAdmin, productAdminController.adminDeleteProduct);
+
 router.get('/:productId', authenticateJWT, productController.getProductById);
 
 export default router;

@@ -307,6 +307,7 @@ const UserSchema: Schema = new Schema({
     type: String,
     validate: {
       validator: function(v: string) {
+        if (!v || v.trim() === '') return true;
         // Format international E.164 ou format simplifié
         return /^\+?[1-9]\d{1,14}$/.test(v);
       },

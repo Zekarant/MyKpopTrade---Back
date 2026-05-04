@@ -85,7 +85,7 @@ export const handleConnectCallback = asyncHandler(async (req: Request, res: Resp
   const { code, state } = req.query;
 
   if (!code || !state) {
-    return res.status(400).redirect(`${process.env.FRONTEND_URL}/account/seller/settings?error=missing_parameters`);
+    return res.status(400).redirect(`${process.env.FRONTEND_URL}/settings?error=missing_parameters`);
   }
 
   try {
@@ -93,7 +93,7 @@ export const handleConnectCallback = asyncHandler(async (req: Request, res: Resp
 
     const seller = await User.findById(sellerId);
     if (!seller) {
-      return res.status(404).redirect(`${process.env.FRONTEND_URL}/account/seller/settings?error=user_not_found`);
+      return res.status(404).redirect(`${process.env.FRONTEND_URL}/settings?error=user_not_found`);
     }
 
     const success = await PayPalService.handleConnectCallback(code as string, sellerId);
@@ -103,9 +103,9 @@ export const handleConnectCallback = asyncHandler(async (req: Request, res: Resp
         userId: truncatedUserId(sellerId)
       });
 
-      return res.redirect(`${process.env.FRONTEND_URL}/account/seller/settings?paypal_connected=true`);
+      return res.redirect(`${process.env.FRONTEND_URL}/settings?paypal_connected=true`);
     } else {
-      return res.redirect(`${process.env.FRONTEND_URL}/account/seller/settings?error=connection_failed`);
+      return res.redirect(`${process.env.FRONTEND_URL}/settings?error=connection_failed`);
     }
   } catch (error) {
     const sellerId = state as string;
@@ -113,7 +113,7 @@ export const handleConnectCallback = asyncHandler(async (req: Request, res: Resp
       error: error instanceof Error ? error.message : String(error),
       userId: truncatedUserId(sellerId)
     });
-    return res.redirect(`${process.env.FRONTEND_URL}/account/seller/settings?error=server_error`);
+    return res.redirect(`${process.env.FRONTEND_URL}/settings?error=server_error`);
   }
 });
 

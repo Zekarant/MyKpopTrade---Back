@@ -18,6 +18,9 @@ router.use(sanitizeInputs);
 // Webhook PayPal (sans authentification)
 router.post('/webhook/paypal', paymentController.handleWebhook);
 
+// Callback OAuth PayPal (sans authentification — l'utilisateur est redirigé par PayPal)
+router.get('/paypal/callback', paymentController.handleConnectCallback);
+
 // Routes nécessitant une authentification
 router.use(authenticateJWT);
 

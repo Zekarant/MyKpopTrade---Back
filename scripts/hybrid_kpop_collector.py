@@ -571,6 +571,67 @@ class HybridKpopCollector:
         
         return True
 
+    def is_valid_spotify_album_only(self, album: Dict) -> bool:
+        """Validation qu'un album Spotify est valide (albums, EPs, singles)"""
+        name = album.get('name', '')
+        album_type = album.get('album_type', '')
+        album_group = album.get('album_group', '')
+
+        # Nom valide
+        if not name or len(name.strip()) < 1:
+            return False
+
+        # Exclure compilations et apparitions
+        if album_group in ['compilation', 'appears_on']:
+            return False
+
+        # Types acceptés
+        if album_type not in ['album', 'single', 'ep', 'compilation']:
+            return False
+
+        # Patterns suspects
+        name_lower = name.lower()
+        suspect_patterns = [
+            r'^\s*\(null\)\s*$',
+            r'^\s*null\s*$',
+            r'karaoke\s+version',
+            r'\(karaoke\)',
+        ]
+        for pattern in suspect_patterns:
+            if re.search(pattern, name_lower):
+                return False
+
+        return True
+
+    def create_group_document(self, spotify_artist: Dict) -> Dict:
+        """Créer un document groupe à partir des données Spotify"""
+        name = spotify_artist.get('name', '').strip()
+        spotify_id = spotify_artist.get('id', '')
+        spotify_url = spotify_artist.get('external_urls', {}).get('spotify', '')
+        genres = spotify_artist.get('genres', [])
+        popularity = spotify_artist.get('popularity', 0)
+        followers = spotify_artist.get('followers', {}).get('total', 0)
+        images = spotify_artist.get('images', [])
+
+        profile_image = '/images/groups/default-group.jpg'
+        if images:
+            profile_image = images[0].get('url', profile_image)
+
+        return {
+            'name': name,
+            'profileImage': profile_image,
+            'spotifyId': spotify_id,
+            'socialLinks': {'spotify': spotify_url},
+            'genres': genres,
+            'popularity': popularity,
+            'followers': followers,
+            'discoverySource': 'Spotify Search',
+            'isActive': True,
+            'createdAt': datetime.now(),
+            'updatedAt': datetime.now(),
+            'lastValidated': datetime.now()
+        }
+
     def create_album_document(self, spotify_release: Dict, group_data: Dict) -> Dict:
         """Créer un document album à partir des données Spotify"""
         

@@ -12,12 +12,6 @@ const createTransporter = async () => {
   // En développement, créer un compte Ethereal temporaire
   if (process.env.NODE_ENV !== 'production') {
     const testAccount = await nodemailer.createTestAccount();
-    
-    console.log('Compte Ethereal créé:');
-    console.log('- Email:', testAccount.user);
-    console.log('- Mot de passe:', testAccount.pass);
-    console.log('- URL de prévisualisation: https://ethereal.email');
-
     return nodemailer.createTransport({
       host: 'smtp.ethereal.email',
       port: 587,
@@ -67,11 +61,7 @@ export const sendVerificationEmail = async (user: IUser, token: string): Promise
     `
   };
 
-  const info = await transporter.sendMail(mailOptions);
-  
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('URL de prévisualisation de l\'email:', nodemailer.getTestMessageUrl(info));
-  }
+  await transporter.sendMail(mailOptions);
 };
 
 /**
@@ -103,11 +93,7 @@ export const sendPasswordResetEmail = async (user: IUser, token: string): Promis
     `
   };
 
-  const info = await transporter.sendMail(mailOptions);
-  
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('URL de prévisualisation de l\'email:', nodemailer.getTestMessageUrl(info));
-  }
+  await transporter.sendMail(mailOptions);
 };
 
 /**
@@ -132,11 +118,7 @@ export const sendAccountDeletionEmail = async (user: IUser): Promise<void> => {
     `
   };
 
-  const info = await transporter.sendMail(mailOptions);
-  
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('URL de prévisualisation de l\'email:', nodemailer.getTestMessageUrl(info));
-  }
+  await transporter.sendMail(mailOptions);
 };
 
 /**
@@ -225,12 +207,7 @@ async function sendEmail(options: { to: string; subject: string; html: any; }): 
       html: options.html
     };
 
-    const info = await transporter.sendMail(mailOptions);
-    
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`Email envoyé à ${options.to}, sujet: ${options.subject}`);
-      console.log('URL de prévisualisation de l\'email:', nodemailer.getTestMessageUrl(info));
-    }
+    await transporter.sendMail(mailOptions);
   } catch (error) {
     console.error('Erreur lors de l\'envoi de l\'email:', error);
     // En développement, on peut choisir de ne pas propager l'erreur

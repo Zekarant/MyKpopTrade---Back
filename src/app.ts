@@ -19,6 +19,8 @@ import { initializePassport } from './config/passport';
 import { logAPIRequest } from './commons/utils/logger';
 import { verificationRoutes } from './modules/verification';
 import { reportRoutes } from './modules/reports';
+import followRoutes from './modules/follows/routes';
+import postRoutes from './modules/posts/routes';
 
 /**
  * Crée l'application Express configurée (middlewares + routes + handlers).
@@ -61,6 +63,8 @@ export function createApp(): express.Express {
   app.use('/api/search', searchRoutes);
   app.use('/api/addresses', addressRoutes);
   app.use('/api/reports', reportRoutes);
+  app.use('/api/follows', followRoutes);
+  app.use('/api/posts', postRoutes);
 
   app.get('/', (req, res) => {
     res.send('API MyKpopTrade v1.0.0');

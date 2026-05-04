@@ -10,11 +10,11 @@ export class PayPalConnectService {
    * Génère l'URL pour connecter un compte vendeur
    */
   static generateConnectUrl(sellerId: string): string {
-    const baseUrl = process.env.API_URL || 'http://localhost:3000/api';
-    const redirectUri = encodeURIComponent(`${baseUrl}/connect/paypal/callback`);
+    const baseUrl = process.env.API_URL || 'http://localhost:3000';
+    const redirectUri = encodeURIComponent(`${baseUrl}/api/payments/paypal/callback`);
     const state = encodeURIComponent(sellerId);
 
-    return `${paypalApiBaseUrl}/connect/oauth2/authorize?flowEntry=static&client_id=${process.env.PAYPAL_CLIENT_ID}&response_type=code&scope=email%20payments&redirect_uri=${redirectUri}&state=${state}`;
+    return `${paypalApiBaseUrl}/connect/oauth2/authorize?flowEntry=static&client_id=${process.env.PAYPAL_CLIENT_ID}&response_type=code&scope=openid%20email&redirect_uri=${redirectUri}&state=${state}`;
   }
 
   /**

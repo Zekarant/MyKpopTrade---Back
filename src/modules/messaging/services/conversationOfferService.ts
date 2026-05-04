@@ -8,6 +8,7 @@ import {
 } from './negotiationService';
 import { LeanConversation } from '../types/conversationTypes';
 import { HttpError } from '../../../commons/utils/httpError';
+import { NotificationService } from '../../notifications/services/notificationService';
 
 const OFFER_STATUS = {
   PENDING: 'pending',
@@ -280,6 +281,15 @@ export async function initiateNegotiationFlow({
 
   const populatedConversation = await populateOfferConversation(Conversation.findById(conversationId));
 
+  await NotificationService.createNotification({
+    recipientId: product.seller,
+    type: 'offer',
+    title: isUpdatingOffer ? 'Offre mise à jour' : 'Nouvelle offre reçue',
+    content: `${initialOffer} ${product.currency} pour "${product.title}"`,
+    link: `/adherents/messages/${conversationId}`,
+    data: { conversationId, productId: product._id, amount: initialOffer }
+  }).catch(() => undefined);
+
   return {
     conversation: populatedConversation,
     initialOffer,
@@ -461,6 +471,42 @@ export async function respondToNegotiationFlow({
 
   const optionalMsg = action !== 'reject' ? message : undefined;
   await createOfferMessages(conversationId, userId, result.statusMessage, result.contentType, optionalMsg);
+
+  const buyerId = pendingOffer.userId || conversation.participants.find(
+    (p: any) => p.toString() !== userId
+  );
+
+  if (buyerId) {
+    const offerAmount = pendingOffer.amount;
+    let notifType = 'system';
+    let notifTitle = '';
+    let notifContent = '';
+
+    if (action === 'accept') {
+      notifType = 'offer_accepted';
+      notifTitle = 'Offre acceptée';
+      notifContent = `Le vendeur a accepté votre offre de ${offerAmount} ${product.currency} sur "${product.title}"`;
+    } else if (action === 'reject') {
+      notifType = 'offer_rejected';
+      notifTitle = 'Offre refusée';
+      notifContent = `Le vendeur a refusé votre offre sur "${product.title}"`;
+    } else if (action === 'counter') {
+      notifType = 'counter_offer';
+      notifTitle = 'Contre-offre reçue';
+      notifContent = `Le vendeur propose ${counterOffer} ${product.currency} pour "${product.title}"`;
+    }
+
+    if (notifTitle) {
+      await NotificationService.createNotification({
+        recipientId: buyerId,
+        type: notifType,
+        title: notifTitle,
+        content: notifContent,
+        link: `/adherents/messages/${conversationId}`,
+        data: { conversationId, productId: product._id, action, amount: counterOffer || offerAmount }
+      }).catch(() => undefined);
+    }
+  }
 
   const updatedConversation = await populateOfferConversation(Conversation.findById(conversationId));
 

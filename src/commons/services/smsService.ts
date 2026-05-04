@@ -24,19 +24,17 @@ export const sendVerificationSMS = async (phoneNumber: string, code: string): Pr
   
   if (smsEnabled && client && fromPhoneNumber) {
     try {
-      const result = await client.messages.create({
+      await client.messages.create({
         body: message,
         from: fromPhoneNumber,
         to: phoneNumber
       });
-      console.log(`SMS envoyé avec succès, SID: ${result.sid}`);
     } catch (error) {
       console.error('Erreur lors de l\'envoi du SMS:', error);
       throw new Error('Impossible d\'envoyer le SMS. Veuillez réessayer plus tard.');
     }
   } else {
     // Mode développement - simulation d'envoi
-    console.log(`[SIMULATION SMS] À: ${phoneNumber} - Message: ${message}`);
   }
 };
 

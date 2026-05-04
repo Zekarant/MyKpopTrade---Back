@@ -49,9 +49,9 @@ function buildProductFilters({
     ];
   }
 
-  if (groups?.length) searchFilters.kpopGroup = { $in: groups };
-  if (members?.length) searchFilters.kpopMember = { $in: members };
-  if (albums?.length) searchFilters.albumName = { $in: albums };
+  if (groups?.length) searchFilters.kpopGroup = { $in: groups.map(g => new RegExp(`^${g}$`, 'i')) };
+  if (members?.length) searchFilters.kpopMember = { $in: members.map(m => new RegExp(`^${m}$`, 'i')) };
+  if (albums?.length) searchFilters.albumName = { $in: albums.map(a => new RegExp(`^${a}$`, 'i')) };
   if (type) searchFilters.type = type;
   if (condition?.length) searchFilters.condition = { $in: condition };
   if (currency) searchFilters.currency = currency;
@@ -65,7 +65,7 @@ function buildProductFilters({
   return searchFilters;
 }
 
-function getSortOption(sortBy: string, hasQuery: boolean): Record<string, SortOrder> | Record<string, { $meta: string }> {
+function getSortOption(sortBy: string): Record<string, SortOrder> {
   switch (sortBy) {
     case 'price_asc':
       return { price: 1 as SortOrder };
@@ -79,7 +79,7 @@ function getSortOption(sortBy: string, hasQuery: boolean): Record<string, SortOr
       return { views: -1 as SortOrder, favorites: -1 as SortOrder };
     case 'relevance':
     default:
-      return hasQuery ? { score: { $meta: 'textScore' } } : { createdAt: -1 as SortOrder };
+      return { createdAt: -1 as SortOrder };
   }
 }
 
@@ -101,12 +101,11 @@ export async function runAdvancedSearch({
   const { query, groups, members, albums, priceRange, condition, type, albumType, era, company } = filters;
 
   const searchFilters = buildProductFilters({ filters, userId, includeOwnProducts });
-  const projection = query ? { score: { $meta: 'textScore' } } : {};
 
   const [products, total] = await Promise.all([
-    Product.find(searchFilters, projection)
+    Product.find(searchFilters)
       .populate('seller', 'username profilePicture statistics.averageRating')
-      .sort(getSortOption(sortBy, Boolean(query)))
+      .sort(getSortOption(sortBy))
       .skip((page - 1) * limit)
       .limit(limit),
     Product.countDocuments(searchFilters)

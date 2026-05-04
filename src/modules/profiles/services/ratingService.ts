@@ -4,6 +4,7 @@ import fs from 'fs';
 import Rating from '../../../models/ratingModel';
 import User from '../../../models/userModel';
 import { HttpError } from '../../../commons/utils/httpError';
+import { NotificationService } from '../../notifications/services/notificationService';
 
 const EMPTY_DISTRIBUTION = { '5': 0, '4': 0, '3': 0, '2': 0, '1': 0 };
 
@@ -194,6 +195,16 @@ export async function createUserRating({
   await newRating.save();
 
   await updateUserAverageRating(recipientId);
+
+  const reviewer = await User.findById(reviewerId).select('username').lean() as { username?: string } | null;
+  await NotificationService.createNotification({
+    recipientId,
+    type: 'rating_received',
+    title: 'Nouvelle évaluation',
+    content: `${reviewer?.username || 'Un utilisateur'} vous a noté ${rating}/5`,
+    link: `/adherents/profile/me`,
+    data: { ratingId: newRating._id, reviewerId, rating }
+  }).catch(() => undefined);
 
   return await Rating.findById(newRating._id).populate('reviewer', 'username profilePicture');
 }

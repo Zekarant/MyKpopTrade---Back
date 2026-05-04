@@ -185,6 +185,7 @@ async function buildPersonalizedRecommendations(userId: string, limit: number): 
         as: 'seller'
       }
     },
+    { $unwind: { path: '$seller', preserveNullAndEmptyArrays: true } },
     {
       $project: {
         _id: 1,

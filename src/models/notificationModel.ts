@@ -30,7 +30,9 @@ const NotificationSchema: Schema = new Schema({
             'product_sold',
             'order_status',
             'system',
-            'rating_received'
+            'rating_received',
+            'new_follower',
+            'refund_issued'
         ]
     },
     title: {
