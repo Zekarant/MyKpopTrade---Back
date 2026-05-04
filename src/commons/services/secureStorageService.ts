@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
 import logger from '../utils/logger';
 
@@ -181,7 +180,7 @@ export const secureStoreDocument = async (
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   
   // Génération d'un identifiant unique
-  const fileId = uuidv4();
+  const fileId = crypto.randomUUID();
   
   // Stocker les métadonnées
   const metadata = {
