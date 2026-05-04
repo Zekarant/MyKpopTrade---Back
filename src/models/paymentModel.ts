@@ -56,6 +56,14 @@ export interface IPayment extends Document {
   retentionExpiresAt?: Date; // Date d'expiration de la rétention des données
   anonymized: boolean;
   gdprRetentionDate?: Date;
+  shipment?: {
+    carrier: string;
+    trackingNumber: string;
+    trackingUrl?: string;
+    status: 'shipped' | 'delivered';
+    shippedAt: Date;
+    deliveredAt?: Date;
+  };
 }
 
 const paymentSchema: Schema = new Schema({
@@ -163,6 +171,17 @@ const paymentSchema: Schema = new Schema({
       date.setFullYear(date.getFullYear() + 3); // 3 ans par défaut
       return date;
     }
+  },
+  shipment: {
+    type: new Schema({
+      carrier: { type: String, required: true, trim: true, maxlength: 50 },
+      trackingNumber: { type: String, required: true, trim: true, maxlength: 100 },
+      trackingUrl: { type: String, trim: true, maxlength: 500 },
+      status: { type: String, enum: ['shipped', 'delivered'], required: true },
+      shippedAt: { type: Date, required: true },
+      deliveredAt: { type: Date }
+    }, { _id: false }),
+    default: undefined
   }
 }, {
   timestamps: true

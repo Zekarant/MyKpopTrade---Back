@@ -14,6 +14,11 @@ import {
   fetchPaymentDetails,
   processRefund
 } from '../services/paymentService';
+import {
+  markShipped,
+  confirmDelivery,
+  getShipment
+} from '../services/shipmentService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
@@ -434,6 +439,98 @@ export const getMyPayments = asyncHandler(async (req: Request, res: Response) =>
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la récupération des paiements',
       error: devErrorDetails(error)
+    });
+  }
+});
+
+/**
+ * Le vendeur enregistre l'expédition (transporteur + numéro de suivi).
+ * @route POST /api/payments/:paymentId/shipment
+ * @access Private - Vendeur uniquement
+ */
+export const createShipment = asyncHandler(async (req: Request, res: Response) => {
+  const { paymentId } = req.params;
+  const userId = (req.user as any).id;
+  const { carrier, trackingNumber, trackingUrl } = req.body;
+
+  try {
+    const shipment = await markShipped({
+      userId,
+      paymentId: String(paymentId),
+      carrier,
+      trackingNumber,
+      trackingUrl
+    });
+
+    return res.status(201).json({ success: true, shipment });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return replyHttpError(res, error, { withSuccess: true });
+    }
+    logger.error('Erreur lors de l\'enregistrement de l\'expédition', {
+      error: error instanceof Error ? error.message : String(error),
+      paymentId,
+      userId: truncatedUserId(userId)
+    });
+    return res.status(500).json({
+      success: false,
+      message: 'Une erreur est survenue lors de l\'enregistrement de l\'expédition'
+    });
+  }
+});
+
+/**
+ * L'acheteur confirme la réception du colis.
+ * @route POST /api/payments/:paymentId/shipment/delivered
+ * @access Private - Acheteur uniquement
+ */
+export const markShipmentDelivered = asyncHandler(async (req: Request, res: Response) => {
+  const { paymentId } = req.params;
+  const userId = (req.user as any).id;
+
+  try {
+    const shipment = await confirmDelivery(userId, String(paymentId));
+    return res.status(200).json({ success: true, shipment });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return replyHttpError(res, error, { withSuccess: true });
+    }
+    logger.error('Erreur lors de la confirmation de réception', {
+      error: error instanceof Error ? error.message : String(error),
+      paymentId,
+      userId: truncatedUserId(userId)
+    });
+    return res.status(500).json({
+      success: false,
+      message: 'Une erreur est survenue lors de la confirmation de réception'
+    });
+  }
+});
+
+/**
+ * Récupère les infos de suivi d'un paiement.
+ * @route GET /api/payments/:paymentId/shipment
+ * @access Private - Acheteur ou vendeur du paiement
+ */
+export const fetchShipment = asyncHandler(async (req: Request, res: Response) => {
+  const { paymentId } = req.params;
+  const userId = (req.user as any).id;
+
+  try {
+    const shipment = await getShipment(userId, String(paymentId));
+    return res.status(200).json({ success: true, shipment });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return replyHttpError(res, error, { withSuccess: true });
+    }
+    logger.error('Erreur lors de la récupération de l\'expédition', {
+      error: error instanceof Error ? error.message : String(error),
+      paymentId,
+      userId: truncatedUserId(userId)
+    });
+    return res.status(500).json({
+      success: false,
+      message: 'Une erreur est survenue lors de la récupération de l\'expédition'
     });
   }
 });

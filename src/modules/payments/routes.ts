@@ -53,6 +53,9 @@ router.get('/paypal/confirm', paymentController.confirmPayPalPayment);
 
 // Routes avec paramètres ensuite
 router.post('/:paymentId/refund', validateRefundRequest, paymentController.refundPayment);
+router.post('/:paymentId/shipment/delivered', paymentController.markShipmentDelivered);
+router.post('/:paymentId/shipment', paymentController.createShipment);
+router.get('/:paymentId/shipment', paymentController.fetchShipment);
 router.get('/:paymentId', dataBreachDetection('payment_details'), paymentController.checkPaymentStatus);
 
 export default router;
