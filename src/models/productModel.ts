@@ -23,6 +23,9 @@ export interface IProduct extends Document {
     worldwide: boolean;
     nationalOnly: boolean;
     localPickup: boolean;
+    nationalCost?: number;
+    worldwideCost?: number;
+    /** @deprecated remplacé par nationalCost/worldwideCost — lu en fallback pour les anciens produits */
     shippingCost?: number;
   };
   createdAt: Date;
@@ -152,8 +155,17 @@ const ProductSchema: Schema = new Schema({
       type: Boolean,
       default: false
     },
+    nationalCost: {
+      type: Number,
+      min: 0
+    },
+    worldwideCost: {
+      type: Number,
+      min: 0
+    },
     shippingCost: {
-      type: Number
+      type: Number,
+      min: 0
     }
   },
   // Configuration des offres et négociations

@@ -13,6 +13,7 @@ import accountsRoutes from './modules/accounts/routes';
 import groupRoutes from './modules/groups/routes';
 import albumRoutes from './modules/albums/routes';
 import searchRoutes from './modules/search/routes';
+import addressRoutes from './modules/addresses/routes';
 import { errorHandler, notFoundHandler } from './commons/middlewares/errorMiddleware';
 import { initializePassport } from './config/passport';
 import { logAPIRequest } from './commons/utils/logger';
@@ -58,6 +59,7 @@ export function createApp(): express.Express {
   app.use('/api/groups', groupRoutes);
   app.use('/api/albums', albumRoutes);
   app.use('/api/search', searchRoutes);
+  app.use('/api/addresses', addressRoutes);
   app.use('/api/reports', reportRoutes);
 
   app.get('/', (req, res) => {

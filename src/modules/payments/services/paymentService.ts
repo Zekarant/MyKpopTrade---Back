@@ -125,7 +125,16 @@ export async function disconnectPayPalForUser(userId: string): Promise<void> {
   }
 }
 
-export async function initiateDirectPayment(userId: string, productId: string) {
+export interface InitiateDirectPaymentInput {
+  shippingMethod: unknown;
+  shippingAddress?: unknown;
+}
+
+export async function initiateDirectPayment(
+  userId: string,
+  productId: string,
+  checkout: InitiateDirectPaymentInput
+) {
   if (!productId) {
     throw new HttpError(400, 'ID du produit requis');
   }
@@ -147,7 +156,7 @@ export async function initiateDirectPayment(userId: string, productId: string) {
     throw new HttpError(400, 'Vous ne pouvez pas acheter votre propre produit');
   }
 
-  return await PayPalService.createDirectPayment(productId, userId);
+  return await PayPalService.createDirectPayment(productId, userId, checkout);
 }
 
 export async function captureDirectPayment(userId: string, orderId: string) {

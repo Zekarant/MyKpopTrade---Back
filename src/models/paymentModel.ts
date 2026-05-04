@@ -56,6 +56,18 @@ export interface IPayment extends Document {
   retentionExpiresAt?: Date; // Date d'expiration de la rétention des données
   anonymized: boolean;
   gdprRetentionDate?: Date;
+  productAmount?: number;
+  shippingAmount?: number;
+  shippingMethod?: 'national' | 'worldwide' | 'localPickup';
+  shippingAddress?: {
+    recipientName: string;
+    streetLine1: string;
+    streetLine2?: string;
+    postalCode: string;
+    city: string;
+    country: string;
+    phone?: string;
+  };
   shipment?: {
     carrier: string;
     trackingNumber: string;
@@ -171,6 +183,31 @@ const paymentSchema: Schema = new Schema({
       date.setFullYear(date.getFullYear() + 3); // 3 ans par défaut
       return date;
     }
+  },
+  productAmount: {
+    type: Number,
+    min: 0
+  },
+  shippingAmount: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  shippingMethod: {
+    type: String,
+    enum: ['national', 'worldwide', 'localPickup']
+  },
+  shippingAddress: {
+    type: new Schema({
+      recipientName: { type: String, required: true, trim: true, maxlength: 100 },
+      streetLine1: { type: String, required: true, trim: true, maxlength: 200 },
+      streetLine2: { type: String, trim: true, maxlength: 200 },
+      postalCode: { type: String, required: true, trim: true, maxlength: 16 },
+      city: { type: String, required: true, trim: true, maxlength: 100 },
+      country: { type: String, required: true, trim: true, maxlength: 2, default: 'FR' },
+      phone: { type: String, trim: true, maxlength: 32 }
+    }, { _id: false }),
+    default: undefined
   },
   shipment: {
     type: new Schema({

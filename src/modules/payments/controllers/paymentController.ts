@@ -181,10 +181,13 @@ export const disconnectPayPal = asyncHandler(async (req: Request, res: Response)
  */
 export const initiatePayPalPayment = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const { productId } = req.body;
+  const { productId, shippingMethod, shippingAddress } = req.body;
 
   try {
-    const paymentResponse = await initiateDirectPayment(userId, productId);
+    const paymentResponse = await initiateDirectPayment(userId, productId, {
+      shippingMethod,
+      shippingAddress
+    });
 
     return res.status(200).json({
       success: true,
@@ -192,6 +195,9 @@ export const initiatePayPalPayment = asyncHandler(async (req: Request, res: Resp
         id: paymentResponse.paymentId,
         paypalOrderId: paymentResponse.orderId,
         amount: paymentResponse.amount,
+        productAmount: paymentResponse.productAmount,
+        shippingAmount: paymentResponse.shippingAmount,
+        shippingMethod: paymentResponse.shippingMethod,
         currency: paymentResponse.currency,
         approvalUrl: paymentResponse.approvalUrl
       },

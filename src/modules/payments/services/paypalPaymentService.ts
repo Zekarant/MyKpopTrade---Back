@@ -4,6 +4,25 @@ import User from '../../../models/userModel';
 import Payment from '../../../models/paymentModel';
 import { PayPalClient, paypalApiBaseUrl } from './paypalClient';
 import logger from '../../../commons/utils/logger';
+import { resolveCheckout, ShippingAddress } from './checkoutService';
+
+export interface CheckoutInput {
+  shippingMethod: unknown;
+  shippingAddress?: unknown;
+}
+
+function buildPayPalShipping(address: ShippingAddress) {
+  return {
+    name: { full_name: address.recipientName },
+    address: {
+      address_line_1: address.streetLine1,
+      address_line_2: address.streetLine2,
+      admin_area_2: address.city,
+      postal_code: address.postalCode,
+      country_code: address.country
+    }
+  };
+}
 
 /**
  * Flux de paiements PayPal : création d'ordre, capture.
@@ -15,7 +34,8 @@ export class PayPalPaymentService {
    */
   static async createDirectPayment(
     productId: string,
-    buyerId: string
+    buyerId: string,
+    checkout: CheckoutInput
   ): Promise<any> {
     try {
       const existingPayment = await Payment.findOne({
@@ -70,7 +90,7 @@ export class PayPalPaymentService {
         throw new Error('Le vendeur n\'a pas configuré son email PayPal');
       }
 
-      let amountToPay = product.price;
+      let priceToPay = product.price;
 
       if (product.negotiations && product.negotiations.length > 0) {
         const acceptedNegotiation = product.negotiations.find(
@@ -78,13 +98,43 @@ export class PayPalPaymentService {
         );
 
         if (acceptedNegotiation) {
-          amountToPay = acceptedNegotiation.counterOffer || acceptedNegotiation.currentOffer;
+          priceToPay = acceptedNegotiation.counterOffer || acceptedNegotiation.currentOffer;
         }
       }
 
-      const roundedPrice = parseFloat(amountToPay.toFixed(2));
+      const { method, breakdown, address } = resolveCheckout(
+        product,
+        priceToPay,
+        checkout.shippingMethod,
+        checkout.shippingAddress
+      );
+      const currency = product.currency || 'EUR';
 
       const accessToken = await PayPalClient.getAccessToken();
+
+      const purchaseUnit: any = {
+        amount: {
+          currency_code: currency,
+          value: breakdown.total.toFixed(2),
+          breakdown: {
+            item_total: { currency_code: currency, value: breakdown.productAmount.toFixed(2) },
+            shipping: { currency_code: currency, value: breakdown.shippingAmount.toFixed(2) }
+          }
+        },
+        items: [{
+          name: product.title.substring(0, 127),
+          quantity: '1',
+          unit_amount: { currency_code: currency, value: breakdown.productAmount.toFixed(2) },
+          category: 'PHYSICAL_GOODS'
+        }],
+        description: `Achat sur MyKpopTrade: ${product.title.substring(0, 100)}`,
+        custom_id: productId,
+        payee: { email_address: seller.paypalEmail }
+      };
+
+      if (address) {
+        purchaseUnit.shipping = buildPayPalShipping(address);
+      }
 
       const response = await axios({
         method: 'post',
@@ -95,24 +145,12 @@ export class PayPalPaymentService {
         },
         data: {
           intent: 'CAPTURE',
-          purchase_units: [
-            {
-              amount: {
-                currency_code: product.currency || 'EUR',
-                value: roundedPrice.toString()
-              },
-              description: `Achat sur MyKpopTrade: ${product.title.substring(0, 100)}`,
-              custom_id: productId,
-              payee: {
-                email_address: seller.paypalEmail
-              }
-            }
-          ],
+          purchase_units: [purchaseUnit],
           application_context: {
             return_url: `${process.env.FRONTEND_URL}/payment/success?source=paypal`,
             cancel_url: `${process.env.FRONTEND_URL}/payment/cancel?source=paypal`,
             brand_name: 'MyKpopTrade',
-            shipping_preference: 'NO_SHIPPING',
+            shipping_preference: address ? 'SET_PROVIDED_ADDRESS' : 'NO_SHIPPING',
             user_action: 'PAY_NOW',
             locale: 'fr-FR'
           }
@@ -127,9 +165,13 @@ export class PayPalPaymentService {
         product: productId,
         buyer: buyerId,
         seller: product.seller,
-        amount: roundedPrice,
+        amount: breakdown.total,
+        productAmount: breakdown.productAmount,
+        shippingAmount: breakdown.shippingAmount,
+        shippingMethod: method,
+        shippingAddress: address,
         platformFee: 0,
-        currency: product.currency || 'EUR',
+        currency,
         paymentIntentId: response.data.id,
         approvalUrl,
         status: 'pending',
@@ -149,8 +191,11 @@ export class PayPalPaymentService {
         orderId: response.data.id,
         approvalUrl,
         paymentId: payment._id,
-        amount: roundedPrice,
-        currency: product.currency || 'EUR'
+        amount: breakdown.total,
+        productAmount: breakdown.productAmount,
+        shippingAmount: breakdown.shippingAmount,
+        shippingMethod: method,
+        currency
       };
     } catch (error) {
       logger.error('Erreur lors de la création du paiement PayPal', {

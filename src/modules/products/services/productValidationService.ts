@@ -68,6 +68,8 @@ export const productSchema = Joi.object({
     worldwide: Joi.boolean().default(false),
     nationalOnly: Joi.boolean().default(true),
     localPickup: Joi.boolean().default(false),
+    nationalCost: Joi.number().min(0),
+    worldwideCost: Joi.number().min(0),
     shippingCost: Joi.number().min(0)
   }).default({
     worldwide: false,
