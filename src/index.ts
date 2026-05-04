@@ -19,7 +19,7 @@ mongoose.connect(env.MONGODB_URI)
       logger.info(`Frontend URL: ${env.FRONTEND_URL}`);
     });
   })
-  .catch(error => {
+  .catch((error) => {
     logger.error('Erreur de connexion à MongoDB:', error);
     process.exit(1);
   });
