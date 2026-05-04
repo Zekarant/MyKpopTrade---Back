@@ -102,6 +102,10 @@ const kpopGroupSchema = new Schema({
   },
   invalidatedAt: {
     type: Date
+  },
+  isActive: {
+    type: Boolean,
+    default: true
   }
 }, {
   timestamps: true

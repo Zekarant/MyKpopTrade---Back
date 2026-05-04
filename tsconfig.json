@@ -6,8 +6,11 @@
     "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
+    "skipLibCheck": true,
     "typeRoots": ["./node_modules/@types", "./src/types"],
-    "types": ["node", "express"]
+    "types": ["node", "express", "jest"],
+    "noUnusedLocals": true,
+    "noUnusedParameters": false
   },
   "include": [
     "src/**/*",
@@ -15,6 +18,8 @@
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "**/__tests__/**",
+    "src/tests/**"
   ]
 }

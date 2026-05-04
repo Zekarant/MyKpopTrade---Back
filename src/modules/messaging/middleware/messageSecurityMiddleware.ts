@@ -1,8 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { RateLimiterMongo } from 'rate-limiter-flexible';
 import mongoose from 'mongoose';
-import User from '../../../models/userModel';
-import Message from '../../../models/messageModel';
 import Conversation from '../../../models/conversationModel';
 import logger from '../../../commons/utils/logger';
 

@@ -1,67 +1,48 @@
 import { Request, Response } from 'express';
-import mongoose from 'mongoose';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import Conversation from '../../../models/conversationModel';
-import Message from '../../../models/messageModel';
-import User from '../../../models/userModel';
-import Product from '../../../models/productModel';
-import { MessagingUtilsService } from '../services/messagingUtilsService';
 import logger from '../../../commons/utils/logger';
+import { HttpError } from '../../../commons/utils/httpError';
 import {
-  startPayWhatYouWant,
-  makePayWhatYouWantOffer
-} from '../services/negotiationService';
-import { LeanConversation } from '../types/conversationTypes';
+  fetchConversation,
+  listUserConversations,
+  createConversationForUser,
+  fetchConversationMedia,
+  softDeleteConversation,
+  archiveConversationForUser,
+  unarchiveConversationForUser,
+  toggleFavoriteConversationForUser
+} from '../services/conversationService';
+import {
+  initiateNegotiationFlow,
+  respondToNegotiationFlow,
+  initiatePayWhatYouWantFlow,
+  makePayWhatYouWantProposalFlow,
+  fetchConversationOffers,
+  cancelOfferFlow
+} from '../services/conversationOfferService';
+
+const DEFAULT_CONVERSATION_PAGE = 1;
+const DEFAULT_CONVERSATION_LIMIT = 20;
+const DEFAULT_USER_LIST_LIMIT = 10;
+const GENERIC_SERVER_ERROR = 'Une erreur est survenue';
 
 /**
- * Retourne la dernière offre pertinente de l'historique :
- * la plus récente acceptée si elle existe, sinon la toute dernière.
+ * Map les exceptions vers une réponse HTTP. Utilisé par tous les handlers
+ * partageant le même contrat catch HttpError → status code, sinon 500 générique.
  */
-function resolveLatestOffer(offerHistory: any[]): any | null {
-  if (!offerHistory.length) return null;
-  const accepted = offerHistory.filter(o => o.status === 'accepted');
-  return accepted.length > 0
-    ? accepted[accepted.length - 1]
-    : offerHistory[offerHistory.length - 1];
-}
-
-/**
- * Crée un message système pour une action d'offre, puis un message texte optionnel,
- * et met à jour le champ lastMessage / lastMessageAt de la conversation.
- */
-async function createOfferMessages(
-  conversationId: any,
-  senderId: string,
-  systemContent: string,
-  contentType: 'offer' | 'counter_offer' | 'system_notification',
-  optionalUserMessage?: string
-): Promise<void> {
-  const systemMessage = await Message.create({
-    conversation: conversationId,
-    sender: senderId,
-    content: systemContent,
-    contentType,
-    isSystemMessage: true,
-    readBy: [senderId]
-  });
-
-  let lastMessageId: any = systemMessage._id;
-
-  if (optionalUserMessage && optionalUserMessage.trim()) {
-    const userMessage = await Message.create({
-      conversation: conversationId,
-      sender: senderId,
-      content: optionalUserMessage,
-      contentType: 'text',
-      readBy: [senderId]
-    });
-    lastMessageId = userMessage._id;
+function handleControllerError(
+  res: Response,
+  error: unknown,
+  logMessage: string,
+  logContext: Record<string, unknown> = {}
+) {
+  if (error instanceof HttpError) {
+    return res.status(error.statusCode).json({ message: error.message });
   }
-
-  await Conversation.findByIdAndUpdate(
-    conversationId,
-    { lastMessage: lastMessageId, lastMessageAt: new Date() }
-  );
+  logger.error(logMessage, { error, ...logContext });
+  return res.status(500).json({
+    message: error instanceof Error ? error.message : GENERIC_SERVER_ERROR
+  });
 }
 
 /**
@@ -70,114 +51,18 @@ async function createOfferMessages(
 export const getConversation = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const conversationId = req.params.id as string;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
+  const limit = parseInt(req.query.limit as string) || DEFAULT_CONVERSATION_LIMIT;
 
   try {
-    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
-
-    // Récupérer la conversation
-    const conversationRaw = await Conversation.findById(conversationId)
-      .populate('participants', 'username profilePicture email location bio preferences socialLinks statistics')
-      .populate({
-        path: 'productId',
-        select: 'title description price images seller category condition kpopGroup kpopMember albumName currency isAvailable allowOffers minOfferPercentage shippingOptions createdAt'
-      })
-      .populate('offerHistory.offeredBy', 'username profilePicture')
-      .lean();
-
-    if (!conversationRaw) {
-      return res.status(404).json({ message: 'Conversation non trouvée' });
-    }
-
-    const conversation = conversationRaw as LeanConversation;
-
-    // Enrichir les données produit si présent
-    if (conversation.productId) {
-      (conversation as any).isOwner = conversation.productId.seller.toString() === userId;
-
-      if (conversation.productId.category) {
-        conversation.productId.categoryLabel = MessagingUtilsService.formatCategory(conversation.productId.category);
-      }
-    }
-
-    // Ajouter les métadonnées utilisateur
-    const isArchived = Array.isArray(conversation.archivedBy) &&
-      conversation.archivedBy.some((id: any) => id.toString() === userId);
-    const isFavorited = Array.isArray(conversation.favoritedBy) &&
-      conversation.favoritedBy.some((id: any) => id.toString() === userId);
-
-    (conversation as any).userMetadata = {
-      isArchived,
-      isFavorited
-    };
-
-    // Formater l'historique des offres
-    if (Array.isArray(conversation.offerHistory) && conversation.offerHistory.length > 0) {
-      (conversation as any).formattedOfferHistory = conversation.offerHistory.map((offer: any) => ({
-        ...offer,
-        isCurrentUserOffer: offer.offeredBy?._id?.toString() === userId,
-        formattedAmount: `${offer.amount} ${conversation.productId?.currency || 'EUR'}`
-      }));
-    }
-
-    // Récupérer les messages
-    const messageQuery = {
-      conversation: new mongoose.Types.ObjectId(conversationId),
-      isDeleted: false,
-      isActive: true
-    };
-
-    const totalMessages = await Message.countDocuments(messageQuery);
-
-    const messages = await Message.find(messageQuery)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .populate('sender', 'username profilePicture')
-      .lean();
-
-    const markedCount = await MessagingUtilsService.markConversationAsRead(conversationId, userId);
-
-    // Récupérer les médias
-    const mediaQuery = {
-      conversation: new mongoose.Types.ObjectId(conversationId),
-      attachments: { $exists: true, $ne: [] },
-      isDeleted: false
-    };
-
-    const mediaMessages = await Message.find(mediaQuery)
-      .select('attachments createdAt sender')
-      .populate('sender', 'username profilePicture')
-      .sort({ createdAt: -1 })
-      .lean();
-
-    const media = MessagingUtilsService.formatConversationMedia(mediaMessages);
-
-    return res.status(200).json({
-      conversation,
-      messages,
-      media,
-      markedAsRead: markedCount,
-      offersSummary: (conversation.type === 'negotiation' || conversation.type === 'pay_what_you_want') ? {
-        totalOffers: conversation.offerHistory.length,
-        currentStatus: conversation.type === 'negotiation'
-          ? conversation.negotiation?.status
-          : conversation.payWhatYouWant?.status,
-        latestOffer: resolveLatestOffer(conversation.offerHistory)
-      } : null,
-      pagination: {
-        total: totalMessages,
-        page,
-        limit,
-        pages: Math.ceil(totalMessages / limit)
-      }
-    });
+    const result = await fetchConversation(conversationId, userId, page, limit);
+    return res.status(200).json(result);
   } catch (error) {
-    logger.error('Erreur lors de la récupération de la conversation', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors de la récupération de la conversation',
+      { conversationId, userId }
+    );
   }
 });
 
@@ -186,102 +71,13 @@ export const getConversation = asyncHandler(async (req: Request, res: Response) 
  */
 export const getUserConversations = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 10;
+  const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
+  const limit = parseInt(req.query.limit as string) || DEFAULT_USER_LIST_LIMIT;
   const filter = req.query.filter as string || 'all';
 
-  const query: any = {
-    participants: userId,
-    isActive: true,
-    deletedBy: { $ne: userId }
-  };
-
-  if (filter === 'unread') {
-    const conversationsWithUnreadMessages = await Message.distinct('conversation', {
-      conversation: { $in: await Conversation.find({ participants: userId }).distinct('_id') },
-      readBy: { $ne: userId },
-      isDeleted: false
-    });
-    query._id = { $in: conversationsWithUnreadMessages };
-  } else if (filter === 'archived') {
-    query.archivedBy = userId;
-  } else if (filter === 'favorites') {
-    query.favoritedBy = userId;
-  } else if (filter === 'active') {
-    query.archivedBy = { $ne: userId };
-  }
-
-  const total = await Conversation.countDocuments(query);
-
-  const conversationsRaw = await Conversation.find(query)
-    .sort({ lastMessageAt: -1 })
-    .skip((page - 1) * limit)
-    .limit(limit)
-    .populate('participants', 'username profilePicture location bio preferences socialLinks statistics')
-    .populate('productId', 'title price images currency')
-    .lean();
-
-  const conversations = conversationsRaw as LeanConversation[];
-
-  const conversationsWithMetadata = await Promise.all(conversations.map(async (conversation) => {
-    const unreadCount = await Message.countDocuments({
-      conversation: conversation._id,
-      sender: { $ne: userId },
-      readBy: { $ne: userId },
-      isDeleted: false
-    });
-
-    const lastMessage = await Message.findOne({
-      conversation: conversation._id,
-      isDeleted: false
-    })
-      .sort({ createdAt: -1 })
-      .select('content contentType sender createdAt isEncrypted')
-      .populate('sender', 'username')
-      .lean();
-
-    let messagePreview = '';
-    if (lastMessage && !Array.isArray(lastMessage)) {
-      messagePreview = MessagingUtilsService.generateMessagePreview(lastMessage);
-    }
-
-    const isArchived = Array.isArray(conversation.archivedBy) &&
-      conversation.archivedBy.some((id: any) => id.toString() === userId);
-    const isFavorited = Array.isArray(conversation.favoritedBy) &&
-      conversation.favoritedBy.some((id: any) => id.toString() === userId);
-    const hasActiveOffer = conversation.type === 'negotiation' &&
-      conversation.negotiation?.status === 'pending';
-
-    return {
-      ...conversation,
-      unreadCount,
-      lastMessage: lastMessage ? {
-        ...lastMessage,
-        preview: messagePreview
-      } : null,
-      otherParticipant: Array.isArray(conversation.participants) && conversation.participants.length === 2
-        ? conversation.participants.find((p: any) => p._id.toString() !== userId)
-        : null,
-      metadata: {
-        isArchived,
-        isFavorited,
-        hasActiveOffer,
-        offerCount: Array.isArray(conversation.offerHistory) ? conversation.offerHistory.length : 0
-      }
-    };
-  }));
-
-  return res.status(200).json({
-    conversations: conversationsWithMetadata,
-    pagination: {
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit)
-    }
-  });
+  const result = await listUserConversations(userId, page, limit, filter);
+  return res.status(200).json(result);
 });
-
 
 /**
  * Crée une nouvelle conversation
@@ -290,91 +86,24 @@ export const startConversation = asyncHandler(async (req: Request, res: Response
   const userId = (req.user as any).id;
   const { recipientId, productId, initialMessage, type = 'general' } = req.body;
 
-  if (!recipientId) {
-    return res.status(400).json({ message: 'Destinataire requis' });
-  }
-
-  if (recipientId === userId) {
-    return res.status(400).json({ message: 'Vous ne pouvez pas créer une conversation avec vous-même' });
-  }
-
-  // Vérifier si le destinataire existe
-  const recipient = await User.findById(recipientId);
-  if (!recipient) {
-    return res.status(404).json({ message: 'Destinataire non trouvé' });
-  }
-
-  // Vérifier si un produit est spécifié et existe
-  if (productId) {
-    const product = await Product.findById(productId);
-    if (!product) {
-      return res.status(404).json({ message: 'Produit non trouvé' });
-    }
-  }
-
   try {
-    // Vérifier si une conversation existe déjà entre ces utilisateurs (et éventuellement pour ce produit)
-    const query: any = {
-      participants: { $all: [userId, recipientId] },
+    const conversation = await createConversationForUser({
+      userId,
+      recipientId,
+      productId,
+      initialMessage,
       type
-    };
-
-    // Si un produit est spécifié, l'ajouter à la requête
-    if (productId) {
-      query.productId = productId;
-    }
-
-    let conversation = await Conversation.findOne(query);
-
-    if (!conversation) {
-      // Créer une conversation avec lastMessageAt initialisé
-      const now = new Date();
-      conversation = await Conversation.create({
-        participants: [userId, recipientId],
-        type,
-        productId: productId || null,
-        createdBy: userId,
-        lastMessageAt: now
-      });
-    }
-
-    // Créer le message initial séparément
-    if (initialMessage) {
-      const message = await Message.create({
-        conversation: conversation._id,
-        sender: userId,
-        content: initialMessage,
-        contentType: 'text',
-        readBy: [userId]
-      });
-
-      await Conversation.findByIdAndUpdate(
-        conversation._id,
-        {
-          lastMessage: message._id,
-          lastMessageAt: new Date()
-        }
-      );
-
-      // Récupérer la conversation mise à jour
-      conversation = await Conversation.findById(conversation._id);
-    } else {
-      // S'assurer que la conversation est bien récupérée même sans message
-      conversation = await Conversation.findById(conversation._id);
-    }
-
-    // Récupérer la conversation complète avec les participants
-    const populatedConversation = await Conversation.findById(conversation._id)
-      .populate('participants', 'username profilePicture email')
-      .populate('productId', 'title price images')
-      .populate('lastMessage');
+    });
 
     return res.status(201).json({
       message: 'Conversation créée avec succès',
-      conversation: populatedConversation
+      conversation
     });
   } catch (error) {
-    // Améliorer la journalisation des erreurs pour faciliter le débogage
+    if (error instanceof HttpError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+
     if (error instanceof Error) {
       logger.error('Erreur lors de la création de la conversation', {
         error: error.message,
@@ -402,177 +131,30 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
   const userId = (req.user as any).id;
   const { productId, initialOffer, message } = req.body;
 
-  // Validation des entrées
-  if (!productId || !initialOffer) {
-    return res.status(400).json({ message: 'ID du produit et offre initiale requis' });
-  }
-
-  if (typeof initialOffer !== 'number' || initialOffer <= 0) {
-    return res.status(400).json({ message: 'L\'offre doit être un nombre positif' });
-  }
-
   try {
-    // Récupérer le produit
-    const product = await Product.findById(productId);
-
-    if (!product) {
-      return res.status(404).json({ message: 'Produit non trouvé' });
-    }
-
-    if (!product.isAvailable) {
-      return res.status(400).json({ message: 'Ce produit n\'est plus disponible' });
-    }
-
-    if (!product.allowOffers) {
-      return res.status(400).json({ message: 'Ce produit n\'accepte pas les offres' });
-    }
-
-    // Vérifier que l'utilisateur n'est pas le vendeur
-    if (product.seller.toString() === userId) {
-      return res.status(400).json({ message: 'Vous ne pouvez pas faire une offre sur votre propre produit' });
-    }
-
-    // Vérifier que l'offre est supérieure au pourcentage minimum
-    const minOffer = product.price * (product.minOfferPercentage || 50) / 100;
-    if (initialOffer < minOffer) {
-      return res.status(400).json({
-        message: `L'offre doit être au moins ${product.minOfferPercentage || 50}% du prix (${minOffer} ${product.currency})`
-      });
-    }
-
-    // Vérifier si une conversation existe déjà entre l'acheteur et le vendeur pour ce produit
-    let conversation = await Conversation.findOne({
-      participants: { $all: [userId, product.seller] },
-      productId: productId,
-      type: 'negotiation',
-      isActive: true
+    const result = await initiateNegotiationFlow({
+      userId,
+      productId,
+      initialOffer,
+      message
     });
 
-    let isUpdatingOffer = false;
-    let oldOffer = null;
-
-    if (conversation) {
-      isUpdatingOffer = true;
-
-      // Récupérer l'ancienne offre pour l'afficher dans le message
-      const lastOffer = conversation.offerHistory.find(
-        (offer: any) => offer.offeredBy.toString() === userId && offer.status === 'pending'
-      );
-
-      if (lastOffer) {
-        oldOffer = lastOffer.amount;
-
-        // Mettre à jour le statut de l'ancienne offre à "expired"
-        await Conversation.updateOne(
-          {
-            _id: conversation._id,
-            'offerHistory._id': lastOffer._id
-          },
-          {
-            $set: { 'offerHistory.$.status': 'expired' }
-          }
-        );
-      }
-
-      // Mettre à jour la conversation avec la nouvelle offre
-      await Conversation.updateOne(
-        { _id: conversation._id },
-        {
-          $set: {
-            'negotiation.currentOffer': initialOffer,
-            'negotiation.status': 'pending',
-            lastMessageAt: new Date()
-          },
-          $push: {
-            offerHistory: {
-              offeredBy: userId,
-              amount: initialOffer,
-              offerType: 'initial',
-              status: 'pending',
-              message: message || '',
-              createdAt: new Date()
-            }
-          }
-        }
-      );
-
-      const systemContent = oldOffer
-        ? `Offre mise à jour de ${oldOffer} ${product.currency} à ${initialOffer} ${product.currency}`
-        : `Nouvelle offre de ${initialOffer} ${product.currency}`;
-
-      await createOfferMessages(conversation._id, userId, systemContent, 'offer', message);
-
-    } else {
-      conversation = await Conversation.create({
-        participants: [userId, product.seller],
-        type: 'negotiation',
-        productId: product._id,
-        createdBy: userId,
-        status: 'open',
-        negotiation: {
-          initialPrice: product.price,
-          currentOffer: initialOffer,
-          status: 'pending'
-        },
-        title: `Négociation pour ${product.title}`,
-        offerHistory: [{
-          offeredBy: userId,
-          amount: initialOffer,
-          offerType: 'initial',
-          status: 'pending',
-          message: message || '',
-          createdAt: new Date()
-        }]
-      });
-
-      await createOfferMessages(
-        conversation._id,
-        userId,
-        `Offre initiale de ${initialOffer} ${product.currency}`,
-        'offer',
-        message
-      );
-
-      // Ajouter la négociation au produit
-      const negotiation = {
-        buyer: userId,
-        initialOffer,
-        currentOffer: initialOffer,
-        status: 'pending',
-        conversationId: conversation._id,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-
-      await Product.findByIdAndUpdate(
-        productId,
-        { $push: { negotiations: negotiation } }
-      );
-    }
-
-    // Récupérer la conversation complète avec les relations
-    const populatedConversation = await Conversation.findById(conversation._id)
-      .populate('participants', 'username profilePicture email')
-      .populate('productId', 'title price images')
-      .populate('lastMessage')
-      .populate('offerHistory.offeredBy', 'username profilePicture');
-
-    return res.status(isUpdatingOffer ? 200 : 201).json({
-      message: isUpdatingOffer ? 'Offre mise à jour avec succès' : 'Négociation initiée avec succès',
-      conversation: populatedConversation,
-      initialOffer,
-      isUpdate: isUpdatingOffer,
-      previousOffer: oldOffer
+    return res.status(result.isUpdate ? 200 : 201).json({
+      message: result.isUpdate ? 'Offre mise à jour avec succès' : 'Négociation initiée avec succès',
+      conversation: result.conversation,
+      initialOffer: result.initialOffer,
+      isUpdate: result.isUpdate,
+      previousOffer: result.previousOffer
     });
   } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     logger.error('Erreur lors de l\'initiation d\'une négociation', {
       error: error instanceof Error ? error.message : 'Erreur inconnue',
       stack: error instanceof Error ? error.stack : undefined,
-      productId,
-      userId,
-      initialOffer
+      productId, userId, initialOffer
     });
-
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la création de la négociation'
     });
@@ -587,172 +169,25 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
   const conversationId = req.params.id as string;
   const { action, counterOffer, message } = req.body;
 
-  // Validation des entrées
-  if (!action || !['accept', 'reject', 'counter'].includes(action)) {
-    return res.status(400).json({ message: 'Action invalide. Doit être accept, reject ou counter' });
-  }
-
-  if (action === 'counter' && (!counterOffer || typeof counterOffer !== 'number' || counterOffer <= 0)) {
-    return res.status(400).json({ message: 'Contre-offre requise et doit être un nombre positif' });
-  }
-
   try {
-    // Récupérer la conversation avec les détails du produit
-    const conversation = await Conversation.findById(conversationId)
-      .populate({
-        path: 'productId',
-        select: 'title price images seller negotiations currency'
-      });
-
-    if (!conversation) {
-      return res.status(404).json({ message: 'Conversation non trouvée' });
-    }
-
-    if (conversation.type !== 'negotiation') {
-      return res.status(400).json({ message: 'Cette conversation n\'est pas une négociation' });
-    }
-
-    const product = conversation.productId as any;
-
-    if (!product) {
-      return res.status(400).json({ message: 'Produit non trouvé dans cette négociation' });
-    }
-
-    // Vérifier que l'utilisateur est bien le vendeur
-    if (product.seller.toString() !== userId) {
-      return res.status(403).json({ message: 'Seul le vendeur peut répondre à cette offre' });
-    }
-
-    // Récupérer l'offre en attente depuis l'historique de la CONVERSATION (source de vérité)
-    const pendingOffer = conversation.offerHistory.find(
-      (offer: any) => offer.status === 'pending'
-    );
-
-    if (!pendingOffer) {
-      return res.status(404).json({ message: 'Aucune offre en attente' });
-    }
-
-    // Trouver la négociation dans le produit
-    const productDoc = await Product.findById(product._id);
-    const negotiationIndex = productDoc.negotiations.findIndex(
-      (n: { conversationId: { toString(): string } }) => n.conversationId.toString() === conversationId
-    );
-
-    if (negotiationIndex === -1) {
-      return res.status(404).json({ message: 'Négociation non trouvée pour ce produit' });
-    }
-
-    const negotiation = productDoc.negotiations[negotiationIndex];
-
-    // Traiter l'action selon son type
-    let statusMessage = '';
-    let contentType = 'system_notification';
-
-    const offerAmount = pendingOffer.amount;
-
-    switch (action) {
-      case 'accept':
-        // Accepter l'offre
-        negotiation.status = 'accepted';
-        negotiation.currentOffer = offerAmount;
-        statusMessage = `Offre de ${offerAmount} ${product.currency} acceptée`;
-
-        // Mettre à jour la conversation et l'historique
-        await Conversation.updateOne(
-          {
-            _id: conversationId,
-            'offerHistory._id': pendingOffer._id
-          },
-          {
-            $set: {
-              'negotiation.status': 'accepted',
-              'negotiation.currentOffer': offerAmount,
-              'offerHistory.$.status': 'accepted',
-              'offerHistory.$.respondedAt': new Date()
-            }
-          }
-        );
-        break;
-
-      case 'reject':
-        // Rejeter l'offre
-        negotiation.status = 'rejected';
-        statusMessage = `Offre de ${offerAmount} ${product.currency} refusée`;
-
-        if (message && message.trim()) {
-          statusMessage += `\nRaison : ${message}`;
-        }
-
-        // Mettre à jour la conversation et l'historique
-        await Conversation.updateOne(
-          {
-            _id: conversationId,
-            'offerHistory._id': pendingOffer._id
-          },
-          {
-            $set: {
-              'negotiation.status': 'rejected',
-              'offerHistory.$.status': 'rejected',
-              'offerHistory.$.respondedAt': new Date()
-            }
-          }
-        );
-        break;
-
-      case 'counter':
-        // Faire une contre-offre
-        negotiation.counterOffer = counterOffer;
-        negotiation.updatedAt = new Date();
-        statusMessage = `🔄 Contre-offre de ${counterOffer} ${product.currency}`;
-        contentType = 'counter_offer';
-
-        // Mettre à jour la conversation et ajouter la contre-offre à l'historique
-        await Conversation.updateOne(
-          {
-            _id: conversationId,
-            'offerHistory._id': pendingOffer._id
-          },
-          {
-            $set: {
-              'negotiation.counterOffer': counterOffer,
-              'offerHistory.$.status': 'rejected'
-            },
-            $push: {
-              offerHistory: {
-                offeredBy: userId,
-                amount: counterOffer,
-                offerType: 'counter',
-                status: 'pending',
-                message: message || '',
-                createdAt: new Date()
-              }
-            }
-          }
-        );
-        break;
-    }
-
-    // Sauvegarder les changements dans le produit (maintenant synchronisé)
-    productDoc.negotiations[negotiationIndex] = negotiation;
-    await productDoc.save();
-
-    const optionalMsg = action !== 'reject' ? message : undefined;
-    await createOfferMessages(conversationId, userId, statusMessage, contentType as any, optionalMsg);
-
-    // Récupérer la conversation mise à jour (source de vérité pour la négo entre ces 2 utilisateurs)
-    const updatedConversation = await Conversation.findById(conversationId)
-      .populate('participants', 'username profilePicture email')
-      .populate('productId', 'title price images')
-      .populate('lastMessage')
-      .populate('offerHistory.offeredBy', 'username profilePicture');
+    const result = await respondToNegotiationFlow({
+      userId,
+      conversationId,
+      action,
+      counterOffer,
+      message
+    });
 
     return res.status(200).json({
       message: 'Réponse à la négociation envoyée avec succès',
-      action,
-      conversation: updatedConversation,
-      negotiation: updatedConversation?.negotiation
+      action: result.action,
+      conversation: result.conversation,
+      negotiation: result.negotiation
     });
   } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     logger.error('Erreur lors de la réponse à une négociation', {
       error: error instanceof Error ? error.message : 'Erreur inconnue',
       stack: error instanceof Error ? error.stack : undefined,
@@ -760,7 +195,6 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
       userId,
       action
     });
-
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la réponse à la négociation'
     });
@@ -774,32 +208,23 @@ export const initiatePayWhatYouWant = asyncHandler(async (req: Request, res: Res
   const userId = (req.user as any).id;
   const { productId, minimumPrice, maximumPrice, message } = req.body;
 
-  if (!productId) {
-    return res.status(400).json({ message: 'ID du produit requis' });
-  }
-
-  if (isNaN(parseFloat(minimumPrice)) || parseFloat(minimumPrice) < 0) {
-    return res.status(400).json({ message: 'Prix minimum invalide' });
-  }
-
-  if (maximumPrice && (isNaN(parseFloat(maximumPrice)) || parseFloat(maximumPrice) <= parseFloat(minimumPrice))) {
-    return res.status(400).json({ message: 'Prix maximum invalide' });
-  }
-
   try {
-    const result = await startPayWhatYouWant({
+    const payWhatYouWant = await initiatePayWhatYouWantFlow({
+      userId,
       productId,
-      sellerId: userId,
-      minimumPrice: parseFloat(minimumPrice),
-      maximumPrice: maximumPrice ? parseFloat(maximumPrice) : undefined,
-      message: message || ''
+      minimumPrice,
+      maximumPrice,
+      message
     });
 
     return res.status(201).json({
       message: 'Option Pay What You Want activée avec succès',
-      payWhatYouWant: result
+      payWhatYouWant
     });
   } catch (error: any) {
+    if (error instanceof HttpError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     logger.error('Erreur lors de l\'activation de Pay What You Want', { error });
     return res.status(400).json({ message: error.message });
   }
@@ -813,16 +238,12 @@ export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res:
   const conversationId = req.params.id as string;
   const { proposedPrice, message } = req.body;
 
-  if (!proposedPrice || isNaN(parseFloat(proposedPrice)) || parseFloat(proposedPrice) <= 0) {
-    return res.status(400).json({ message: 'Prix proposé invalide' });
-  }
-
   try {
-    const result = await makePayWhatYouWantOffer({
+    const result = await makePayWhatYouWantProposalFlow({
+      userId,
       conversationId,
-      buyerId: userId,
-      proposedPrice: parseFloat(proposedPrice),
-      message: message || ''
+      proposedPrice,
+      message
     });
 
     return res.status(200).json({
@@ -830,105 +251,56 @@ export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res:
       result
     });
   } catch (error: any) {
+    if (error instanceof HttpError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     logger.error('Erreur lors de la proposition d\'un prix PWYW', { error });
     return res.status(400).json({ message: error.message });
   }
 });
 
 /**
- * Récupère tous les médias d'une conversation - SIMPLIFIÉ
+ * Récupère tous les médias d'une conversation
  */
 export const getConversationMedia = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const conversationId = req.params.id as string;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
+  const limit = parseInt(req.query.limit as string) || DEFAULT_CONVERSATION_LIMIT;
   const type = req.query.type as string;
 
   try {
-    // Vérifier l'accès avec le service utilitaire
-    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
-
-    // Récupérer les messages avec médias
-    const mediaMessages = await Message.find({
-      conversation: conversationId,
-      attachments: { $exists: true, $ne: [] },
-      isDeleted: false
-    })
-      .select('attachments createdAt sender')
-      .populate('sender', 'username profilePicture')
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .lean();
-
-    // Utiliser le service utilitaire pour formater
-    let media = MessagingUtilsService.formatConversationMedia(mediaMessages);
-
-    // Filtrer par type si spécifié
-    if (type && type !== 'all') {
-      media = media.filter(item => item.type === type);
-    }
-
-    return res.status(200).json({
-      media,
-      pagination: {
-        total: media.length,
-        page,
-        limit,
-        pages: Math.ceil(media.length / limit)
-      }
-    });
+    const result = await fetchConversationMedia({ userId, conversationId, page, limit, type });
+    return res.status(200).json(result);
   } catch (error) {
-    logger.error('Erreur lors de la récupération des médias', { error, conversationId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors de la récupération des médias',
+      { conversationId }
+    );
   }
 });
 
 /**
  * Supprime une conversation pour l'utilisateur actuel
- * (soft delete - la conversation reste pour les autres participants)
  */
 export const deleteConversation = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const conversationId = req.params.id as string;
 
   try {
-    // Vérifier l'accès
-    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
-
-    // Ajouter l'utilisateur à la liste deletedBy
-    const conversation = await Conversation.findByIdAndUpdate(
-      conversationId,
-      { $addToSet: { deletedBy: userId } },
-      { new: true }
-    );
-
-    if (!conversation) {
-      return res.status(404).json({ message: 'Conversation non trouvée' });
-    }
-
-    // Si tous les participants ont supprimé la conversation, la marquer comme inactive
-    if (conversation.deletedBy.length === conversation.participants.length) {
-      await Conversation.findByIdAndUpdate(
-        conversationId,
-        { isActive: false, status: 'closed' }
-      );
-    }
-
+    await softDeleteConversation(userId, conversationId);
     logger.info(`Conversation ${conversationId} supprimée par l'utilisateur ${userId}`);
-
     return res.status(200).json({
       message: 'Conversation supprimée avec succès',
       conversationId
     });
   } catch (error) {
-    logger.error('Erreur lors de la suppression de la conversation', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors de la suppression de la conversation',
+      { conversationId, userId }
+    );
   }
 });
 
@@ -940,32 +312,19 @@ export const archiveConversation = asyncHandler(async (req: Request, res: Respon
   const conversationId = req.params.id as string;
 
   try {
-    // Vérifier l'accès
-    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
-
-    // Ajouter l'utilisateur à la liste archivedBy
-    const conversation = await Conversation.findByIdAndUpdate(
-      conversationId,
-      { $addToSet: { archivedBy: userId } },
-      { new: true }
-    );
-
-    if (!conversation) {
-      return res.status(404).json({ message: 'Conversation non trouvée' });
-    }
-
+    await archiveConversationForUser(userId, conversationId);
     logger.info(`Conversation ${conversationId} archivée par l'utilisateur ${userId}`);
-
     return res.status(200).json({
       message: 'Conversation archivée avec succès',
       conversationId,
       isArchived: true
     });
   } catch (error) {
-    logger.error('Erreur lors de l\'archivage de la conversation', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors de l\'archivage de la conversation',
+      { conversationId, userId }
+    );
   }
 });
 
@@ -977,32 +336,19 @@ export const unarchiveConversation = asyncHandler(async (req: Request, res: Resp
   const conversationId = req.params.id as string;
 
   try {
-    // Vérifier l'accès
-    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
-
-    // Retirer l'utilisateur de la liste archivedBy
-    const conversation = await Conversation.findByIdAndUpdate(
-      conversationId,
-      { $pull: { archivedBy: userId } },
-      { new: true }
-    );
-
-    if (!conversation) {
-      return res.status(404).json({ message: 'Conversation non trouvée' });
-    }
-
+    await unarchiveConversationForUser(userId, conversationId);
     logger.info(`Conversation ${conversationId} désarchivée par l'utilisateur ${userId}`);
-
     return res.status(200).json({
       message: 'Conversation désarchivée avec succès',
       conversationId,
       isArchived: false
     });
   } catch (error) {
-    logger.error('Erreur lors du désarchivage de la conversation', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors du désarchivage de la conversation',
+      { conversationId, userId }
+    );
   }
 });
 
@@ -1014,49 +360,24 @@ export const toggleFavoriteConversation = asyncHandler(async (req: Request, res:
   const conversationId = req.params.id as string;
 
   try {
-    // Vérifier l'accès
-    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+    const { wasFavorited } = await toggleFavoriteConversationForUser(userId, conversationId);
+    const isFavorited = !wasFavorited;
 
-    // Vérifier si déjà en favoris
-    const conversation = await Conversation.findById(conversationId);
-
-    if (!conversation) {
-      return res.status(404).json({ message: 'Conversation non trouvée' });
-    }
-
-    const isFavorited = conversation.favoritedBy.some(
-      (id: mongoose.Types.ObjectId) => id.toString() === userId
+    logger.info(
+      `Conversation ${conversationId} ${wasFavorited ? 'retirée des' : 'ajoutée aux'} favoris par l'utilisateur ${userId}`
     );
 
-    let updatedConversation;
-    if (isFavorited) {
-      // Retirer des favoris
-      updatedConversation = await Conversation.findByIdAndUpdate(
-        conversationId,
-        { $pull: { favoritedBy: userId } },
-        { new: true }
-      );
-    } else {
-      // Ajouter aux favoris
-      updatedConversation = await Conversation.findByIdAndUpdate(
-        conversationId,
-        { $addToSet: { favoritedBy: userId } },
-        { new: true }
-      );
-    }
-
-    logger.info(`Conversation ${conversationId} ${isFavorited ? 'retirée des' : 'ajoutée aux'} favoris par l'utilisateur ${userId}`);
-
     return res.status(200).json({
-      message: `Conversation ${isFavorited ? 'retirée des' : 'ajoutée aux'} favoris avec succès`,
+      message: `Conversation ${wasFavorited ? 'retirée des' : 'ajoutée aux'} favoris avec succès`,
       conversationId,
-      isFavorited: !isFavorited
+      isFavorited
     });
   } catch (error) {
-    logger.error('Erreur lors du toggle favoris de la conversation', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors du toggle favoris de la conversation',
+      { conversationId, userId }
+    );
   }
 });
 
@@ -1068,58 +389,14 @@ export const getConversationOffers = asyncHandler(async (req: Request, res: Resp
   const conversationId = req.params.id as string;
 
   try {
-    await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
-
-    const conversationRaw = await Conversation.findById(conversationId)
-      .populate('offerHistory.offeredBy', 'username profilePicture')
-      .populate({
-        path: 'productId',
-        select: 'title price images currency seller'
-      })
-      .lean();
-
-    if (!conversationRaw) {
-      return res.status(404).json({ message: 'Conversation non trouvée' });
-    }
-
-    const conversation = conversationRaw as LeanConversation;
-
-    const response: any = {
-      conversationId,
-      type: conversation.type,
-      offerHistory: conversation.offerHistory
-    };
-
-    if (conversation.type === 'negotiation' && conversation.negotiation) {
-      response.currentNegotiation = {
-        initialPrice: conversation.negotiation.initialPrice,
-        currentOffer: conversation.negotiation.currentOffer,
-        counterOffer: conversation.negotiation.counterOffer,
-        status: conversation.negotiation.status,
-        expiresAt: conversation.negotiation.expiresAt
-      };
-    }
-
-    if (conversation.type === 'pay_what_you_want' && conversation.payWhatYouWant) {
-      response.payWhatYouWant = {
-        minimumPrice: conversation.payWhatYouWant.minimumPrice,
-        maximumPrice: conversation.payWhatYouWant.maximumPrice,
-        proposedPrice: conversation.payWhatYouWant.proposedPrice,
-        status: conversation.payWhatYouWant.status
-      };
-    }
-
-    if (conversation.productId) {
-      response.product = conversation.productId;
-      response.isOwner = conversation.productId.seller.toString() === userId;
-    }
-
+    const response = await fetchConversationOffers(userId, conversationId);
     return res.status(200).json(response);
   } catch (error) {
-    logger.error('Erreur lors de la récupération des offres', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors de la récupération des offres',
+      { conversationId, userId }
+    );
   }
 });
 
@@ -1131,95 +408,18 @@ export const cancelOffer = asyncHandler(async (req: Request, res: Response) => {
   const conversationId = req.params.id as string;
 
   try {
-    // Récupérer la conversation
-    const conversation = await Conversation.findById(conversationId)
-      .populate({
-        path: 'productId',
-        select: 'title price currency seller'
-      });
-
-    if (!conversation) {
-      return res.status(404).json({ message: 'Conversation non trouvée' });
-    }
-
-    if (conversation.type !== 'negotiation' && conversation.type !== 'pay_what_you_want') {
-      return res.status(400).json({ message: 'Cette conversation ne contient pas d\'offre' });
-    }
-
-    // Vérifier que l'utilisateur a bien fait une offre
-    const userOffer = conversation.offerHistory.find(
-      (offer: any) => offer.offeredBy.toString() === userId && offer.status === 'pending'
-    );
-
-    if (!userOffer) {
-      return res.status(404).json({ message: 'Aucune offre en cours à annuler' });
-    }
-
-    const product = conversation.productId as any;
-
-    // Mettre à jour l'offre dans l'historique
-    await Conversation.updateOne(
-      {
-        _id: conversationId,
-        'offerHistory._id': userOffer._id
-      },
-      {
-        $set: {
-          'offerHistory.$.status': 'expired',
-          'offerHistory.$.respondedAt': new Date()
-        }
-      }
-    );
-
-    // Mettre à jour le statut de la négociation si applicable
-    if (conversation.type === 'negotiation' && conversation.negotiation) {
-      await Conversation.updateOne(
-        { _id: conversationId },
-        {
-          $set: { 'negotiation.status': 'expired' }
-        }
-      );
-    }
-
-    if (conversation.type === 'pay_what_you_want' && conversation.payWhatYouWant) {
-      await Conversation.updateOne(
-        { _id: conversationId },
-        {
-          $set: { 'payWhatYouWant.status': 'rejected' }
-        }
-      );
-    }
-
-    // Créer un message système pour l'annulation
-    const systemMessage = await Message.create({
-      conversation: conversationId,
-      sender: userId,
-      content: `Offre de ${userOffer.amount} ${product?.currency || 'EUR'} annulée`,
-      contentType: 'system_notification',
-      isSystemMessage: true,
-      readBy: [userId]
-    });
-
-    // Mettre à jour le dernier message
-    await Conversation.findByIdAndUpdate(
-      conversationId,
-      { lastMessage: systemMessage._id, lastMessageAt: new Date() }
-    );
-
+    const cancelledOffer = await cancelOfferFlow(userId, conversationId);
     logger.info(`Offre annulée pour la conversation ${conversationId} par l'utilisateur ${userId}`);
-
     return res.status(200).json({
       message: 'Offre annulée avec succès',
       conversationId,
-      cancelledOffer: {
-        amount: userOffer.amount,
-        cancelledAt: new Date()
-      }
+      cancelledOffer
     });
   } catch (error) {
-    logger.error('Erreur lors de l\'annulation de l\'offre', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors de l\'annulation de l\'offre',
+      { conversationId, userId }
+    );
   }
 });

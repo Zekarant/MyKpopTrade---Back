@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import User from '../models/userModel';
-import logger from '../commons/utils/logger';
 
 // Charger les variables d'environnement
 dotenv.config({ path: '.env.local' });

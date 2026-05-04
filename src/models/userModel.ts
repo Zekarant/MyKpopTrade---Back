@@ -75,6 +75,12 @@ export interface IUser extends Document {
   identityVerifiedAt?: Date;
   verificationLevel: 'none' | 'basic' | 'advanced' | 'complete';
   paypalEmail?: string;
+  paypalConnected?: boolean;
+  paypalTokens?: {
+    accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: Date;
+  };
   isSellerVerified?: boolean;
   sellerRating?: number;
   
@@ -128,6 +134,15 @@ const UserSchema: Schema = new Schema({
       },
       message: 'Veuillez fournir un email PayPal valide'
     }
+  },
+  paypalConnected: {
+    type: Boolean,
+    default: false
+  },
+  paypalTokens: {
+    accessToken: { type: String, select: false },
+    refreshToken: { type: String, select: false },
+    expiresAt: { type: Date }
   },
   // Champs RGPD
   privacyPolicyAccepted: {

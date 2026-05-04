@@ -1,4 +1,3 @@
-import passport from 'passport';
 import User, { IUser } from '../../../models/userModel';
 
 /**
