@@ -21,26 +21,48 @@ import {
   cancelOfferFlow
 } from '../services/conversationOfferService';
 
+const DEFAULT_CONVERSATION_PAGE = 1;
+const DEFAULT_CONVERSATION_LIMIT = 20;
+const DEFAULT_USER_LIST_LIMIT = 10;
+const GENERIC_SERVER_ERROR = 'Une erreur est survenue';
+
+/**
+ * Map les exceptions vers une réponse HTTP. Utilisé par tous les handlers
+ * partageant le même contrat catch HttpError → status code, sinon 500 générique.
+ */
+function handleControllerError(
+  res: Response,
+  error: unknown,
+  logMessage: string,
+  logContext: Record<string, unknown> = {}
+) {
+  if (error instanceof HttpError) {
+    return res.status(error.statusCode).json({ message: error.message });
+  }
+  logger.error(logMessage, { error, ...logContext });
+  return res.status(500).json({
+    message: error instanceof Error ? error.message : GENERIC_SERVER_ERROR
+  });
+}
+
 /**
  * Récupère une conversation spécifique avec ses messages
  */
 export const getConversation = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const conversationId = req.params.id as string;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
+  const limit = parseInt(req.query.limit as string) || DEFAULT_CONVERSATION_LIMIT;
 
   try {
     const result = await fetchConversation(conversationId, userId, page, limit);
     return res.status(200).json(result);
   } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    logger.error('Erreur lors de la récupération de la conversation', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors de la récupération de la conversation',
+      { conversationId, userId }
+    );
   }
 });
 
@@ -49,8 +71,8 @@ export const getConversation = asyncHandler(async (req: Request, res: Response) 
  */
 export const getUserConversations = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 10;
+  const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
+  const limit = parseInt(req.query.limit as string) || DEFAULT_USER_LIST_LIMIT;
   const filter = req.query.filter as string || 'all';
 
   const result = await listUserConversations(userId, page, limit, filter);
@@ -131,9 +153,7 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
     logger.error('Erreur lors de l\'initiation d\'une négociation', {
       error: error instanceof Error ? error.message : 'Erreur inconnue',
       stack: error instanceof Error ? error.stack : undefined,
-      productId,
-      userId,
-      initialOffer
+      productId, userId, initialOffer
     });
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la création de la négociation'
@@ -245,21 +265,19 @@ export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res:
 export const getConversationMedia = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const conversationId = req.params.id as string;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
+  const limit = parseInt(req.query.limit as string) || DEFAULT_CONVERSATION_LIMIT;
   const type = req.query.type as string;
 
   try {
     const result = await fetchConversationMedia({ userId, conversationId, page, limit, type });
     return res.status(200).json(result);
   } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    logger.error('Erreur lors de la récupération des médias', { error, conversationId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors de la récupération des médias',
+      { conversationId }
+    );
   }
 });
 
@@ -278,13 +296,11 @@ export const deleteConversation = asyncHandler(async (req: Request, res: Respons
       conversationId
     });
   } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    logger.error('Erreur lors de la suppression de la conversation', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors de la suppression de la conversation',
+      { conversationId, userId }
+    );
   }
 });
 
@@ -304,13 +320,11 @@ export const archiveConversation = asyncHandler(async (req: Request, res: Respon
       isArchived: true
     });
   } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    logger.error('Erreur lors de l\'archivage de la conversation', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors de l\'archivage de la conversation',
+      { conversationId, userId }
+    );
   }
 });
 
@@ -330,13 +344,11 @@ export const unarchiveConversation = asyncHandler(async (req: Request, res: Resp
       isArchived: false
     });
   } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    logger.error('Erreur lors du désarchivage de la conversation', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors du désarchivage de la conversation',
+      { conversationId, userId }
+    );
   }
 });
 
@@ -361,13 +373,11 @@ export const toggleFavoriteConversation = asyncHandler(async (req: Request, res:
       isFavorited
     });
   } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    logger.error('Erreur lors du toggle favoris de la conversation', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors du toggle favoris de la conversation',
+      { conversationId, userId }
+    );
   }
 });
 
@@ -382,13 +392,11 @@ export const getConversationOffers = asyncHandler(async (req: Request, res: Resp
     const response = await fetchConversationOffers(userId, conversationId);
     return res.status(200).json(response);
   } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    logger.error('Erreur lors de la récupération des offres', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors de la récupération des offres',
+      { conversationId, userId }
+    );
   }
 });
 
@@ -408,12 +416,10 @@ export const cancelOffer = asyncHandler(async (req: Request, res: Response) => {
       cancelledOffer
     });
   } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    logger.error('Erreur lors de l\'annulation de l\'offre', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return handleControllerError(
+      res, error,
+      'Erreur lors de l\'annulation de l\'offre',
+      { conversationId, userId }
+    );
   }
 });

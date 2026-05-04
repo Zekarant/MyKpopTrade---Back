@@ -8,6 +8,83 @@ import { GdprLogger } from '../../../commons/utils/gdprLogger';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 
+const PAYMENT_STATUS = {
+  PENDING: 'pending',
+  COMPLETED: 'completed'
+} as const;
+
+const PAYPAL_STATUS = {
+  APPROVED: 'APPROVED',
+  COMPLETED: 'COMPLETED'
+} as const;
+
+const ERROR_CODES = {
+  SELLER_UNAVAILABLE: 'SELLER_UNAVAILABLE',
+  PAYMENT_ACCESS_DENIED: 'PAYMENT_ACCESS_DENIED',
+  REFUND_PERMISSION_DENIED: 'REFUND_PERMISSION_DENIED'
+} as const;
+
+const USER_ID_LOG_PREFIX_LENGTH = 5;
+
+async function isUserAdmin(userId: string): Promise<boolean> {
+  const user = await User.findById(userId).select('role');
+  return Boolean(user && user.role === 'admin');
+}
+
+async function assertPaymentAccess(
+  payment: any,
+  userId: string,
+  paymentId: string,
+  buyerIdAccessor: (p: any) => string,
+  sellerIdAccessor: (p: any) => string
+): Promise<void> {
+  const buyerId = buyerIdAccessor(payment);
+  const sellerId = sellerIdAccessor(payment);
+
+  if (buyerId === userId || sellerId === userId) {
+    return;
+  }
+
+  if (await isUserAdmin(userId)) {
+    return;
+  }
+
+  GdprLogger.logPaymentAction('unauthorized_access_attempt', {
+    paymentId,
+    targetPaymentBuyer: buyerId,
+    targetPaymentSeller: sellerId
+  }, userId);
+
+  throw new HttpError(
+    403,
+    'Vous n\'êtes pas autorisé à accéder à ce paiement',
+    ERROR_CODES.PAYMENT_ACCESS_DENIED
+  );
+}
+
+async function markProductAsSold(productId: any, buyerId: any): Promise<void> {
+  await Product.findByIdAndUpdate(productId, {
+    isAvailable: false,
+    isSold: true,
+    soldAt: new Date(),
+    soldTo: buyerId
+  });
+}
+
+function decryptPaymentMetadata(paymentObj: any, paymentId: any): void {
+  if (!paymentObj.paymentMetadata) return;
+
+  try {
+    paymentObj.metadata = JSON.parse(EncryptionService.decrypt(paymentObj.paymentMetadata));
+    delete paymentObj.paymentMetadata;
+  } catch (error) {
+    logger.warn('Erreur lors du déchiffrement des métadonnées', {
+      error: error instanceof Error ? error.message : String(error),
+      paymentId
+    });
+  }
+}
+
 export async function buildConnectUrl(userId: string): Promise<string> {
   const seller = await User.findById(userId);
   if (!seller) {
@@ -27,10 +104,9 @@ export async function getPayPalConnectionStatus(userId: string): Promise<{
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
 
-  let tokensValid = false;
-  if (user.paypalTokens && user.paypalTokens.expiresAt) {
-    tokensValid = new Date(user.paypalTokens.expiresAt) > new Date();
-  }
+  const tokensValid = Boolean(
+    user.paypalTokens?.expiresAt && new Date(user.paypalTokens.expiresAt) > new Date()
+  );
 
   return {
     connected: Boolean(user.paypalConnected && tokensValid),
@@ -82,7 +158,7 @@ export async function captureDirectPayment(userId: string, orderId: string) {
   const payment = await Payment.findOne({
     paymentIntentId: orderId,
     buyer: userId,
-    status: 'pending'
+    status: PAYMENT_STATUS.PENDING
   });
 
   if (!payment) {
@@ -91,9 +167,11 @@ export async function captureDirectPayment(userId: string, orderId: string) {
 
   const seller = await User.findById(payment.seller);
   if (!seller || !seller.paypalConnected) {
-    const err = new HttpError(400, 'Vendeur non disponible ou non connecté à PayPal');
-    (err as any).code = 'SELLER_UNAVAILABLE';
-    throw err;
+    throw new HttpError(
+      400,
+      'Vendeur non disponible ou non connecté à PayPal',
+      ERROR_CODES.SELLER_UNAVAILABLE
+    );
   }
 
   const captureResult = await PayPalService.captureConnectedPayment(
@@ -101,17 +179,12 @@ export async function captureDirectPayment(userId: string, orderId: string) {
     payment.seller.toString()
   );
 
-  payment.status = 'completed';
+  payment.status = PAYMENT_STATUS.COMPLETED;
   payment.completedAt = new Date();
   payment.captureId = captureResult.captureId;
   await payment.save();
 
-  await Product.findByIdAndUpdate(payment.product, {
-    isAvailable: false,
-    isSold: true,
-    soldAt: new Date(),
-    soldTo: payment.buyer
-  });
+  await markProductAsSold(payment.product, payment.buyer);
 
   await NotificationService.createNotification({
     recipientId: payment.seller,
@@ -129,7 +202,7 @@ export async function captureDirectPayment(userId: string, orderId: string) {
 
   return {
     id: payment._id,
-    status: 'completed',
+    status: PAYMENT_STATUS.COMPLETED,
     captureId: captureResult.captureId,
     amount: captureResult.amount,
     currency: captureResult.currency
@@ -161,22 +234,17 @@ export async function resolveConfirmPayment(orderId: unknown): Promise<ConfirmPa
 
   const paymentStatus = await PayPalService.checkPaymentStatus(orderId as string);
 
-  if (paymentStatus === 'APPROVED') {
+  if (paymentStatus === PAYPAL_STATUS.APPROVED) {
     return { kind: 'approved', orderId: orderId as string, paymentId: payment._id };
   }
 
-  if (paymentStatus === 'COMPLETED') {
-    if (payment.status !== 'completed') {
-      payment.status = 'completed';
+  if (paymentStatus === PAYPAL_STATUS.COMPLETED) {
+    if (payment.status !== PAYMENT_STATUS.COMPLETED) {
+      payment.status = PAYMENT_STATUS.COMPLETED;
       payment.completedAt = new Date();
       await payment.save();
 
-      await Product.findByIdAndUpdate(payment.product, {
-        isAvailable: false,
-        isSold: true,
-        soldAt: new Date(),
-        soldTo: payment.buyer
-      });
+      await markProductAsSold(payment.product, payment.buyer);
     }
     return { kind: 'completed', paymentId: payment._id };
   }
@@ -192,25 +260,13 @@ export async function fetchPaymentStatus(userId: string, paymentId: string) {
     throw new HttpError(404, 'Paiement non trouvé');
   }
 
-  const isAuthorized =
-    payment.buyer.toString() === userId ||
-    payment.seller.toString() === userId;
-
-  if (!isAuthorized) {
-    const user = await User.findById(userId).select('role');
-
-    if (!user || user.role !== 'admin') {
-      GdprLogger.logPaymentAction('unauthorized_access_attempt', {
-        paymentId,
-        targetPaymentBuyer: payment.buyer.toString(),
-        targetPaymentSeller: payment.seller.toString()
-      }, userId);
-
-      const err = new HttpError(403, 'Vous n\'êtes pas autorisé à accéder à ce paiement');
-      (err as any).code = 'PAYMENT_ACCESS_DENIED';
-      throw err;
-    }
-  }
+  await assertPaymentAccess(
+    payment,
+    userId,
+    paymentId,
+    (p) => p.buyer.toString(),
+    (p) => p.seller.toString()
+  );
 
   GdprLogger.logPaymentAction('payment_status_checked', { paymentId }, userId);
 
@@ -255,22 +311,9 @@ export async function listUserPayments(
 
   const processedPayments = payments.map(payment => {
     const paymentObj = payment.toObject();
-
     delete paymentObj.ipAddress;
     delete paymentObj.userAgent;
-
-    if (paymentObj.paymentMetadata) {
-      try {
-        (paymentObj as any).metadata = JSON.parse(EncryptionService.decrypt(paymentObj.paymentMetadata));
-        delete paymentObj.paymentMetadata;
-      } catch (error) {
-        logger.warn('Erreur lors du déchiffrement des métadonnées', {
-          error: error instanceof Error ? error.message : String(error),
-          paymentId: payment._id
-        });
-      }
-    }
-
+    decryptPaymentMetadata(paymentObj, payment._id);
     return paymentObj;
   });
 
@@ -303,25 +346,20 @@ export async function processRefund({
   }
 
   const isSeller = payment.seller.toString() === userId;
-  let isAdmin = false;
+  if (!isSeller && !(await isUserAdmin(userId))) {
+    GdprLogger.logPaymentAction('unauthorized_refund_attempt', {
+      paymentId,
+      targetPaymentSeller: payment.seller.toString()
+    }, userId);
 
-  if (!isSeller) {
-    const user = await User.findById(userId).select('role');
-    isAdmin = Boolean(user && user.role === 'admin');
-
-    if (!isAdmin) {
-      GdprLogger.logPaymentAction('unauthorized_refund_attempt', {
-        paymentId,
-        targetPaymentSeller: payment.seller.toString()
-      }, userId);
-
-      const err = new HttpError(403, 'Seul le vendeur ou un administrateur peut effectuer un remboursement');
-      (err as any).code = 'REFUND_PERMISSION_DENIED';
-      throw err;
-    }
+    throw new HttpError(
+      403,
+      'Seul le vendeur ou un administrateur peut effectuer un remboursement',
+      ERROR_CODES.REFUND_PERMISSION_DENIED
+    );
   }
 
-  if (payment.status !== 'completed') {
+  if (payment.status !== PAYMENT_STATUS.COMPLETED) {
     throw new HttpError(400, 'Seul un paiement complété peut être remboursé');
   }
 
@@ -358,7 +396,7 @@ export async function processRefund({
     logger.error('Erreur lors du remboursement PayPal', {
       error: error instanceof Error ? error.message : String(error),
       paymentId,
-      userId: userId.substring(0, 5) + '...'
+      userId: userId.substring(0, USER_ID_LOG_PREFIX_LENGTH) + '...'
     });
     throw new HttpError(400, error.message || 'Erreur lors du remboursement');
   }
@@ -374,25 +412,13 @@ export async function fetchPaymentDetails(userId: string, paymentId: string) {
     throw new HttpError(404, 'Paiement non trouvé');
   }
 
-  const isAuthorized =
-    payment.buyer._id.toString() === userId ||
-    payment.seller._id.toString() === userId;
-
-  if (!isAuthorized) {
-    const user = await User.findById(userId).select('role');
-
-    if (!user || user.role !== 'admin') {
-      GdprLogger.logPaymentAction('unauthorized_access_attempt', {
-        paymentId,
-        targetPaymentBuyer: payment.buyer._id.toString(),
-        targetPaymentSeller: payment.seller._id.toString()
-      }, userId);
-
-      const err = new HttpError(403, 'Vous n\'êtes pas autorisé à accéder à ce paiement');
-      (err as any).code = 'PAYMENT_ACCESS_DENIED';
-      throw err;
-    }
-  }
+  await assertPaymentAccess(
+    payment,
+    userId,
+    paymentId,
+    (p) => p.buyer._id.toString(),
+    (p) => p.seller._id.toString()
+  );
 
   GdprLogger.logPaymentAction('payment_details_accessed', { paymentId }, userId);
 

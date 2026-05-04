@@ -8,10 +8,29 @@ import KpopAlbum from '../../../models/albumModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import { validateProductData } from './productValidationService';
 
+const DEFAULT_LIST_LIMIT = 20;
+const DEFAULT_LIST_PAGE = 1;
+const DEFAULT_LIST_SORT = '-createdAt';
+
+const ALLOWED_PRODUCT_UPDATES = [
+  'title', 'description', 'price', 'currency', 'condition',
+  'category', 'kpopGroup', 'kpopMember', 'albumName',
+  'images', 'isAvailable', 'isReserved', 'reservedFor', 'shippingOptions'
+];
+
 function assertValidObjectId(productId: string) {
   if (!mongoose.Types.ObjectId.isValid(productId)) {
     throw new HttpError(400, 'ID de produit invalide');
   }
+}
+
+async function findKpopEntityByIdOrName<T extends { _id: any; name: string }>(
+  model: { findById: Function; findOne: Function },
+  identifier: string
+): Promise<T | null> {
+  return mongoose.Types.ObjectId.isValid(identifier)
+    ? await model.findById(identifier).select('_id name')
+    : await model.findOne({ name: identifier }).select('_id name');
 }
 
 function cleanupUploadedFiles(files?: Express.Multer.File[]) {
@@ -25,10 +44,7 @@ function cleanupUploadedFiles(files?: Express.Multer.File[]) {
 
 async function enrichWithKpopNames(product: any, enriched: any) {
   if (product.kpopGroup) {
-    const group = mongoose.Types.ObjectId.isValid(product.kpopGroup)
-      ? await KpopGroup.findById(product.kpopGroup).select('_id name')
-      : await KpopGroup.findOne({ name: product.kpopGroup }).select('_id name');
-
+    const group = await findKpopEntityByIdOrName<any>(KpopGroup, product.kpopGroup);
     if (group) {
       enriched.kpopGroupName = group.name;
       enriched.kpopGroupId = group._id.toString();
@@ -36,10 +52,7 @@ async function enrichWithKpopNames(product: any, enriched: any) {
   }
 
   if (product.albumName) {
-    const album = mongoose.Types.ObjectId.isValid(product.albumName)
-      ? await KpopAlbum.findById(product.albumName).select('_id name')
-      : await KpopAlbum.findOne({ name: product.albumName }).select('_id name');
-
+    const album = await findKpopEntityByIdOrName<any>(KpopAlbum, product.albumName);
     if (album) {
       enriched.albumNameStr = album.name;
       enriched.albumId = album._id.toString();
@@ -172,9 +185,9 @@ export async function fetchProductById(productId: string, userId?: string) {
 }
 
 export async function listProducts(query: any) {
-  const page = parseInt(query.page as string) || 1;
-  const limit = parseInt(query.limit as string) || 20;
-  const sort = query.sort || '-createdAt';
+  const page = parseInt(query.page as string) || DEFAULT_LIST_PAGE;
+  const limit = parseInt(query.limit as string) || DEFAULT_LIST_LIMIT;
+  const sort = query.sort || DEFAULT_LIST_SORT;
 
   const filter: any = { isAvailable: true };
 
@@ -242,15 +255,9 @@ export async function updateProductForOwner({
   const product = await findProductOr404(productId);
   assertOwnership(product, userId, 'Vous n\'êtes pas autorisé à modifier ce produit');
 
-  const allowedUpdates = [
-    'title', 'description', 'price', 'currency', 'condition',
-    'category', 'kpopGroup', 'kpopMember', 'albumName',
-    'images', 'isAvailable', 'isReserved', 'reservedFor', 'shippingOptions'
-  ];
-
   const updates: Record<string, any> = {};
   for (const [key, value] of Object.entries(body)) {
-    if (allowedUpdates.includes(key)) {
+    if (ALLOWED_PRODUCT_UPDATES.includes(key)) {
       updates[key] = value;
     }
   }

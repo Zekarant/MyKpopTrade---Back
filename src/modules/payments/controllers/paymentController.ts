@@ -24,6 +24,24 @@ function devErrorDetails(error: unknown) {
     : undefined;
 }
 
+const USER_ID_LOG_PREFIX_LENGTH = 5;
+
+function truncatedUserId(userId: string): string {
+  return userId.substring(0, USER_ID_LOG_PREFIX_LENGTH) + '...';
+}
+
+function replyHttpError(
+  res: Response,
+  error: HttpError,
+  options: { withSuccess?: boolean } = {}
+) {
+  const body: any = {};
+  if (options.withSuccess) body.success = false;
+  body.message = error.message;
+  if (error.code) body.code = error.code;
+  return res.status(error.statusCode).json(body);
+}
+
 /**
  * Génère l'URL pour connecter un compte vendeur à PayPal
  */
@@ -42,11 +60,11 @@ export const generateConnectUrl = asyncHandler(async (req: Request, res: Respons
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return replyHttpError(res, error);
     }
     logger.error('Erreur lors de la génération de l\'URL de connexion PayPal', {
       error: error instanceof Error ? error.message : String(error),
-      userId: userId.substring(0, 5) + '...'
+      userId: truncatedUserId(userId)
     });
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la génération de l\'URL de connexion PayPal',
@@ -77,7 +95,7 @@ export const handleConnectCallback = asyncHandler(async (req: Request, res: Resp
 
     if (success) {
       logger.info('Compte PayPal connecté avec succès', {
-        userId: sellerId.substring(0, 5) + '...'
+        userId: truncatedUserId(sellerId)
       });
 
       return res.redirect(`${process.env.FRONTEND_URL}/account/seller/settings?paypal_connected=true`);
@@ -88,7 +106,7 @@ export const handleConnectCallback = asyncHandler(async (req: Request, res: Resp
     const sellerId = state as string;
     logger.error('Erreur lors du callback de connexion PayPal', {
       error: error instanceof Error ? error.message : String(error),
-      userId: sellerId.substring(0, 5) + '...'
+      userId: truncatedUserId(sellerId)
     });
     return res.redirect(`${process.env.FRONTEND_URL}/account/seller/settings?error=server_error`);
   }
@@ -110,11 +128,11 @@ export const checkPayPalConnection = asyncHandler(async (req: Request, res: Resp
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return replyHttpError(res, error);
     }
     logger.error('Erreur lors de la vérification de la connexion PayPal', {
       error: error instanceof Error ? error.message : String(error),
-      userId: userId.substring(0, 5) + '...'
+      userId: truncatedUserId(userId)
     });
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la vérification de la connexion PayPal',
@@ -132,7 +150,7 @@ export const disconnectPayPal = asyncHandler(async (req: Request, res: Response)
   try {
     await disconnectPayPalForUser(userId);
 
-    logger.info('Compte PayPal déconnecté', { userId: userId.substring(0, 5) + '...' });
+    logger.info('Compte PayPal déconnecté', { userId: truncatedUserId(userId) });
 
     return res.status(200).json({
       success: true,
@@ -140,11 +158,11 @@ export const disconnectPayPal = asyncHandler(async (req: Request, res: Response)
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return replyHttpError(res, error);
     }
     logger.error('Erreur lors de la déconnexion du compte PayPal', {
       error: error instanceof Error ? error.message : String(error),
-      userId: userId.substring(0, 5) + '...'
+      userId: truncatedUserId(userId)
     });
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la déconnexion du compte PayPal',
@@ -176,12 +194,12 @@ export const initiatePayPalPayment = asyncHandler(async (req: Request, res: Resp
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return replyHttpError(res, error);
     }
     logger.error('Erreur lors de l\'initiation du paiement PayPal', {
       error: error instanceof Error ? error.message : String(error),
       productId,
-      userId: userId.substring(0, 5) + '...'
+      userId: truncatedUserId(userId)
     });
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la création du paiement',
@@ -207,15 +225,12 @@ export const capturePayPalPayment = asyncHandler(async (req: Request, res: Respo
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      const body: any = { message: error.message };
-      const code = (error as any).code;
-      if (code) body.code = code;
-      return res.status(error.statusCode).json(body);
+      return replyHttpError(res, error);
     }
     logger.error('Erreur lors de la capture du paiement PayPal', {
       error: error instanceof Error ? error.message : String(error),
       orderId,
-      userId: userId.substring(0, 5) + '...'
+      userId: truncatedUserId(userId)
     });
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la capture du paiement',
@@ -330,10 +345,7 @@ export const checkPaymentStatus = asyncHandler(async (req: Request, res: Respons
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      const body: any = { success: false, message: error.message };
-      const code = (error as any).code;
-      if (code) body.code = code;
-      return res.status(error.statusCode).json(body);
+      return replyHttpError(res, error, { withSuccess: true });
     }
     GdprLogger.logPaymentError(error, userId, { action: 'check_payment_status', paymentId });
     return res.status(500).json({
@@ -378,10 +390,7 @@ export const refundPayment = asyncHandler(async (req: Request, res: Response) =>
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      const body: any = { success: false, message: error.message };
-      const code = (error as any).code;
-      if (code) body.code = code;
-      return res.status(error.statusCode).json(body);
+      return replyHttpError(res, error, { withSuccess: true });
     }
 
     GdprLogger.logPaymentError(error, userId, { action: 'refund_payment', paymentId });
@@ -420,7 +429,7 @@ export const getMyPayments = asyncHandler(async (req: Request, res: Response) =>
   } catch (error) {
     logger.error('Erreur lors de la récupération des paiements', {
       error: error instanceof Error ? error.message : String(error),
-      userId: userId.substring(0, 5) + '...'
+      userId: truncatedUserId(userId)
     });
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la récupération des paiements',
@@ -454,10 +463,7 @@ export const getPayment = asyncHandler(async (req: Request, res: Response) => {
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      const body: any = { success: false, message: error.message };
-      const code = (error as any).code;
-      if (code) body.code = code;
-      return res.status(error.statusCode).json(body);
+      return replyHttpError(res, error, { withSuccess: true });
     }
     GdprLogger.logPaymentError(error, userId, { action: 'get_payment_details', paymentId });
     return res.status(500).json({

@@ -7,6 +7,18 @@ import { HttpError } from '../../../commons/utils/httpError';
 
 const EMPTY_DISTRIBUTION = { '5': 0, '4': 0, '3': 0, '2': 0, '1': 0 };
 
+const RATING_MIN = 1;
+const RATING_MAX = 5;
+const MAX_IMAGES_PER_RATING = 5;
+const MAX_RESPONSE_LENGTH = 500;
+const STAR_KEY_BY_RATING: Record<number, string> = {
+  5: 'fiveStars',
+  4: 'fourStars',
+  3: 'threeStars',
+  2: 'twoStars',
+  1: 'oneStars'
+};
+
 /**
  * Met à jour la note moyenne d'un utilisateur
  */
@@ -68,6 +80,11 @@ export async function getUserRatingsWithStats(
     Rating.countDocuments(filter)
   ]);
 
+  const starAggregations: Record<string, any> = {};
+  for (const [score, key] of Object.entries(STAR_KEY_BY_RATING)) {
+    starAggregations[key] = { $sum: { $cond: [{ $eq: ['$rating', Number(score)] }, 1, 0] } };
+  }
+
   const stats = await Rating.aggregate([
     { $match: { recipient: new mongoose.Types.ObjectId(userId), isHidden: false } },
     {
@@ -75,11 +92,7 @@ export async function getUserRatingsWithStats(
         _id: null,
         averageRating: { $avg: '$rating' },
         totalRatings: { $sum: 1 },
-        fiveStars: { $sum: { $cond: [{ $eq: ['$rating', 5] }, 1, 0] } },
-        fourStars: { $sum: { $cond: [{ $eq: ['$rating', 4] }, 1, 0] } },
-        threeStars: { $sum: { $cond: [{ $eq: ['$rating', 3] }, 1, 0] } },
-        twoStars: { $sum: { $cond: [{ $eq: ['$rating', 2] }, 1, 0] } },
-        oneStars: { $sum: { $cond: [{ $eq: ['$rating', 1] }, 1, 0] } }
+        ...starAggregations
       }
     }
   ]);
@@ -92,13 +105,9 @@ export async function getUserRatingsWithStats(
     threeStars: stats[0].threeStars,
     twoStars: stats[0].twoStars,
     oneStars: stats[0].oneStars,
-    distribution: {
-      '5': stats[0].fiveStars,
-      '4': stats[0].fourStars,
-      '3': stats[0].threeStars,
-      '2': stats[0].twoStars,
-      '1': stats[0].oneStars
-    }
+    distribution: Object.fromEntries(
+      Object.entries(STAR_KEY_BY_RATING).map(([score, key]) => [score, stats[0][key]])
+    )
   } : {
     averageRating: 0,
     totalRatings: 0,
@@ -143,8 +152,8 @@ export async function createUserRating({
     fail(400, 'Tous les champs sont obligatoires');
   }
 
-  if (rating < 1 || rating > 5 || !Number.isInteger(rating)) {
-    fail(400, 'La note doit être un entier entre 1 et 5');
+  if (rating < RATING_MIN || rating > RATING_MAX || !Number.isInteger(rating)) {
+    fail(400, `La note doit être un entier entre ${RATING_MIN} et ${RATING_MAX}`);
   }
 
   if (type !== 'buyer' && type !== 'seller') {
@@ -266,9 +275,9 @@ export async function addRatingImageForUser({
     rating.images = [];
   }
 
-  if (rating.images.length >= 5) {
+  if (rating.images.length >= MAX_IMAGES_PER_RATING) {
     cleanupRatingImages([filePath]);
-    throw new HttpError(400, 'Nombre maximum d\'images atteint (5)');
+    throw new HttpError(400, `Nombre maximum d'images atteint (${MAX_IMAGES_PER_RATING})`);
   }
 
   const relativePath = `/uploads/ratings/${path.basename(filePath)}`;
@@ -300,8 +309,8 @@ function validateResponseContent(response: unknown): string {
     throw new HttpError(400, 'Le contenu de la réponse est requis');
   }
 
-  if (response.length > 500) {
-    throw new HttpError(400, 'La réponse ne peut pas dépasser 500 caractères');
+  if (response.length > MAX_RESPONSE_LENGTH) {
+    throw new HttpError(400, `La réponse ne peut pas dépasser ${MAX_RESPONSE_LENGTH} caractères`);
   }
 
   return response.trim();

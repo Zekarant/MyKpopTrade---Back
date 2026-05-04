@@ -14,16 +14,67 @@ import { HttpError } from '../../../commons/utils/httpError';
 
 export { HttpError };
 
+const OFFER_STATUS = {
+  PENDING: 'pending',
+  ACCEPTED: 'accepted'
+} as const;
+
+const CONVERSATION_TYPE = {
+  NEGOTIATION: 'negotiation',
+  PAY_WHAT_YOU_WANT: 'pay_what_you_want'
+} as const;
+
+const CONVERSATION_FILTER = {
+  UNREAD: 'unread',
+  ARCHIVED: 'archived',
+  FAVORITES: 'favorites',
+  ACTIVE: 'active'
+} as const;
+
+const DEFAULT_CURRENCY = 'EUR';
+
 /**
  * Retourne la dernière offre pertinente de l'historique :
  * la plus récente acceptée si elle existe, sinon la toute dernière.
  */
 function resolveLatestOffer(offerHistory: any[]): any | null {
   if (!offerHistory.length) return null;
-  const accepted = offerHistory.filter(o => o.status === 'accepted');
+  const accepted = offerHistory.filter(o => o.status === OFFER_STATUS.ACCEPTED);
   return accepted.length > 0
     ? accepted[accepted.length - 1]
     : offerHistory[offerHistory.length - 1];
+}
+
+async function addUserToConversationField(
+  conversationId: string,
+  userId: string,
+  field: 'archivedBy' | 'favoritedBy' | 'deletedBy'
+) {
+  const conversation = await Conversation.findByIdAndUpdate(
+    conversationId,
+    { $addToSet: { [field]: userId } },
+    { new: true }
+  );
+  if (!conversation) {
+    throw new HttpError(404, 'Conversation non trouvée');
+  }
+  return conversation;
+}
+
+async function removeUserFromConversationField(
+  conversationId: string,
+  userId: string,
+  field: 'archivedBy' | 'favoritedBy'
+) {
+  const conversation = await Conversation.findByIdAndUpdate(
+    conversationId,
+    { $pull: { [field]: userId } },
+    { new: true }
+  );
+  if (!conversation) {
+    throw new HttpError(404, 'Conversation non trouvée');
+  }
+  return conversation;
 }
 
 export async function fetchConversation(
@@ -66,7 +117,7 @@ export async function fetchConversation(
     (conversation as any).formattedOfferHistory = formatOfferHistory(
       conversation,
       userId,
-      conversation.productId?.currency || 'EUR'
+      conversation.productId?.currency || DEFAULT_CURRENCY
     );
   }
 
@@ -106,9 +157,12 @@ export async function fetchConversation(
     messages,
     media,
     markedAsRead: markedCount,
-    offersSummary: (conversation.type === 'negotiation' || conversation.type === 'pay_what_you_want') ? {
+    offersSummary: (
+      conversation.type === CONVERSATION_TYPE.NEGOTIATION ||
+      conversation.type === CONVERSATION_TYPE.PAY_WHAT_YOU_WANT
+    ) ? {
       totalOffers: conversation.offerHistory.length,
-      currentStatus: conversation.type === 'negotiation'
+      currentStatus: conversation.type === CONVERSATION_TYPE.NEGOTIATION
         ? conversation.negotiation?.status
         : conversation.payWhatYouWant?.status,
       latestOffer: resolveLatestOffer(conversation.offerHistory)
@@ -134,18 +188,18 @@ export async function listUserConversations(
     deletedBy: { $ne: userId }
   };
 
-  if (filter === 'unread') {
+  if (filter === CONVERSATION_FILTER.UNREAD) {
     const conversationsWithUnreadMessages = await Message.distinct('conversation', {
       conversation: { $in: await Conversation.find({ participants: userId }).distinct('_id') },
       readBy: { $ne: userId },
       isDeleted: false
     });
     query._id = { $in: conversationsWithUnreadMessages };
-  } else if (filter === 'archived') {
+  } else if (filter === CONVERSATION_FILTER.ARCHIVED) {
     query.archivedBy = userId;
-  } else if (filter === 'favorites') {
+  } else if (filter === CONVERSATION_FILTER.FAVORITES) {
     query.favoritedBy = userId;
-  } else if (filter === 'active') {
+  } else if (filter === CONVERSATION_FILTER.ACTIVE) {
     query.archivedBy = { $ne: userId };
   }
 
@@ -183,8 +237,8 @@ export async function listUserConversations(
       messagePreview = MessagingUtilsService.generateMessagePreview(lastMessage);
     }
 
-    const hasActiveOffer = conversation.type === 'negotiation' &&
-      conversation.negotiation?.status === 'pending';
+    const hasActiveOffer = conversation.type === CONVERSATION_TYPE.NEGOTIATION &&
+      conversation.negotiation?.status === OFFER_STATUS.PENDING;
 
     return {
       ...conversation,
@@ -342,15 +396,7 @@ export async function fetchConversationMedia({
 export async function softDeleteConversation(userId: string, conversationId: string) {
   await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
 
-  const conversation = await Conversation.findByIdAndUpdate(
-    conversationId,
-    { $addToSet: { deletedBy: userId } },
-    { new: true }
-  );
-
-  if (!conversation) {
-    throw new HttpError(404, 'Conversation non trouvée');
-  }
+  const conversation = await addUserToConversationField(conversationId, userId, 'deletedBy');
 
   if (conversation.deletedBy.length === conversation.participants.length) {
     await Conversation.findByIdAndUpdate(
@@ -362,37 +408,18 @@ export async function softDeleteConversation(userId: string, conversationId: str
 
 export async function archiveConversationForUser(userId: string, conversationId: string) {
   await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
-
-  const conversation = await Conversation.findByIdAndUpdate(
-    conversationId,
-    { $addToSet: { archivedBy: userId } },
-    { new: true }
-  );
-
-  if (!conversation) {
-    throw new HttpError(404, 'Conversation non trouvée');
-  }
+  await addUserToConversationField(conversationId, userId, 'archivedBy');
 }
 
 export async function unarchiveConversationForUser(userId: string, conversationId: string) {
   await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
-
-  const conversation = await Conversation.findByIdAndUpdate(
-    conversationId,
-    { $pull: { archivedBy: userId } },
-    { new: true }
-  );
-
-  if (!conversation) {
-    throw new HttpError(404, 'Conversation non trouvée');
-  }
+  await removeUserFromConversationField(conversationId, userId, 'archivedBy');
 }
 
 export async function toggleFavoriteConversationForUser(userId: string, conversationId: string) {
   await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
 
   const conversation = await Conversation.findById(conversationId);
-
   if (!conversation) {
     throw new HttpError(404, 'Conversation non trouvée');
   }
@@ -402,17 +429,9 @@ export async function toggleFavoriteConversationForUser(userId: string, conversa
   );
 
   if (wasFavorited) {
-    await Conversation.findByIdAndUpdate(
-      conversationId,
-      { $pull: { favoritedBy: userId } },
-      { new: true }
-    );
+    await removeUserFromConversationField(conversationId, userId, 'favoritedBy');
   } else {
-    await Conversation.findByIdAndUpdate(
-      conversationId,
-      { $addToSet: { favoritedBy: userId } },
-      { new: true }
-    );
+    await addUserToConversationField(conversationId, userId, 'favoritedBy');
   }
 
   return { wasFavorited };
