@@ -32,7 +32,9 @@ const NotificationSchema: Schema = new Schema({
             'system',
             'rating_received',
             'new_follower',
-            'refund_issued'
+            'refund_issued',
+            'wishlist_price_drop',
+            'wishlist_unavailable'
         ]
     },
     title: {

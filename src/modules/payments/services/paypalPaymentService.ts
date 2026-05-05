@@ -207,23 +207,148 @@ export class PayPalPaymentService {
   }
 
   /**
-   * Capture un paiement avec le compte vendeur connecté
+   * Capture un paiement avec le compte vendeur connecté.
+   * Tente la capture directement (sans vérifier le statut avant).
+   * Si PayPal refuse, retry jusqu'à 5 fois avec délai.
    */
   static async captureConnectedPayment(orderId: string, sellerId: string): Promise<any> {
     try {
       const accessToken = await PayPalClient.getAccessToken();
 
-      const requestId = `capture_${orderId}_${Date.now()}`;
-
-      const response = await axios({
-        method: 'post',
-        url: `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}/capture`,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-          'PayPal-Request-Id': requestId
+      // Vérifier si déjà capturé
+      const currentStatus = await PayPalClient.checkPaymentStatus(orderId);
+      if (currentStatus === 'COMPLETED') {
+        const orderDetails = await axios({
+          method: 'get',
+          url: `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}`,
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        const captureInfo = orderDetails.data.purchase_units[0]?.payments?.captures[0];
+        if (captureInfo) {
+          return {
+            status: 'COMPLETED',
+            captureId: captureInfo.id,
+            amount: captureInfo.amount.value,
+            currency: captureInfo.amount.currency_code
+          };
         }
-      });
+      }
+
+      // Récupérer l'email PayPal du vendeur pour le header Auth-Assertion
+      const seller = await User.findById(sellerId).select('paypalEmail');
+      const baseHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      };
+
+      // Ajouter le PayPal-Auth-Assertion si le vendeur a un email PayPal
+      let useAuthAssertion = false;
+      if (seller?.paypalEmail) {
+        const clientId = process.env.PAYPAL_CLIENT_ID;
+        const headerPart1 = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64');
+        const headerPart2 = Buffer.from(JSON.stringify({ iss: clientId, email: seller.paypalEmail })).toString('base64');
+        baseHeaders['PayPal-Auth-Assertion'] = `${headerPart1}.${headerPart2}.`;
+        useAuthAssertion = true;
+      }
+
+      // Tenter la capture directement avec retry
+      let response;
+      let lastError: any = null;
+
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        const headers = {
+          ...baseHeaders,
+          'PayPal-Request-Id': `capture_${orderId}_${Date.now()}_${attempt}`
+        };
+
+        try {
+          response = await axios({
+            method: 'post',
+            url: `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}/capture`,
+            headers
+          });
+          break; // Succès, sortir de la boucle
+        } catch (err: any) {
+          const status = err.response?.status;
+          const details = err.response?.data;
+          const issue = details?.details?.[0]?.issue || '';
+
+          logger.warn(`Capture attempt ${attempt}/5 failed`, {
+            orderId, status, issue,
+            details: JSON.stringify(details)
+          });
+
+          // Si 403/400 avec Auth-Assertion, retirer et réessayer immédiatement
+          if ((status === 403 || status === 400) && useAuthAssertion && baseHeaders['PayPal-Auth-Assertion']) {
+            logger.warn('Retrait du PayPal-Auth-Assertion et retry', { orderId });
+            delete baseHeaders['PayPal-Auth-Assertion'];
+            useAuthAssertion = false;
+            try {
+              response = await axios({
+                method: 'post',
+                url: `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}/capture`,
+                headers: { ...baseHeaders, 'PayPal-Request-Id': `capture_${orderId}_${Date.now()}_${attempt}b` }
+              });
+              break;
+            } catch (retryErr: any) {
+              lastError = retryErr;
+              const retryStatus = retryErr.response?.status;
+              const retryIssue = retryErr.response?.data?.details?.[0]?.issue || '';
+              if ((retryStatus === 422 || retryStatus === 400) &&
+                  (retryIssue === 'ORDER_NOT_APPROVED' || retryIssue === 'INVALID_RESOURCE_ID')) {
+                if (attempt < 5) {
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                  continue;
+                }
+              }
+              throw retryErr;
+            }
+          }
+
+          // Si ORDER_NOT_APPROVED (422) — PayPal n'a pas encore mis à jour le statut, on attend
+          if ((status === 422 || status === 400) &&
+              (issue === 'ORDER_NOT_APPROVED' || issue === 'ORDER_ALREADY_CAPTURED')) {
+            if (issue === 'ORDER_ALREADY_CAPTURED') {
+              // Déjà capturé, récupérer les détails
+              const orderDetails = await axios({
+                method: 'get',
+                url: `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}`,
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+              });
+              const captureInfo = orderDetails.data.purchase_units[0]?.payments?.captures[0];
+              if (captureInfo) {
+                return {
+                  status: 'COMPLETED',
+                  captureId: captureInfo.id,
+                  amount: captureInfo.amount.value,
+                  currency: captureInfo.amount.currency_code
+                };
+              }
+            }
+            lastError = err;
+            if (attempt < 5) {
+              logger.info(`Attente 2s avant retry capture (attempt ${attempt}/5)`, { orderId });
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              continue;
+            }
+          }
+
+          lastError = err;
+          // Autre erreur non-retryable
+          if (status !== 422 && status !== 400) {
+            throw err;
+          }
+          if (attempt < 5) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
+      }
+
+      if (!response) {
+        const errorDetails = lastError?.response?.data;
+        const issue = errorDetails?.details?.[0]?.issue || 'UNKNOWN';
+        throw new Error(`Impossible de capturer le paiement après 5 tentatives (dernier statut: ${issue}). L'acheteur doit d'abord valider le paiement sur PayPal.`);
+      }
 
       if (response.data.status !== 'COMPLETED') {
         throw new Error(`La capture a échoué avec le statut: ${response.data.status}`);

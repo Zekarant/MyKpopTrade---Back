@@ -58,7 +58,30 @@ export const authenticateJWT = async (req: Request, res: Response, next: NextFun
       // Extraire l'ID et les autres propriétés séparément pour éviter le problème d'écrasement
       const { id, ...otherProps } = decoded;
       req.user = { id, ...otherProps };
-      
+
+      // Enforce account status : un compte suspendu ou supprimé ne doit
+      // jamais consommer une route authentifiée, même avec un JWT valide.
+      // Lecture minimale (un seul champ) pour ne pas alourdir le hot path.
+      const status = await User.findById(id).select('accountStatus').lean<{ accountStatus?: string } | null>();
+      if (!status) {
+        res.status(401).json({ message: 'Utilisateur introuvable', code: 'USER_NOT_FOUND' });
+        return;
+      }
+      if (status.accountStatus === 'suspended') {
+        res.status(403).json({
+          message: 'Votre compte est suspendu. Contactez le support.',
+          code: 'ACCOUNT_SUSPENDED'
+        });
+        return;
+      }
+      if (status.accountStatus === 'deleted') {
+        res.status(403).json({
+          message: 'Ce compte n\'existe plus.',
+          code: 'ACCOUNT_DELETED'
+        });
+        return;
+      }
+
       next();
     } catch (tokenError) {
       // Gestion des erreurs spécifiques aux tokens

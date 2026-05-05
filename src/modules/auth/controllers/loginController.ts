@@ -46,6 +46,14 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    if (user.accountStatus === 'suspended') {
+      res.status(403).json({
+        message: 'Votre compte est suspendu. Contactez le support.',
+        code: 'ACCOUNT_SUSPENDED'
+      });
+      return;
+    }
+
     // Mise à jour de la dernière connexion
     user.lastLogin = new Date();
     await user.save();

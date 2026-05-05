@@ -3,10 +3,14 @@ import app from './app';
 import env from './config/env';
 import logger from './commons/utils/logger';
 import { startGdprCleanupTask } from './commons/tasks/gdprCleanupTask';
+import { startShipmentTrackingTask } from './commons/tasks/shipmentTrackingTask';
+import { startReservationCleanupTask } from './commons/tasks/reservationCleanupTask';
 
 if (process.env.NODE_ENV !== 'test') {
   startGdprCleanupTask();
-  logger.info('Tâches CRON de maintenance RGPD démarrées');
+  startShipmentTrackingTask();
+  startReservationCleanupTask();
+  logger.info('Tâches CRON de maintenance démarrées');
 }
 
 mongoose.connect(env.MONGODB_URI)

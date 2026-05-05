@@ -4,13 +4,20 @@ import mongoose from 'mongoose';
 import Conversation from '../../../models/conversationModel';
 import logger from '../../../commons/utils/logger';
 
-// Limite de messages par utilisateur par intervalle de temps
-const messageLimiter = new RateLimiterMongo({
-  storeClient: mongoose.connection,
-  keyPrefix: 'messaging_rate_limit',
-  points: 10, // nombre de messages autorisés
-  duration: 60, // par minute
-});
+let messageLimiterInstance: RateLimiterMongo | null = null;
+
+function getMessageLimiter(): RateLimiterMongo {
+  if (!messageLimiterInstance) {
+    messageLimiterInstance = new RateLimiterMongo({
+      storeClient: mongoose.connection,
+      keyPrefix: 'messaging_rate_limit',
+      points: 10,
+      duration: 60,
+      tableName: 'rate_limits',
+    });
+  }
+  return messageLimiterInstance;
+}
 
 /**
  * Middleware pour limiter le nombre de messages (anti-spam)
@@ -18,13 +25,18 @@ const messageLimiter = new RateLimiterMongo({
 export const rateLimitMessages = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = (req.user as any).id;
-    await messageLimiter.consume(userId);
+    await getMessageLimiter().consume(userId);
     next();
-  } catch (error) {
-    logger.warn(`Limite de messages dépassée par l'utilisateur ${(req.user as any).id}`);
-    res.status(429).json({ 
-      message: 'Vous envoyez trop de messages. Veuillez attendre avant d\'en envoyer d\'autres.' 
-    });
+  } catch (error: any) {
+    if (error && error.remainingPoints !== undefined) {
+      logger.warn(`Limite de messages dépassée par l'utilisateur ${(req.user as any).id}`);
+      res.status(429).json({ 
+        message: 'Vous envoyez trop de messages. Veuillez attendre avant d\'en envoyer d\'autres.' 
+      });
+    } else {
+      // Erreur technique (DB pas prête) → on laisse passer
+      next();
+    }
   }
 };
 

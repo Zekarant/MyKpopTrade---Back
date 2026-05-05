@@ -9,6 +9,19 @@ import logger from '../../../commons/utils/logger';
  */
 export class PayPalRefundService {
   /**
+   * Construit le header PayPal-Auth-Assertion pour agir au nom du vendeur.
+   * Format : base64({"alg":"none"}).base64({"iss":"<client_id>","email":"<seller_email>"}).
+   */
+  private static buildAuthAssertion(sellerEmail: string): string {
+    const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({
+      iss: process.env.PAYPAL_CLIENT_ID,
+      email: sellerEmail
+    })).toString('base64url');
+    return `${header}.${payload}.`;
+  }
+
+  /**
    * Effectue un remboursement pour un paiement capturé.
    * @param captureId ID de la capture PayPal
    * @param amount Montant à rembourser (null pour remboursement complet)
@@ -34,19 +47,22 @@ export class PayPalRefundService {
         throw new Error('Vendeur non trouvé');
       }
 
-      let accessToken: string;
+      // Utiliser le token de la plateforme + PayPal-Auth-Assertion pour agir
+      // au nom du vendeur (les fonds sont sur son compte PayPal).
+      const accessToken = await PayPalClient.getAccessToken();
 
-      if (seller.paypalTokens && seller.paypalTokens.accessToken) {
-        accessToken = seller.paypalTokens.accessToken;
-        logger.debug('Utilisation du token d\'accès du vendeur', {
-          sellerId: sellerId.substring(0, 5) + '...'
-        });
-      } else {
-        accessToken = await PayPalClient.getAccessToken();
-        logger.debug('Utilisation du token d\'accès de l\'application', {
-          sellerId: sellerId.substring(0, 5) + '...'
-        });
+      const sellerPaypalEmail = seller.paypalEmail;
+      if (!sellerPaypalEmail) {
+        throw new Error('Le vendeur n\'a pas d\'email PayPal configuré');
       }
+
+      // Header PayPal-Auth-Assertion : permet à la plateforme d'effectuer
+      // un remboursement depuis le compte du vendeur.
+      const authAssertion = PayPalRefundService.buildAuthAssertion(sellerPaypalEmail);
+
+      logger.debug('Utilisation du token plateforme + Auth-Assertion pour le remboursement', {
+        sellerId: sellerId.substring(0, 5) + '...'
+      });
 
       const captureDetails = await PayPalClient.getCaptureDetails(captureId, accessToken);
 
@@ -79,9 +95,10 @@ export class PayPalRefundService {
         };
       }
 
-      const headers = {
+      const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
+        'PayPal-Auth-Assertion': authAssertion,
         'PayPal-Request-Id': `refund_${captureId}_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`,
         'Prefer': 'return=representation'
       };

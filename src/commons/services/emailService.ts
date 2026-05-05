@@ -192,6 +192,115 @@ function emailTemplate(options: {
   `;
 }
 
+/* ----------------------------------------------------------------------- */
+/* Emails shipping                                                          */
+/* ----------------------------------------------------------------------- */
+
+interface ShipmentEmailContext {
+  paymentId: string;
+  carrier: string;
+  trackingNumber: string;
+  trackingUrl?: string;
+}
+
+/** Notifie l'acheteur que son colis vient d'être expédié. */
+export const sendShipmentShippedEmail = async (
+  user: IUser,
+  ctx: ShipmentEmailContext
+): Promise<void> => {
+  const trackingLink = ctx.trackingUrl
+    ? `<p>Suivez votre colis en direct : <a href="${ctx.trackingUrl}">${ctx.trackingUrl}</a></p>`
+    : '';
+  await sendEmail({
+    to: user.email,
+    subject: 'Votre commande a été expédiée',
+    html: emailTemplate({
+      title: 'Votre commande est en route !',
+      content: `
+        <p>Bonjour ${user.username},</p>
+        <p>Le vendeur vient d'expédier votre commande via <strong>${ctx.carrier}</strong>.</p>
+        <p><strong>Numéro de suivi :</strong> ${ctx.trackingNumber}</p>
+        ${trackingLink}
+      `,
+      ctaText: 'Voir mes achats',
+      ctaUrl: `${BASE_URL}/payments`
+    })
+  });
+};
+
+/** Notifie le vendeur que l'acheteur a confirmé la réception. */
+export const sendShipmentDeliveredEmail = async (
+  user: IUser,
+  ctx: { paymentId: string; carrier: string; trackingNumber: string }
+): Promise<void> => {
+  await sendEmail({
+    to: user.email,
+    subject: 'Livraison confirmée',
+    html: emailTemplate({
+      title: 'Votre vente est finalisée',
+      content: `
+        <p>Bonjour ${user.username},</p>
+        <p>L'acheteur vient de confirmer la réception du colis (<strong>${ctx.carrier}</strong> — ${ctx.trackingNumber}). La transaction est complète.</p>
+      `,
+      ctaText: 'Voir mes ventes',
+      ctaUrl: `${BASE_URL}/payments`
+    })
+  });
+};
+
+/** Relance email à l'acheteur si le colis est expédié depuis trop longtemps. */
+export const sendShipmentReminderEmail = async (
+  user: IUser,
+  ctx: ShipmentEmailContext & { daysSinceShipped: number }
+): Promise<void> => {
+  const trackingLink = ctx.trackingUrl
+    ? `<p>Si besoin, vérifiez le suivi : <a href="${ctx.trackingUrl}">${ctx.trackingUrl}</a></p>`
+    : '';
+  await sendEmail({
+    to: user.email,
+    subject: 'Avez-vous bien reçu votre colis ?',
+    html: emailTemplate({
+      title: 'Votre colis devrait être arrivé',
+      content: `
+        <p>Bonjour ${user.username},</p>
+        <p>Votre commande a été expédiée il y a ${ctx.daysSinceShipped} jours par <strong>${ctx.carrier}</strong> (${ctx.trackingNumber}).</p>
+        <p>Merci de confirmer la réception depuis votre espace pour clôturer la transaction. Si le colis n'est pas arrivé, contactez le vendeur ou le support.</p>
+        ${trackingLink}
+      `,
+      ctaText: 'Confirmer la réception',
+      ctaUrl: `${BASE_URL}/payments`
+    })
+  });
+};
+
+/** Notifie acheteur ou vendeur d'une auto-confirmation après délai dépassé. */
+export const sendShipmentAutoConfirmedEmail = async (
+  user: IUser,
+  ctx: { paymentId: string; role: 'buyer' | 'seller'; days: number }
+): Promise<void> => {
+  const subject = 'Livraison auto-confirmée';
+  const content = ctx.role === 'buyer'
+    ? `
+      <p>Bonjour ${user.username},</p>
+      <p>Sans confirmation de votre part après ${ctx.days} jours, la livraison a été automatiquement validée et la transaction clôturée.</p>
+      <p>Si le colis n'est jamais arrivé, contactez immédiatement le support.</p>
+    `
+    : `
+      <p>Bonjour ${user.username},</p>
+      <p>Le délai de ${ctx.days} jours est dépassé sans contestation : la livraison a été automatiquement confirmée et la vente est finalisée.</p>
+    `;
+  await sendEmail({
+    to: user.email,
+    subject,
+    html: emailTemplate({
+      title: subject,
+      content,
+      ctaText: 'Accéder à mes paiements',
+      ctaUrl: `${BASE_URL}/payments`
+    })
+  });
+};
+
 /**
  * Envoie un email en utilisant le transporteur configuré
  * @param options Options de l'email (destinataire, sujet, contenu HTML)

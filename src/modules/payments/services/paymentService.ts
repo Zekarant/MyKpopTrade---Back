@@ -97,20 +97,24 @@ export async function buildConnectUrl(userId: string): Promise<string> {
 export async function getPayPalConnectionStatus(userId: string): Promise<{
   connected: boolean;
   expiresAt: Date | null;
+  email: string | null;
 }> {
-  const user = await User.findById(userId).select('paypalConnected paypalTokens.expiresAt');
+  const user = await User.findById(userId).select('paypalConnected paypalEmail paypalTokens.expiresAt');
 
   if (!user) {
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
 
-  const tokensValid = Boolean(
+  const hasOAuthTokens = Boolean(
     user.paypalTokens?.expiresAt && new Date(user.paypalTokens.expiresAt) > new Date()
   );
 
+  const hasManualEmail = Boolean(user.paypalEmail);
+
   return {
-    connected: Boolean(user.paypalConnected && tokensValid),
-    expiresAt: user.paypalTokens?.expiresAt || null
+    connected: Boolean(user.paypalConnected && (hasOAuthTokens || hasManualEmail)),
+    expiresAt: user.paypalTokens?.expiresAt || null,
+    email: user.paypalEmail || null
   };
 }
 
@@ -128,6 +132,51 @@ export async function disconnectPayPalForUser(userId: string): Promise<void> {
 export interface InitiateDirectPaymentInput {
   shippingMethod: unknown;
   shippingAddress?: unknown;
+}
+
+/**
+ * Annule un paiement PayPal en attente et libère la réservation du produit.
+ */
+export async function cancelDirectPayment(userId: string, orderId: string) {
+  if (!orderId) {
+    throw new HttpError(400, 'ID de commande PayPal requis');
+  }
+
+  const payment = await Payment.findOne({
+    paymentIntentId: orderId,
+    buyer: userId,
+    status: PAYMENT_STATUS.PENDING
+  });
+
+  if (!payment) {
+    throw new HttpError(404, 'Paiement non trouvé ou déjà traité');
+  }
+
+  // Libérer la réservation du produit seulement si c'est bien cet acheteur qui l'a réservé
+  await Product.findOneAndUpdate(
+    {
+      _id: payment.product,
+      isReserved: true,
+      reservedFor: userId
+    },
+    {
+      isReserved: false,
+      reservedFor: null,
+      reservedUntil: null
+    }
+  );
+
+  // Marquer le paiement comme annulé
+  payment.status = 'cancelled' as any;
+  await payment.save();
+
+  logger.info('Paiement annulé et réservation libérée', {
+    orderId,
+    productId: payment.product,
+    userId: userId.substring(0, USER_ID_LOG_PREFIX_LENGTH) + '...'
+  });
+
+  return { cancelled: true };
 }
 
 export async function initiateDirectPayment(

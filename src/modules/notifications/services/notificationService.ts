@@ -2,6 +2,7 @@ import Notification from '../../../models/notificationModel';
 import User from '../../../models/userModel';
 import mongoose from 'mongoose';
 import logger from '../../../commons/utils/logger';
+import { sendToUser as sendPushToUser } from './pushService';
 
 /**
  * Service pour la gestion des notifications
@@ -55,8 +56,21 @@ export class NotificationService {
         notificationId: notification._id,
         type
       });
-    
-      
+
+      // Push notification (web push) — fire-and-forget : un échec push
+      // ne doit pas bloquer la création de la notification in-app.
+      sendPushToUser(recipientId.toString(), {
+        title,
+        body: content,
+        link: link ?? undefined,
+        data: { ...data, notificationId: notification._id, type }
+      }).catch((error) => {
+        logger.warn('Erreur push notification', {
+          recipientId: recipientId.toString(),
+          error: error instanceof Error ? error.message : String(error)
+        });
+      });
+
       return notification;
     } catch (error) {
       logger.error('Erreur lors de la création de notification', { 

@@ -75,6 +75,17 @@ export interface IPayment extends Document {
     status: 'shipped' | 'delivered';
     shippedAt: Date;
     deliveredAt?: Date;
+    estimatedDeliveryAt?: Date;
+    lastTrackedAt?: Date;
+    lastReminderAt?: Date;
+    autoConfirmedAt?: Date;
+    events?: Array<{
+      status: string;
+      description?: string;
+      location?: string;
+      occurredAt: Date;
+      source: 'system' | 'seller' | 'buyer' | 'carrier';
+    }>;
   };
 }
 
@@ -216,7 +227,21 @@ const paymentSchema: Schema = new Schema({
       trackingUrl: { type: String, trim: true, maxlength: 500 },
       status: { type: String, enum: ['shipped', 'delivered'], required: true },
       shippedAt: { type: Date, required: true },
-      deliveredAt: { type: Date }
+      deliveredAt: { type: Date },
+      estimatedDeliveryAt: { type: Date },
+      lastTrackedAt: { type: Date },
+      lastReminderAt: { type: Date },
+      autoConfirmedAt: { type: Date },
+      events: {
+        type: [new Schema({
+          status: { type: String, required: true, trim: true, maxlength: 50 },
+          description: { type: String, trim: true, maxlength: 300 },
+          location: { type: String, trim: true, maxlength: 200 },
+          occurredAt: { type: Date, required: true },
+          source: { type: String, enum: ['system', 'seller', 'buyer', 'carrier'], required: true }
+        }, { _id: false })],
+        default: []
+      }
     }, { _id: false }),
     default: undefined
   }

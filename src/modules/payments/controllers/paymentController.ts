@@ -8,6 +8,7 @@ import {
   disconnectPayPalForUser,
   initiateDirectPayment,
   captureDirectPayment,
+  cancelDirectPayment,
   resolveConfirmPayment,
   fetchPaymentStatus,
   listUserPayments,
@@ -118,18 +119,60 @@ export const handleConnectCallback = asyncHandler(async (req: Request, res: Resp
 });
 
 /**
+ * Connecte un compte PayPal via saisie manuelle de l'email
+ */
+export const connectPayPalByEmail = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  const { paypalEmail } = req.body;
+
+  if (!paypalEmail || typeof paypalEmail !== 'string') {
+    return res.status(400).json({ success: false, message: 'Email PayPal requis' });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(paypalEmail)) {
+    return res.status(400).json({ success: false, message: 'Email PayPal invalide' });
+  }
+
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+    }
+
+    user.paypalEmail = paypalEmail.trim().toLowerCase();
+    user.paypalConnected = true;
+    await user.save();
+
+    logger.info('Compte PayPal connecté manuellement', { userId: truncatedUserId(userId) });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Email PayPal enregistré avec succès'
+    });
+  } catch (error) {
+    logger.error('Erreur connexion PayPal manuelle', {
+      error: error instanceof Error ? error.message : String(error),
+      userId: truncatedUserId(userId)
+    });
+    return res.status(500).json({ success: false, message: 'Erreur interne' });
+  }
+});
+
+/**
  * Vérifie l'état de connexion PayPal du vendeur
  */
 export const checkPayPalConnection = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
 
   try {
-    const { connected, expiresAt } = await getPayPalConnectionStatus(userId);
+    const { connected, expiresAt, email } = await getPayPalConnectionStatus(userId);
 
     return res.status(200).json({
       success: true,
       connected,
-      expiresAt
+      expiresAt,
+      email
     });
   } catch (error) {
     if (error instanceof HttpError) {
@@ -243,8 +286,47 @@ export const capturePayPalPayment = asyncHandler(async (req: Request, res: Respo
       orderId,
       userId: truncatedUserId(userId)
     });
+
+    // Si l'ordre n'est pas approuvé, renvoyer l'approvalUrl pour re-rediriger
+    const errorMsg = error instanceof Error ? error.message : '';
+    if (errorMsg.includes('non approuvé')) {
+      const Payment = (await import('../../../models/paymentModel')).default;
+      const payment = await Payment.findOne({ paymentIntentId: orderId }).select('approvalUrl');
+      return res.status(400).json({
+        message: 'Une erreur est survenue lors de la capture du paiement',
+        error: devErrorDetails(error),
+        approvalUrl: payment?.approvalUrl || null
+      });
+    }
+
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la capture du paiement',
+      error: devErrorDetails(error)
+    });
+  }
+});
+
+/**
+ * Annule un paiement PayPal et libère la réservation
+ */
+export const cancelPayPalPayment = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  const { orderId } = req.body;
+
+  try {
+    const result = await cancelDirectPayment(userId, orderId);
+    return res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return replyHttpError(res, error);
+    }
+    logger.error('Erreur lors de l\'annulation du paiement PayPal', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+      userId: truncatedUserId(userId)
+    });
+    return res.status(500).json({
+      message: 'Une erreur est survenue lors de l\'annulation du paiement',
       error: devErrorDetails(error)
     });
   }

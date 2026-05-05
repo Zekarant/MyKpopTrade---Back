@@ -7,6 +7,7 @@ import KpopGroup from '../../../models/kpopGroupModel';
 import KpopAlbum from '../../../models/albumModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import { validateProductData } from './productValidationService';
+import { notifyWishlistPriceDrop, notifyWishlistUnavailable } from './wishlistAlertService';
 
 const DEFAULT_LIST_LIMIT = 20;
 const DEFAULT_LIST_PAGE = 1;
@@ -271,11 +272,30 @@ export async function updateProductForOwner({
     updates.reservedFor = null;
   }
 
-  return await Product.findByIdAndUpdate(
+  const previousPrice = product.price;
+  const previousAvailable = product.isAvailable;
+
+  const updated = await Product.findByIdAndUpdate(
     productId,
     { $set: updates },
     { new: true, runValidators: true }
   );
+
+  if (updated) {
+    if (
+      typeof updates.price === 'number' &&
+      updates.price < previousPrice
+    ) {
+      notifyWishlistPriceDrop(updated, previousPrice, updates.price)
+        .catch(() => { /* déjà loggué dans le service */ });
+    }
+    if (updates.isAvailable === false && previousAvailable !== false) {
+      notifyWishlistUnavailable(updated, 'unavailable')
+        .catch(() => { /* déjà loggué dans le service */ });
+    }
+  }
+
+  return updated;
 }
 
 export async function removeProduct({
@@ -295,9 +315,13 @@ export async function removeProduct({
   if (soft) {
     product.isAvailable = false;
     await product.save();
+    notifyWishlistUnavailable(product, 'unavailable')
+      .catch(() => { /* déjà loggué dans le service */ });
     return { soft: true };
   }
 
+  notifyWishlistUnavailable(product, 'unavailable')
+    .catch(() => { /* déjà loggué dans le service */ });
   await product.deleteOne();
   return { soft: false };
 }
@@ -333,6 +357,9 @@ export async function markAsSold({
   });
 
   await product.save();
+
+  notifyWishlistUnavailable(product, 'sold')
+    .catch(() => { /* déjà loggué dans le service */ });
 
   return product;
 }

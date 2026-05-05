@@ -46,12 +46,14 @@ router.post('/gdpr/anonymize-old-payments',
 
 // Routes de gestion de connexion PayPal
 router.get('/paypal/connect', paymentController.generateConnectUrl);
+router.post('/paypal/connect-email', paymentController.connectPayPalByEmail);
 router.get('/paypal/connection-status', paymentController.checkPayPalConnection);
 router.post('/paypal/disconnect', paymentController.disconnectPayPal);
 
 // Routes de paiement PayPal
 router.post('/paypal/create', paymentController.initiatePayPalPayment);
 router.post('/paypal/capture', paymentController.capturePayPalPayment);
+router.post('/paypal/cancel', paymentController.cancelPayPalPayment);
 router.get('/paypal/confirm', paymentController.confirmPayPalPayment);
 
 // Routes avec paramètres ensuite
