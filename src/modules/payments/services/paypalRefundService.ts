@@ -1,33 +1,113 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import User from '../../../models/userModel';
 import { PayPalClient, paypalApiBaseUrl } from './paypalClient';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
 import logger from '../../../commons/utils/logger';
 import { formatForPayPal, gt } from '../../../commons/utils/moneyMath';
 
+const REFUND_ENDPOINT = (captureId: string) =>
+  `${paypalApiBaseUrl}/v2/payments/captures/${captureId}/refund`;
+
 /**
- * Flux de remboursement PayPal.
+ * Construit le header PayPal-Auth-Assertion pour agir au nom du vendeur.
+ * Format JWS sans signature : base64({"alg":"none"}).base64({"iss":"<client_id>","email":"<seller_email>"}).
  */
-export class PayPalRefundService {
-  /**
-   * Construit le header PayPal-Auth-Assertion pour agir au nom du vendeur.
-   * Format : base64({"alg":"none"}).base64({"iss":"<client_id>","email":"<seller_email>"}).
-   */
-  private static buildAuthAssertion(sellerEmail: string): string {
-    const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
-    const payload = Buffer.from(JSON.stringify({
-      iss: process.env.PAYPAL_CLIENT_ID,
-      email: sellerEmail
-    })).toString('base64url');
-    return `${header}.${payload}.`;
+function buildAuthAssertion(sellerEmail: string): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({
+    iss: process.env.PAYPAL_CLIENT_ID,
+    email: sellerEmail
+  })).toString('base64url');
+  return `${header}.${payload}.`;
+}
+
+/**
+ * Extrait un message lisible depuis une erreur PayPal, couvrant les
+ * différentes formes de réponses (objet structuré, string, debug_id seul).
+ */
+function describePayPalError(error: AxiosError): { message: string; status: number; issues: string[] } {
+  const status = error.response?.status ?? 0;
+  const data = (error.response?.data ?? {}) as any;
+
+  const issues: string[] = Array.isArray(data?.details)
+    ? data.details.map((d: any) => d?.issue).filter(Boolean)
+    : [];
+
+  if (data?.message) {
+    const detail = issues.length ? ` (${issues.join(', ')})` : '';
+    return { message: `${data.message}${detail}`, status, issues };
   }
 
+  if (typeof data === 'string' && data.length > 0) {
+    return { message: data.slice(0, 250), status, issues };
+  }
+
+  if (issues.length) {
+    return { message: `PayPal a rejeté le remboursement (${issues.join(', ')})`, status, issues };
+  }
+
+  return {
+    message: `PayPal a renvoyé une erreur ${status || 'inconnue'} sans détail exploitable`,
+    status,
+    issues
+  };
+}
+
+/**
+ * Lance la requête HTTP de remboursement contre PayPal.
+ * Isolée pour pouvoir retry avec/sans PayPal-Auth-Assertion.
+ */
+async function callPayPalRefund(
+  captureId: string,
+  requestBody: any,
+  accessToken: string,
+  authAssertion: string | null
+): Promise<{ id: string; status: string }> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${accessToken}`,
+    'PayPal-Request-Id': `refund_${captureId}_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`,
+    Prefer: 'return=representation'
+  };
+  if (authAssertion) {
+    headers['PayPal-Auth-Assertion'] = authAssertion;
+  }
+
+  const response = await axios.post(REFUND_ENDPOINT(captureId), requestBody, { headers });
+  return { id: response.data.id, status: response.data.status };
+}
+
+/**
+ * Vrai indicateur de l'échec dû à l'Auth-Assertion : PayPal renvoie 401/403
+ * ou un 400/422 sur des codes connus quand l'header est rejeté.
+ */
+function looksLikeAuthAssertionRejection(error: AxiosError): boolean {
+  const status = error.response?.status;
+  const data = (error.response?.data ?? {}) as any;
+  const issues: string[] = Array.isArray(data?.details)
+    ? data.details.map((d: any) => d?.issue)
+    : [];
+  if (status === 401 || status === 403) return true;
+  if ((status === 400 || status === 422) && issues.some((i) =>
+    ['NOT_AUTHORIZED', 'PERMISSION_DENIED', 'AUTHORIZATION_ERROR', 'AUTHENTICATION_FAILURE'].includes(i)
+  )) {
+    return true;
+  }
+  return false;
+}
+
+export class PayPalRefundService {
   /**
-   * Effectue un remboursement pour un paiement capturé.
-   * @param captureId ID de la capture PayPal
-   * @param amount Montant à rembourser (null pour remboursement complet)
-   * @param reason Raison du remboursement
-   * @param sellerId ID du vendeur
+   * Effectue un remboursement (total ou partiel) sur une capture PayPal.
+   *
+   * Stratégie :
+   *  1. Essai avec PayPal-Auth-Assertion (mode partenaire/marketplace).
+   *  2. Si rejeté (401/403/400 lié à l'autorisation), retry SANS l'header.
+   *     Aligné sur le comportement de `captureConnectedPayment` : le payee
+   *     est explicitement défini sur l'order, donc la plateforme peut
+   *     rembourser via son propre token sans Auth-Assertion en sandbox /
+   *     hors statut Marketplace Partner.
+   *  3. Mapping fin des codes d'erreur PayPal pour un message utilisateur clair.
    */
   static async refundConnectedPayment(
     captureId: string,
@@ -35,165 +115,128 @@ export class PayPalRefundService {
     reason: string,
     sellerId: string
   ): Promise<{ id: string; status: string; createdAt: Date }> {
+    const maskedCaptureId = captureId.substring(0, 5) + '...';
+
+    GdprLogger.logPaymentAction('remboursement_preparation', {
+      captureId: maskedCaptureId,
+      isPartial: amount !== null
+    }, sellerId);
+
+    const seller = await User.findById(sellerId);
+    if (!seller) {
+      throw new Error('Vendeur non trouvé');
+    }
+
+    const accessToken = await PayPalClient.getAccessToken();
+
+    const captureDetails = await PayPalClient.getCaptureDetails(captureId, accessToken);
+
+    logger.info('Préparation d\'un remboursement ' + (amount !== null ? 'partiel' : 'complet'), {
+      captureId: maskedCaptureId,
+      amount,
+      currency: captureDetails.currency,
+      maxRefundable: captureDetails.amount
+    });
+
+    const requestBody: any = {};
+    if (amount !== null) {
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Le montant du remboursement doit être strictement positif');
+      }
+      if (gt(amount, captureDetails.amount)) {
+        throw new Error(`Le montant du remboursement (${formatForPayPal(amount)} ${captureDetails.currency}) est supérieur au montant capturé (${captureDetails.amount} ${captureDetails.currency})`);
+      }
+      requestBody.amount = {
+        value: formatForPayPal(amount),
+        currency_code: captureDetails.currency
+      };
+      requestBody.note_to_payer = (reason || 'Remboursement partiel').slice(0, 255);
+    } else {
+      requestBody.note_to_payer = (reason || 'Remboursement complet').slice(0, 255);
+    }
+
+    const sellerPaypalEmail = seller.paypalEmail;
+    const authAssertion = sellerPaypalEmail ? buildAuthAssertion(sellerPaypalEmail) : null;
+
     try {
-      const maskedCaptureId = captureId.substring(0, 5) + '...';
-
-      GdprLogger.logPaymentAction('remboursement_preparation', {
+      const result = await callPayPalRefund(captureId, requestBody, accessToken, authAssertion);
+      logger.info('Remboursement effectué', {
         captureId: maskedCaptureId,
-        isPartial: amount !== null
-      }, sellerId);
-
-      const seller = await User.findById(sellerId);
-      if (!seller) {
-        throw new Error('Vendeur non trouvé');
-      }
-
-      // Utiliser le token de la plateforme + PayPal-Auth-Assertion pour agir
-      // au nom du vendeur (les fonds sont sur son compte PayPal).
-      const accessToken = await PayPalClient.getAccessToken();
-
-      const sellerPaypalEmail = seller.paypalEmail;
-      if (!sellerPaypalEmail) {
-        throw new Error('Le vendeur n\'a pas d\'email PayPal configuré');
-      }
-
-      // Header PayPal-Auth-Assertion : permet à la plateforme d'effectuer
-      // un remboursement depuis le compte du vendeur.
-      const authAssertion = PayPalRefundService.buildAuthAssertion(sellerPaypalEmail);
-
-      logger.debug('Utilisation du token plateforme + Auth-Assertion pour le remboursement', {
-        sellerId: sellerId.substring(0, 5) + '...'
+        refundId: result.id,
+        status: result.status
       });
-
-      const captureDetails = await PayPalClient.getCaptureDetails(captureId, accessToken);
-
-      logger.info('Préparation d\'un remboursement ' + (amount !== null ? 'partiel' : 'complet'), {
+      return { id: result.id, status: result.status, createdAt: new Date() };
+    } catch (firstError: any) {
+      const firstDescription = describePayPalError(firstError as AxiosError);
+      logger.warn('Premier essai de remboursement échoué', {
         captureId: maskedCaptureId,
-        amount,
-        currency: captureDetails.currency,
-        maxRefundable: captureDetails.amount
+        status: firstDescription.status,
+        message: firstDescription.message,
+        issues: firstDescription.issues,
+        usedAuthAssertion: Boolean(authAssertion)
       });
 
-      let requestBody: any = {};
+      // Retry sans Auth-Assertion si on l'avait envoyé et que c'est probablement la cause.
+      const shouldRetryWithoutAssertion = Boolean(authAssertion) &&
+        looksLikeAuthAssertionRejection(firstError as AxiosError);
 
-      if (amount !== null) {
-        if (!Number.isFinite(amount) || amount <= 0) {
-          throw new Error('Le montant du remboursement doit être strictement positif');
-        }
-
-        // Comparaison en cents : `0.1 + 0.2 !== 0.3` côté flottant.
-        if (gt(amount, captureDetails.amount)) {
-          throw new Error(`Le montant du remboursement (${formatForPayPal(amount)} ${captureDetails.currency}) est supérieur au montant capturé (${captureDetails.amount} ${captureDetails.currency})`);
-        }
-
-        requestBody = {
-          amount: {
-            value: formatForPayPal(amount),
-            currency_code: captureDetails.currency
-          },
-          note_to_payer: (reason || 'Remboursement partiel').slice(0, 255)
-        };
-      } else {
-        requestBody = {
-          note_to_payer: (reason || 'Remboursement complet').slice(0, 255)
-        };
-      }
-
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
-        'PayPal-Auth-Assertion': authAssertion,
-        'PayPal-Request-Id': `refund_${captureId}_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`,
-        'Prefer': 'return=representation'
-      };
-
-      logger.debug('Corps de la requête de remboursement', {
-        isPartial: amount !== null,
-        captureId: maskedCaptureId,
-        requestBody: JSON.stringify(requestBody)
-      });
-
-      const response = await axios.post(
-        `${paypalApiBaseUrl}/v2/payments/captures/${captureId}/refund`,
-        requestBody,
-        { headers }
-      );
-
-      logger.info('Remboursement effectué avec succès', {
-        captureId: maskedCaptureId,
-        refundId: response.data.id,
-        status: response.data.status
-      });
-
-      return {
-        id: response.data.id,
-        status: response.data.status,
-        createdAt: new Date()
-      };
-    } catch (error: any) {
-      const errorResponse = error.response?.data || {};
-      const errorDetails = errorResponse.details || [];
-
-      GdprLogger.logPaymentError(error, sellerId, {
-        captureId,
-        statusCode: error.response?.status,
-        errorName: errorResponse.name
-      });
-
-      if (errorResponse.name === 'UNPROCESSABLE_ENTITY') {
-        const hasIssue = (issue: string) =>
-          errorDetails.some((detail: any) => detail.issue === issue);
-
-        if (hasIssue('CAPTURE_FULLY_REFUNDED')) {
-          throw new Error('Cette transaction a déjà été entièrement remboursée');
-        }
-        if (hasIssue('AMOUNT_MISMATCH') || hasIssue('INVALID_CURRENCY_CODE')) {
-          throw new Error('Le montant ou la devise du remboursement est invalide');
-        }
-        if (hasIssue('DUPLICATE_INVOICE_ID')) {
-          throw new Error('Un remboursement avec cet identifiant existe déjà');
-        }
-        if (hasIssue('MAX_NUMBER_OF_REFUNDS_EXCEEDED')) {
-          throw new Error('Le nombre maximum de remboursements pour cette transaction a été atteint');
-        }
-        if (hasIssue('REFUND_TIME_LIMIT_EXCEEDED')) {
-          throw new Error('Le délai de remboursement PayPal (180 jours) est dépassé');
-        }
-        if (hasIssue('REFUND_NOT_PERMITTED') || hasIssue('REFUND_NOT_ALLOWED')) {
-          throw new Error('PayPal n\'autorise pas le remboursement de cette transaction');
-        }
-        if (hasIssue('REFUND_AMOUNT_EXCEEDED') || hasIssue('REFUND_CAPTURE_CURRENCY_MISMATCH')) {
-          throw new Error('Le montant ou la devise dépasse ce qui est remboursable sur cette transaction');
-        }
-        if (hasIssue('PAYEE_ACCOUNT_NOT_SUPPORTED') || hasIssue('PAYEE_ACCOUNT_RESTRICTED')) {
-          throw new Error('Le compte PayPal du vendeur ne permet pas ce remboursement');
-        }
-        if (hasIssue('TRANSACTION_REFUSED')) {
-          throw new Error('PayPal a refusé l\'opération de remboursement');
+      if (shouldRetryWithoutAssertion) {
+        try {
+          const result = await callPayPalRefund(captureId, requestBody, accessToken, null);
+          logger.info('Remboursement effectué après retry sans Auth-Assertion', {
+            captureId: maskedCaptureId,
+            refundId: result.id
+          });
+          return { id: result.id, status: result.status, createdAt: new Date() };
+        } catch (secondError: any) {
+          const secondDescription = describePayPalError(secondError as AxiosError);
+          logger.error('Refund échoué même sans Auth-Assertion', {
+            captureId: maskedCaptureId,
+            ...secondDescription
+          });
+          GdprLogger.logPaymentError(secondError, sellerId, { captureId, statusCode: secondDescription.status });
+          throw new Error(translatePayPalIssue(secondDescription));
         }
       }
 
-      if (errorResponse.name === 'RESOURCE_NOT_FOUND') {
-        throw new Error('La transaction à rembourser est introuvable côté PayPal');
-      }
-
-      if (errorResponse.name === 'AUTHENTICATION_FAILURE' || error.response?.status === 401) {
-        throw new Error('Authentification PayPal invalide — vérifiez la configuration de la plateforme');
-      }
-
-      if (errorResponse.name === 'NOT_AUTHORIZED' || error.response?.status === 403) {
-        throw new Error('La plateforme n\'est pas autorisée à rembourser pour ce vendeur (Auth-Assertion refusée)');
-      }
-
-      if (errorResponse.name === 'RATE_LIMIT_REACHED' || error.response?.status === 429) {
-        throw new Error('Trop de requêtes vers PayPal — réessayez dans quelques instants');
-      }
-
-      throw new Error(
-        errorResponse.message ||
-        error.message ||
-        'Erreur lors du remboursement'
-      );
+      GdprLogger.logPaymentError(firstError, sellerId, { captureId, statusCode: firstDescription.status });
+      throw new Error(translatePayPalIssue(firstDescription));
     }
   }
+}
+
+/**
+ * Traduit un code d'issue PayPal en message utilisateur. Quand on n'a pas de
+ * mapping, on renvoie le `message` PayPal brut — toujours plus utile que
+ * "Request failed with status code 400".
+ */
+function translatePayPalIssue(desc: { message: string; status: number; issues: string[] }): string {
+  const known: Record<string, string> = {
+    CAPTURE_FULLY_REFUNDED: 'Cette transaction a déjà été entièrement remboursée',
+    AMOUNT_MISMATCH: 'Le montant du remboursement est invalide',
+    INVALID_CURRENCY_CODE: 'La devise du remboursement est invalide',
+    DUPLICATE_INVOICE_ID: 'Un remboursement avec cet identifiant existe déjà',
+    MAX_NUMBER_OF_REFUNDS_EXCEEDED: 'Le nombre maximum de remboursements pour cette transaction a été atteint',
+    REFUND_TIME_LIMIT_EXCEEDED: 'Le délai de remboursement PayPal (180 jours) est dépassé',
+    REFUND_NOT_PERMITTED: 'PayPal n\'autorise pas le remboursement de cette transaction',
+    REFUND_NOT_ALLOWED: 'PayPal n\'autorise pas le remboursement de cette transaction',
+    REFUND_AMOUNT_EXCEEDED: 'Le montant dépasse ce qui est remboursable',
+    REFUND_CAPTURE_CURRENCY_MISMATCH: 'La devise du remboursement diffère de celle de la capture',
+    PAYEE_ACCOUNT_NOT_SUPPORTED: 'Le compte PayPal du vendeur ne permet pas ce remboursement',
+    PAYEE_ACCOUNT_RESTRICTED: 'Le compte PayPal du vendeur est restreint',
+    TRANSACTION_REFUSED: 'PayPal a refusé l\'opération',
+    NOT_AUTHORIZED: 'La plateforme n\'est pas autorisée à effectuer ce remboursement',
+    PERMISSION_DENIED: 'Permissions PayPal insuffisantes pour rembourser ce paiement',
+    AUTHENTICATION_FAILURE: 'Authentification PayPal invalide',
+    AUTHORIZATION_ERROR: 'Authentification PayPal invalide',
+    INVALID_RESOURCE_ID: 'La capture PayPal référencée est introuvable ou invalide',
+    RESOURCE_NOT_FOUND: 'La transaction à rembourser est introuvable côté PayPal'
+  };
+  for (const issue of desc.issues) {
+    if (known[issue]) return known[issue];
+  }
+  if (desc.status === 401) return 'Authentification PayPal invalide — vérifiez la configuration plateforme';
+  if (desc.status === 403) return 'PayPal a refusé l\'opération (permissions insuffisantes)';
+  if (desc.status === 429) return 'Trop de requêtes vers PayPal — réessayez dans quelques instants';
+  return desc.message;
 }

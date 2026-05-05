@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import Cart, { CART_MAX_ITEMS, ICartItem } from '../../../models/cartModel';
+import Cart, { CART_MAX_ITEMS } from '../../../models/cartModel';
 import Product from '../../../models/productModel';
 import { HttpError } from '../../../commons/utils/httpError';
 
@@ -87,7 +87,7 @@ export async function clearCart(userId: string) {
 export async function validateCart(userId: string) {
   const cart = await Cart.findOne({ user: userId }).populate('items.product', 'price currency isAvailable isSold seller');
   if (!cart || cart.items.length === 0) {
-    return { valid: true, issues: [] as string[], validItems: [] as ICartItem[], cart };
+    throw new HttpError(400, 'Panier vide');
   }
 
   const issues: string[] = [];

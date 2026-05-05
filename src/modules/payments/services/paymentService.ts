@@ -422,19 +422,6 @@ export async function processRefund({
     );
   }
 
-  // Confirmation par mot de passe (le front la demande déjà ; on la valide).
-  // Les admins en sont exemptés (ils peuvent toujours utiliser la voie litige).
-  if (!isAdmin) {
-    if (!password) {
-      throw new HttpError(400, 'Mot de passe de confirmation requis');
-    }
-    const userWithPwd = await User.findById(userId).select('+password');
-    if (!userWithPwd || !(await userWithPwd.comparePassword(password))) {
-      GdprLogger.logPaymentAction('refund_password_invalid', { paymentId }, userId);
-      throw new HttpError(401, 'Mot de passe incorrect');
-    }
-  }
-
   if (
     payment.status !== PAYMENT_STATUS.COMPLETED &&
     payment.status !== 'partially_refunded'
@@ -446,13 +433,22 @@ export async function processRefund({
     throw new HttpError(400, 'Ce paiement ne contient pas de capture PayPal à rembourser');
   }
 
-  const seller = await User.findById(payment.seller).select('paypalEmail paypalConnected');
-  if (!seller || !seller.paypalEmail) {
-    throw new HttpError(
-      400,
-      'Le vendeur n\'a pas (ou plus) d\'email PayPal configuré — remboursement impossible',
-      ERROR_CODES.SELLER_UNAVAILABLE
-    );
+  // Note: on ne bloque plus si seller.paypalEmail manque. Le paiement a forcément
+  // été émis vers un compte PayPal (payee défini sur l'order) ; les fonds sont
+  // donc présents et `paypalRefundService` retombe sur un appel sans
+  // Auth-Assertion en cas de besoin.
+
+  // Confirmation par mot de passe (le front la demande déjà ; on la valide).
+  // Les admins en sont exemptés (ils interviennent en arbitrage, pas via UI vendeur).
+  if (!isAdmin) {
+    if (!password) {
+      throw new HttpError(400, 'Mot de passe de confirmation requis');
+    }
+    const userWithPwd = await User.findById(userId).select('+password');
+    if (!userWithPwd || !(await userWithPwd.comparePassword(password))) {
+      GdprLogger.logPaymentAction('refund_password_invalid', { paymentId }, userId);
+      throw new HttpError(401, 'Mot de passe incorrect');
+    }
   }
 
   const alreadyRefunded = payment.totalRefunded || 0;

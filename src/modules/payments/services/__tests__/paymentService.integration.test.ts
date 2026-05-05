@@ -57,7 +57,8 @@ describe('paymentService (integration)', () => {
   });
 
   async function createTestPayment(overrides: any = {}) {
-    const seller = await createTestUser();
+    // paypalEmail est requis pour pouvoir initier un remboursement.
+    const seller = await createTestUser({ paypalEmail: `seller_${Date.now()}@paypal.com` });
     const buyer = await createTestUser();
     const product = await createTestProduct(seller._id);
 
@@ -78,6 +79,9 @@ describe('paymentService (integration)', () => {
 
     return { seller, buyer, product, payment };
   }
+
+  // Le mot de passe par défaut des fixtures, requis pour la confirmation refund.
+  const SELLER_PASSWORD = 'Password1!';
 
   describe('buildConnectUrl', () => {
     it('retourne une URL pour un utilisateur existant', async () => {
@@ -167,11 +171,13 @@ describe('paymentService (integration)', () => {
 
       const result = await processRefund({
         userId: seller._id.toString(),
-        paymentId: payment._id.toString()
+        paymentId: payment._id.toString(),
+        password: SELLER_PASSWORD
       });
 
       expect(result.refundId).toBe('refund_123');
-      expect(result.amount).toBeNull();
+      // amount=null en entrée → on rembourse le restant complet
+      expect(result.amount).toBe(20);
       expect(PayPalService.refundConnectedPayment).toHaveBeenCalledWith(
         'cap_test_123',
         null,
@@ -193,7 +199,8 @@ describe('paymentService (integration)', () => {
         userId: seller._id.toString(),
         paymentId: payment._id.toString(),
         amount: 10,
-        reason: 'Article endommagé'
+        reason: 'Article endommagé',
+        password: SELLER_PASSWORD
       });
 
       expect(result.amount).toBe(10);
@@ -280,7 +287,8 @@ describe('paymentService (integration)', () => {
       await expect(
         processRefund({
           userId: seller._id.toString(),
-          paymentId: payment._id.toString()
+          paymentId: payment._id.toString(),
+          password: SELLER_PASSWORD
         })
       ).rejects.toMatchObject({
         statusCode: 400,
