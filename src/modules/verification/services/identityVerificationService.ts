@@ -4,6 +4,7 @@ import { secureStoreDocument, deleteSecureDocument } from '../../../commons/serv
 import { sendVerificationResultEmail } from '../../../commons/services/emailService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import { recordAuditLog } from '../../../commons/utils/auditService';
 
 const VALID_DOCUMENT_TYPES = ['id_card', 'passport', 'driver_license'];
 
@@ -164,6 +165,14 @@ export async function approveIdentityVerification({
 
   safelyDeleteDocument(verification.documentReferenceId);
 
+  await recordAuditLog({
+    adminId,
+    action: 'verification_approved',
+    targetType: 'verification',
+    targetId: verification._id as any,
+    metadata: { userId: String(verification.user) }
+  });
+
   logger.info(`Demande de vérification approuvée: ${verificationId}`, {
     adminId,
     userId: verification.user
@@ -197,6 +206,15 @@ export async function rejectIdentityVerification({
   }
 
   safelyDeleteDocument(verification.documentReferenceId);
+
+  await recordAuditLog({
+    adminId,
+    action: 'verification_rejected',
+    targetType: 'verification',
+    targetId: verification._id as any,
+    details: reason,
+    metadata: { userId: String(verification.user) }
+  });
 
   logger.info(`Demande de vérification rejetée: ${verificationId}`, {
     adminId,

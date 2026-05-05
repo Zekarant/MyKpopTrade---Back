@@ -87,6 +87,12 @@ export interface IUser extends Document {
   followedGroups?: mongoose.Types.ObjectId[];
   followedGroupsCount?: number;
   phoneNumber?: string;
+  /**
+   * `true` si l'utilisateur a complété son profil (OBLIGATOIRE pour les comptes
+   * créés via OAuth, qui n'ont pas pu remplir bio/téléphone à l'inscription).
+   * Le front bloque l'accès à certaines fonctionnalités tant que `false`.
+   */
+  profileCompleted: boolean;
 }
 
 const UserSchema: Schema = new Schema({
@@ -313,6 +319,10 @@ const UserSchema: Schema = new Schema({
       },
       message: 'Veuillez fournir un numéro de téléphone valide'
     }
+  },
+  profileCompleted: {
+    type: Boolean,
+    default: true
   },
 }, {
   timestamps: true

@@ -31,17 +31,21 @@ export const oauthCallback = async (req: Request, res: Response): Promise<void> 
     
     const isNewUser = (req as Request & { isNewUser?: boolean }).isNewUser === true;
 
+    const requiresProfileCompletion = user.profileCompleted === false;
+
     if (responseMode === 'json') {
       res.status(200).json({
         accessToken,
         refreshToken,
         isNewUser,
+        requiresProfileCompletion,
         user: {
           id: user._id,
           username: user.username,
           email: user.email,
           isEmailVerified: user.isEmailVerified,
-          isPhoneVerified: user.isPhoneVerified
+          isPhoneVerified: user.isPhoneVerified,
+          profileCompleted: user.profileCompleted !== false
         }
       });
     } else {
@@ -52,6 +56,7 @@ export const oauthCallback = async (req: Request, res: Response): Promise<void> 
         username: user.username,
       });
       if (isNewUser) params.set('newAccount', '1');
+      if (requiresProfileCompletion) params.set('completeProfile', '1');
       res.redirect(`${process.env.FRONTEND_URL}/auth/callback?${params.toString()}`);
     }
   } catch (error) {

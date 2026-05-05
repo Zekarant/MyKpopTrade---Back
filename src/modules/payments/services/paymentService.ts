@@ -7,6 +7,8 @@ import { NotificationService } from '../../notifications/services/notificationSe
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import { gt, subtract } from '../../../commons/utils/moneyMath';
+import { recordAuditLog } from '../../../commons/utils/auditService';
 
 const PAYMENT_STATUS = {
   PENDING: 'pending',
@@ -390,12 +392,14 @@ export async function processRefund({
   userId,
   paymentId,
   amount,
-  reason
+  reason,
+  password
 }: {
   userId: string;
   paymentId: string;
   amount?: unknown;
   reason?: string;
+  password?: string;
 }) {
   const payment = await Payment.findById(paymentId);
 
@@ -404,7 +408,8 @@ export async function processRefund({
   }
 
   const isSeller = payment.seller.toString() === userId;
-  if (!isSeller && !(await isUserAdmin(userId))) {
+  const isAdmin = await isUserAdmin(userId);
+  if (!isSeller && !isAdmin) {
     GdprLogger.logPaymentAction('unauthorized_refund_attempt', {
       paymentId,
       targetPaymentSeller: payment.seller.toString()
@@ -417,18 +422,62 @@ export async function processRefund({
     );
   }
 
-  if (payment.status !== PAYMENT_STATUS.COMPLETED) {
-    throw new HttpError(400, 'Seul un paiement complété peut être remboursé');
+  // Confirmation par mot de passe (le front la demande déjà ; on la valide).
+  // Les admins en sont exemptés (ils peuvent toujours utiliser la voie litige).
+  if (!isAdmin) {
+    if (!password) {
+      throw new HttpError(400, 'Mot de passe de confirmation requis');
+    }
+    const userWithPwd = await User.findById(userId).select('+password');
+    if (!userWithPwd || !(await userWithPwd.comparePassword(password))) {
+      GdprLogger.logPaymentAction('refund_password_invalid', { paymentId }, userId);
+      throw new HttpError(401, 'Mot de passe incorrect');
+    }
+  }
+
+  if (
+    payment.status !== PAYMENT_STATUS.COMPLETED &&
+    payment.status !== 'partially_refunded'
+  ) {
+    throw new HttpError(400, 'Seul un paiement complété (ou partiellement remboursé) peut être remboursé');
   }
 
   if (!payment.captureId) {
     throw new HttpError(400, 'Ce paiement ne contient pas de capture PayPal à rembourser');
   }
 
-  const refundAmount =
-    amount === undefined || amount === null || amount === ''
-      ? null
-      : parseFloat(amount as string);
+  const seller = await User.findById(payment.seller).select('paypalEmail paypalConnected');
+  if (!seller || !seller.paypalEmail) {
+    throw new HttpError(
+      400,
+      'Le vendeur n\'a pas (ou plus) d\'email PayPal configuré — remboursement impossible',
+      ERROR_CODES.SELLER_UNAVAILABLE
+    );
+  }
+
+  const alreadyRefunded = payment.totalRefunded || 0;
+  const remaining = subtract(payment.amount, alreadyRefunded);
+
+  if (gt(0.01, remaining)) {
+    throw new HttpError(400, 'Ce paiement a déjà été entièrement remboursé');
+  }
+
+  let refundAmount: number | null;
+  if (amount === undefined || amount === null || amount === '') {
+    refundAmount = null;
+  } else {
+    const parsed = typeof amount === 'number' ? amount : parseFloat(String(amount));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new HttpError(400, 'Le montant du remboursement doit être un nombre strictement positif');
+    }
+    if (gt(parsed, remaining)) {
+      throw new HttpError(
+        400,
+        `Le montant demandé (${parsed} ${payment.currency}) dépasse le restant remboursable (${remaining} ${payment.currency})`
+      );
+    }
+    refundAmount = parsed;
+  }
 
   try {
     const refundResult = await PayPalService.refundConnectedPayment(
@@ -438,16 +487,50 @@ export async function processRefund({
       payment.seller.toString()
     );
 
+    // Persistance immédiate (statut 'pending') — le webhook PAYMENT.CAPTURE.REFUNDED
+    // basculera l'entrée en 'completed' et mettra à jour totalRefunded/status.
+    // En cas de webhook manqué, l'opération reste tracée.
+    payment.refunds = payment.refunds || [];
+    payment.refunds.push({
+      refundId: refundResult.id,
+      amount: refundAmount !== null ? refundAmount : remaining,
+      currency: payment.currency,
+      reason: reason || undefined,
+      status: refundResult.status === 'COMPLETED' ? 'completed' : 'pending',
+      initiatedBy: new (require('mongoose').Types.ObjectId)(userId),
+      initiatedAt: new Date()
+    });
+    await payment.save();
+
     GdprLogger.logPaymentAction('refund_initiated', {
       paymentId,
       refundId: refundResult.id,
-      isPartial: refundAmount !== null
+      isPartial: refundAmount !== null,
+      amount: refundAmount,
+      remaining: subtract(remaining, refundAmount !== null ? refundAmount : remaining)
     }, userId);
+
+    if (isAdmin) {
+      await recordAuditLog({
+        adminId: userId,
+        action: refundAmount === null ? 'refund_full' : 'refund_partial',
+        targetType: 'payment',
+        targetId: payment._id as any,
+        details: reason || undefined,
+        metadata: {
+          refundId: refundResult.id,
+          amount: refundAmount,
+          currency: payment.currency
+        }
+      });
+    }
 
     return {
       refundId: refundResult.id,
       status: refundResult.status,
-      amount: refundAmount,
+      amount: refundAmount !== null ? refundAmount : remaining,
+      currency: payment.currency,
+      remaining: subtract(remaining, refundAmount !== null ? refundAmount : remaining),
       createdAt: refundResult.createdAt
     };
   } catch (error: any) {

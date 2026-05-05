@@ -4,6 +4,7 @@ import { HttpError } from '../../../commons/utils/httpError';
 import {
   getPublicProfileData,
   updateProfileData,
+  completeFirstProfile,
   softDeleteAccount,
   setPayPalEmail,
   clearPayPalEmail
@@ -30,6 +31,22 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
 
     logger.error('Erreur lors de la récupération du profil:', error);
     res.status(500).json({ message: 'Erreur lors de la récupération du profil' });
+  }
+};
+
+/**
+ * Marque le profil comme complété (OAuth first login).
+ * Le front l'appelle après une inscription via Google/Discord.
+ */
+export const completeProfile = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = (req.user as any).id;
+    const result = await completeFirstProfile(userId, req.body);
+    res.status(200).json(result);
+  } catch (error) {
+    if (handleHttpError(res, error)) return;
+    logger.error('Erreur lors de la complétion du profil:', error);
+    res.status(500).json({ message: 'Erreur lors de la complétion du profil' });
   }
 };
 

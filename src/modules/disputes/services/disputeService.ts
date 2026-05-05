@@ -5,6 +5,7 @@ import { HttpError } from '../../../commons/utils/httpError';
 import { NotificationService } from '../../notifications/services/notificationService';
 import { processRefund } from '../../payments/services/paymentService';
 import logger from '../../../commons/utils/logger';
+import { recordAuditLog } from '../../../commons/utils/auditService';
 
 const VALID_REASONS: DisputeReason[] = [
   'not_received', 'damaged', 'not_as_described', 'counterfeit',
@@ -137,11 +138,20 @@ export async function openDispute({
   const other = openedByRole === 'buyer' ? payment.seller : payment.buyer;
   await NotificationService.createNotification({
     recipientId: other,
-    type: 'order_status',
+    type: 'dispute_opened',
     title: 'Un litige a été ouvert sur votre transaction',
     content: `Motif : ${reason}. Merci de répondre depuis votre espace litiges.`,
     link: `/disputes/${dispute._id}`,
     data: { disputeId: dispute._id, paymentId, reason }
+  });
+
+  // Notifie tous les admins pour qu'ils puissent prendre le litige en main.
+  await NotificationService.notifyAllAdmins({
+    type: 'admin_alert',
+    title: 'Nouveau litige à arbitrer',
+    content: `Litige ouvert par ${openedByRole === 'buyer' ? 'l\'acheteur' : 'le vendeur'} (motif : ${reason}).`,
+    link: `/admin?tab=disputes&id=${dispute._id}`,
+    data: { disputeId: dispute._id, paymentId, reason, openedByRole }
   });
 
   logger.info('Dispute ouvert', {
@@ -252,6 +262,27 @@ export async function takeDisputeUnderReview(adminId: string, disputeId: string)
   }
   dispute.status = 'under_review';
   await dispute.save();
+
+  await recordAuditLog({
+    adminId,
+    action: 'dispute_taken_under_review',
+    targetType: 'dispute',
+    targetId: dispute._id as any,
+    metadata: { paymentId: dispute.payment.toString() }
+  });
+
+  // Notifier les deux parties que le litige est en cours d'arbitrage.
+  await Promise.all([dispute.buyer, dispute.seller].map((r) =>
+    NotificationService.createNotification({
+      recipientId: r,
+      type: 'dispute_message',
+      title: 'Votre litige est en cours d\'arbitrage',
+      content: 'Un membre de l\'équipe de modération étudie votre dossier.',
+      link: `/disputes/${dispute._id}`,
+      data: { disputeId: dispute._id }
+    }).catch(() => undefined)
+  ));
+
   return dispute;
 }
 
@@ -329,13 +360,26 @@ export async function resolveDispute({
   await Promise.all([dispute.buyer, dispute.seller].map((r) =>
     NotificationService.createNotification({
       recipientId: r,
-      type: 'order_status',
+      type: 'dispute_resolved',
       title: verdictLabel,
       content: notesStr || 'Le litige a été clôturé par l\'équipe de modération.',
       link: `/disputes/${dispute._id}`,
       data: { disputeId: dispute._id, outcome }
     }).catch(() => undefined)
   ));
+
+  await recordAuditLog({
+    adminId,
+    action: `dispute_${outcome}`,
+    targetType: 'dispute',
+    targetId: dispute._id as any,
+    details: notesStr,
+    metadata: {
+      paymentId: dispute.payment.toString(),
+      refundAmount: refundAmountNum,
+      outcome
+    }
+  });
 
   return dispute;
 }

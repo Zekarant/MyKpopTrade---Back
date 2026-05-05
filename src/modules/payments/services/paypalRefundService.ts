@@ -3,6 +3,7 @@ import User from '../../../models/userModel';
 import { PayPalClient, paypalApiBaseUrl } from './paypalClient';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
 import logger from '../../../commons/utils/logger';
+import { formatForPayPal, gt } from '../../../commons/utils/moneyMath';
 
 /**
  * Flux de remboursement PayPal.
@@ -76,22 +77,25 @@ export class PayPalRefundService {
       let requestBody: any = {};
 
       if (amount !== null) {
-        const formattedAmount = parseFloat(amount.toString()).toFixed(2);
+        if (!Number.isFinite(amount) || amount <= 0) {
+          throw new Error('Le montant du remboursement doit être strictement positif');
+        }
+
+        // Comparaison en cents : `0.1 + 0.2 !== 0.3` côté flottant.
+        if (gt(amount, captureDetails.amount)) {
+          throw new Error(`Le montant du remboursement (${formatForPayPal(amount)} ${captureDetails.currency}) est supérieur au montant capturé (${captureDetails.amount} ${captureDetails.currency})`);
+        }
 
         requestBody = {
           amount: {
-            value: formattedAmount,
+            value: formatForPayPal(amount),
             currency_code: captureDetails.currency
           },
-          note_to_payer: reason || 'Remboursement partiel'
+          note_to_payer: (reason || 'Remboursement partiel').slice(0, 255)
         };
-
-        if (parseFloat(formattedAmount) > captureDetails.amount) {
-          throw new Error(`Le montant du remboursement (${formattedAmount} ${captureDetails.currency}) est supérieur au montant capturé (${captureDetails.amount} ${captureDetails.currency})`);
-        }
       } else {
         requestBody = {
-          note_to_payer: reason || 'Remboursement complet'
+          note_to_payer: (reason || 'Remboursement complet').slice(0, 255)
         };
       }
 
@@ -137,23 +141,52 @@ export class PayPalRefundService {
       });
 
       if (errorResponse.name === 'UNPROCESSABLE_ENTITY') {
-        if (errorDetails.some((detail: any) => detail.issue === 'CAPTURE_FULLY_REFUNDED')) {
+        const hasIssue = (issue: string) =>
+          errorDetails.some((detail: any) => detail.issue === issue);
+
+        if (hasIssue('CAPTURE_FULLY_REFUNDED')) {
           throw new Error('Cette transaction a déjà été entièrement remboursée');
         }
-
-        if (errorDetails.some((detail: any) => detail.issue === 'AMOUNT_MISMATCH' || detail.issue === 'INVALID_CURRENCY_CODE')) {
+        if (hasIssue('AMOUNT_MISMATCH') || hasIssue('INVALID_CURRENCY_CODE')) {
           throw new Error('Le montant ou la devise du remboursement est invalide');
         }
-        if (errorDetails.some((detail: any) => detail.issue === 'DUPLICATE_INVOICE_ID')) {
+        if (hasIssue('DUPLICATE_INVOICE_ID')) {
           throw new Error('Un remboursement avec cet identifiant existe déjà');
         }
-        if (errorDetails.some((detail: any) => detail.issue === 'MAX_NUMBER_OF_REFUNDS_EXCEEDED')) {
+        if (hasIssue('MAX_NUMBER_OF_REFUNDS_EXCEEDED')) {
           throw new Error('Le nombre maximum de remboursements pour cette transaction a été atteint');
+        }
+        if (hasIssue('REFUND_TIME_LIMIT_EXCEEDED')) {
+          throw new Error('Le délai de remboursement PayPal (180 jours) est dépassé');
+        }
+        if (hasIssue('REFUND_NOT_PERMITTED') || hasIssue('REFUND_NOT_ALLOWED')) {
+          throw new Error('PayPal n\'autorise pas le remboursement de cette transaction');
+        }
+        if (hasIssue('REFUND_AMOUNT_EXCEEDED') || hasIssue('REFUND_CAPTURE_CURRENCY_MISMATCH')) {
+          throw new Error('Le montant ou la devise dépasse ce qui est remboursable sur cette transaction');
+        }
+        if (hasIssue('PAYEE_ACCOUNT_NOT_SUPPORTED') || hasIssue('PAYEE_ACCOUNT_RESTRICTED')) {
+          throw new Error('Le compte PayPal du vendeur ne permet pas ce remboursement');
+        }
+        if (hasIssue('TRANSACTION_REFUSED')) {
+          throw new Error('PayPal a refusé l\'opération de remboursement');
         }
       }
 
       if (errorResponse.name === 'RESOURCE_NOT_FOUND') {
-        throw new Error('La transaction à rembourser est introuvable');
+        throw new Error('La transaction à rembourser est introuvable côté PayPal');
+      }
+
+      if (errorResponse.name === 'AUTHENTICATION_FAILURE' || error.response?.status === 401) {
+        throw new Error('Authentification PayPal invalide — vérifiez la configuration de la plateforme');
+      }
+
+      if (errorResponse.name === 'NOT_AUTHORIZED' || error.response?.status === 403) {
+        throw new Error('La plateforme n\'est pas autorisée à rembourser pour ce vendeur (Auth-Assertion refusée)');
+      }
+
+      if (errorResponse.name === 'RATE_LIMIT_REACHED' || error.response?.status === 429) {
+        throw new Error('Trop de requêtes vers PayPal — réessayez dans quelques instants');
       }
 
       throw new Error(

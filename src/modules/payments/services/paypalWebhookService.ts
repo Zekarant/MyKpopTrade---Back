@@ -4,6 +4,7 @@ import Conversation from '../../../models/conversationModel';
 import Message from '../../../models/messageModel';
 import { NotificationService } from '../../notifications/services/notificationService';
 import logger from '../../../commons/utils/logger';
+import { add, gt } from '../../../commons/utils/moneyMath';
 
 /**
  * Dispatcher + handlers des webhooks PayPal.
@@ -132,7 +133,9 @@ export class PayPalWebhookService {
   }
 
   /**
-   * Traite les événements de remboursement
+   * Traite les événements de remboursement (PAYMENT.CAPTURE.REFUNDED).
+   * Idempotent : si le refundId est déjà marqué « completed » dans
+   * l'historique, on ne refait rien (PayPal peut redélivrer le webhook).
    */
   private static async handleRefund(event: any): Promise<void> {
     try {
@@ -154,15 +157,47 @@ export class PayPalWebhookService {
       }
 
       const refundAmount = parseFloat(resource.amount.value);
-      const isPartialRefund = refundAmount < payment.amount;
+      const refundCurrency = resource.amount.currency_code;
+      const refundId = resource.id;
 
-      payment.status = isPartialRefund ? 'partially_refunded' : 'refunded';
-      payment.refundAmount = refundAmount;
+      payment.refunds = payment.refunds || [];
+      const existing = payment.refunds.find((r: any) => r.refundId === refundId);
+
+      if (existing && existing.status === 'completed') {
+        logger.debug('Webhook de remboursement déjà traité, ignoré', { refundId });
+        return;
+      }
+
+      if (existing) {
+        existing.status = 'completed';
+        existing.settledAt = new Date();
+      } else {
+        payment.refunds.push({
+          refundId,
+          amount: refundAmount,
+          currency: refundCurrency,
+          status: 'completed',
+          initiatedAt: new Date(),
+          settledAt: new Date()
+        });
+      }
+
+      // Recalcul à partir de l'historique « completed » uniquement.
+      const totalRefunded = payment.refunds
+        .filter((r: any) => r.status === 'completed')
+        .reduce((sum: number, r: any) => add(sum, r.amount), 0);
+
+      const isFullyRefunded = !gt(payment.amount, totalRefunded);
+
+      payment.totalRefunded = totalRefunded;
+      payment.status = isFullyRefunded ? 'refunded' : 'partially_refunded';
+      payment.refundAmount = totalRefunded; // legacy (back-compat)
+      payment.refundId = refundId;
       payment.refundedAt = new Date();
-      payment.refundId = resource.id;
+
       await payment.save();
 
-      if (!isPartialRefund) {
+      if (isFullyRefunded) {
         await Product.findByIdAndUpdate(payment.product, {
           isAvailable: true,
           isSold: false,
@@ -174,14 +209,31 @@ export class PayPalWebhookService {
       await NotificationService.createNotification({
         recipientId: payment.buyer,
         type: 'system',
-        title: isPartialRefund ? 'Remboursement partiel reçu' : 'Remboursement complet reçu',
-        content: `Vous avez été remboursé de ${refundAmount} ${resource.amount.currency_code} pour votre achat.`,
+        title: isFullyRefunded ? 'Remboursement complet reçu' : 'Remboursement partiel reçu',
+        content: `Vous avez été remboursé de ${refundAmount} ${refundCurrency} pour votre achat.`,
         link: `/account/purchases/${payment._id}`,
         data: {
           paymentId: payment._id,
           productId: payment.product,
           refundAmount,
-          currency: resource.amount.currency_code,
+          totalRefunded,
+          currency: refundCurrency,
+          isRefund: true
+        }
+      });
+
+      // Notifier aussi le vendeur (information comptable)
+      await NotificationService.createNotification({
+        recipientId: payment.seller,
+        type: 'system',
+        title: isFullyRefunded ? 'Remboursement complet effectué' : 'Remboursement partiel effectué',
+        content: `Un remboursement de ${refundAmount} ${refundCurrency} a été émis depuis votre compte.`,
+        link: `/account/sales/${payment._id}`,
+        data: {
+          paymentId: payment._id,
+          refundAmount,
+          totalRefunded,
+          currency: refundCurrency,
           isRefund: true
         }
       });

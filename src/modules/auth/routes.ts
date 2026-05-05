@@ -34,6 +34,7 @@ router.post('/verify-phone', authenticateJWT, phoneVerificationController.verify
 // Routes de profil
 router.get('/profile', authenticateJWT, profileController.getProfile);
 router.put('/profile', authenticateJWT, profileController.updateProfile);
+router.post('/profile/complete', authenticateJWT, profileController.completeProfile);
 router.delete('/delete-account', authenticateJWT, profileController.deleteAccount);
 router.put('/profile/paypal-email', authenticateJWT, profileController.updatePayPalEmail);
 router.delete('/profile/paypal-email', authenticateJWT, profileController.removePayPalEmail);

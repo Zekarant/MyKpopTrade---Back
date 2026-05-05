@@ -73,15 +73,54 @@ export class NotificationService {
 
       return notification;
     } catch (error) {
-      logger.error('Erreur lors de la création de notification', { 
+      logger.error('Erreur lors de la création de notification', {
         error: error instanceof Error ? error.message : 'Erreur inconnue',
-        recipientId, 
-        type 
+        recipientId,
+        type
       });
       throw error;
     }
   }
-  
+
+  /**
+   * Crée la même notification pour tous les administrateurs actifs.
+   * Échec individuel ne bloque pas la diffusion (fire-and-forget par admin).
+   * Utilisé pour les alertes nécessitant une action de modération
+   * (litige ouvert, signalement urgent, etc.).
+   */
+  static async notifyAllAdmins(payload: {
+    type: string;
+    title: string;
+    content: string;
+    link?: string | null;
+    data?: any;
+    expiresInDays?: number;
+  }) {
+    try {
+      const admins = await User.find({ role: 'admin', accountStatus: 'active' }).select('_id');
+      const results = await Promise.allSettled(
+        admins.map((admin) =>
+          NotificationService.createNotification({
+            recipientId: admin._id as any,
+            ...payload
+          })
+        )
+      );
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      if (failed > 0) {
+        logger.warn('Notifications admin partielles', { sent: admins.length - failed, failed });
+      }
+      return { sent: admins.length - failed, failed };
+    } catch (error) {
+      logger.error('Erreur lors de la diffusion aux admins', {
+        error: error instanceof Error ? error.message : String(error),
+        type: payload.type
+      });
+      // Nous voulons pas faire échouer l'opération métier appelante.
+      return { sent: 0, failed: 0 };
+    }
+  }
+
   /**
    * Récupère les notifications d'un utilisateur avec pagination
    */

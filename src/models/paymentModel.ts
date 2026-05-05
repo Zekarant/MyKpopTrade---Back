@@ -51,6 +51,26 @@ export interface IPayment extends Document {
   refundReason?: string;
   refundedAt?: Date;
   refundId?: string;
+  /**
+   * Total cumulé des remboursements effectués (en unité de la devise, ex EUR).
+   * Indispensable pour valider les remboursements partiels successifs.
+   */
+  totalRefunded?: number;
+  /**
+   * Historique des remboursements, append-only. Permet de tracer chaque
+   * opération (montant, motif, ID PayPal, date, source) pour les litiges et
+   * les audits comptables.
+   */
+  refunds?: Array<{
+    refundId: string;
+    amount: number;
+    currency: string;
+    reason?: string;
+    status: 'pending' | 'completed' | 'failed';
+    initiatedBy?: mongoose.Types.ObjectId;
+    initiatedAt: Date;
+    settledAt?: Date;
+  }>;
   createdAt: Date;
   updatedAt: Date;
   retentionExpiresAt?: Date; // Date d'expiration de la rétention des données
@@ -179,6 +199,24 @@ const paymentSchema: Schema = new Schema({
   },
   refundId: {
     type: String
+  },
+  totalRefunded: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  refunds: {
+    type: [new Schema({
+      refundId: { type: String, required: true, trim: true },
+      amount: { type: Number, required: true, min: 0 },
+      currency: { type: String, required: true, trim: true, maxlength: 3 },
+      reason: { type: String, trim: true, maxlength: 500 },
+      status: { type: String, enum: ['pending', 'completed', 'failed'], required: true },
+      initiatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+      initiatedAt: { type: Date, required: true, default: Date.now },
+      settledAt: { type: Date }
+    }, { _id: false })],
+    default: []
   },
   retentionExpiresAt: {
     type: Date

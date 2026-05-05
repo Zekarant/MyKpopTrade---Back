@@ -244,6 +244,15 @@ export const adminAnonymizeUser = asyncHandler(async (req: Request, res: Respons
 
   await user.save({ validateBeforeSave: false });
 
+  await AuditLog.create({
+    admin: (req as any).user.id,
+    action: 'anonymize_user',
+    targetType: 'user',
+    targetId: user._id,
+    details: `Utilisateur anonymisé (RGPD Art. 17)`,
+    metadata: { anonymizedId }
+  });
+
   return res.status(200).json({ message: 'Utilisateur anonymisé avec succès' });
 });
 
@@ -273,6 +282,14 @@ export const confirmDeletion = asyncHandler(async (req: Request, res: Response) 
 
   await user.save({ validateBeforeSave: false });
 
+  await AuditLog.create({
+    admin: (req as any).user.id,
+    action: 'confirm_deletion',
+    targetType: 'user',
+    targetId: user._id,
+    details: 'Suppression de compte confirmée et anonymisée'
+  });
+
   return res.status(200).json({ message: 'Compte supprimé et anonymisé' });
 });
 
@@ -290,6 +307,14 @@ export const adminCancelDeletion = asyncHandler(async (req: Request, res: Respon
   user.scheduledForDeletion = false;
   user.scheduledDeletionDate = undefined;
   await user.save({ validateBeforeSave: false });
+
+  await AuditLog.create({
+    admin: (req as any).user.id,
+    action: 'cancel_deletion',
+    targetType: 'user',
+    targetId: user._id,
+    details: 'Demande de suppression annulée'
+  });
 
   return res.status(200).json({ message: 'Demande de suppression annulée' });
 });

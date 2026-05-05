@@ -104,7 +104,7 @@ export const getAuditLogs = asyncHandler(async (req: Request, res: Response) => 
   const targetType = req.query.targetType as string;
 
   const filter: any = {};
-  if (targetType && ['user', 'product', 'post', 'report', 'verification', 'system'].includes(targetType)) {
+  if (targetType && ['user', 'product', 'post', 'report', 'verification', 'system', 'dispute', 'payment'].includes(targetType)) {
     filter.targetType = targetType;
   }
 

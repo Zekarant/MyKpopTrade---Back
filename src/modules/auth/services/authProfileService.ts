@@ -177,6 +177,37 @@ export async function updateProfileData(userId: string, body: any) {
   };
 }
 
+/**
+ * Première complétion de profil pour un compte créé via OAuth.
+ * Délègue les validations à `updateProfileData`, puis flippe `profileCompleted`
+ * à `true` à condition qu'un numéro de téléphone ait été renseigné.
+ */
+export async function completeFirstProfile(userId: string, body: any) {
+  const result = await updateProfileData(userId, body);
+  const user = await loadUserOr404(userId);
+
+  if (!user.phoneNumber) {
+    throw new HttpError(400, 'Le numéro de téléphone est requis pour compléter le profil');
+  }
+
+  user.profileCompleted = true;
+  if (body?.privacyPolicyAccepted) {
+    user.privacyPolicyAccepted = true;
+    user.privacyPolicyAcceptedAt = new Date();
+  }
+  if (body?.dataProcessingConsent) {
+    user.dataProcessingConsent = true;
+    user.dataProcessingConsentAt = new Date();
+  }
+  if (body?.marketingConsent !== undefined) {
+    user.marketingConsent = !!body.marketingConsent;
+    user.marketingConsentAt = new Date();
+  }
+  await user.save();
+
+  return { ...result, profileCompleted: true };
+}
+
 export async function softDeleteAccount(userId: string, password?: string) {
   // Mongoose crée des sous-documents vides par défaut — on vérifie l'id explicitement
   // pour savoir si un provider social est vraiment rattaché.

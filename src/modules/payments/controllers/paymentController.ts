@@ -458,7 +458,7 @@ export const checkPaymentStatus = asyncHandler(async (req: Request, res: Respons
  */
 export const refundPayment = asyncHandler(async (req: Request, res: Response) => {
   const { paymentId } = req.params;
-  const { amount, reason } = req.body;
+  const { amount, reason, password } = req.body;
   const userId = (req.user as any).id;
 
   if (!userId) {
@@ -473,7 +473,8 @@ export const refundPayment = asyncHandler(async (req: Request, res: Response) =>
       userId,
       paymentId: String(paymentId),
       amount,
-      reason
+      reason,
+      password
     });
 
     return res.status(200).json({

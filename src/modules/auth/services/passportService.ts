@@ -30,12 +30,16 @@ export const findOrCreateSocialUser = async (
     } else {
       // Créer un nouvel utilisateur
       const username = `${provider}_${Date.now()}`;
-      
+
       user = new User({
         username,
         email,
         password: Math.random().toString(36).substring(2),
         isEmailVerified: true,
+        // Flag à `false` pour les comptes OAuth fraîchement créés : ils n'ont pas
+        // pu remplir téléphone / RGPD à l'inscription, le front les redirigera
+        // vers la page de complétion de profil.
+        profileCompleted: false,
         socialAuth: {
           [provider]: {
             id: providerId,
@@ -44,7 +48,7 @@ export const findOrCreateSocialUser = async (
           }
         }
       });
-      
+
       await user.save({ validateBeforeSave: false });
     }
     

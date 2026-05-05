@@ -34,7 +34,11 @@ const NotificationSchema: Schema = new Schema({
             'new_follower',
             'refund_issued',
             'wishlist_price_drop',
-            'wishlist_unavailable'
+            'wishlist_unavailable',
+            'dispute_opened',
+            'dispute_message',
+            'dispute_resolved',
+            'admin_alert'
         ]
     },
     title: {
