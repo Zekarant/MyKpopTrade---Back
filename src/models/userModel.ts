@@ -141,6 +141,10 @@ const UserSchema: Schema = new Schema({
       message: 'Veuillez fournir un email PayPal valide'
     }
   },
+  paypalPayerId: {
+    type: String,
+    default: null
+  },
   paypalConnected: {
     type: Boolean,
     default: false

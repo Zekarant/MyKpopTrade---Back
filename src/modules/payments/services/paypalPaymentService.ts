@@ -234,22 +234,46 @@ export class PayPalPaymentService {
         }
       }
 
-      // Récupérer l'email PayPal du vendeur pour le header Auth-Assertion
-      const seller = await User.findById(sellerId).select('paypalEmail');
+      // Stratégie 1 : Utiliser le token OAuth du vendeur s'il existe
+      const sellerAccessToken = await PayPalClient.getSellerAccessToken(sellerId);
+      if (sellerAccessToken) {
+        try {
+          logger.info('Capture avec token OAuth vendeur', { orderId });
+          const response = await axios({
+            method: 'post',
+            url: `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}/capture`,
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${sellerAccessToken}`,
+              'PayPal-Request-Id': `capture_${orderId}_${Date.now()}_seller`
+            }
+          });
+          if (response.data.status === 'COMPLETED') {
+            const captureInfo = response.data.purchase_units[0]?.payments?.captures[0];
+            if (captureInfo) {
+              return {
+                status: 'COMPLETED',
+                captureId: captureInfo.id,
+                amount: captureInfo.amount.value,
+                currency: captureInfo.amount.currency_code
+              };
+            }
+          }
+        } catch (sellerErr: any) {
+          logger.warn('Capture avec token vendeur échouée, fallback sur token plateforme', {
+            orderId,
+            status: sellerErr.response?.status,
+            error: sellerErr.response?.data?.message || sellerErr.message
+          });
+        }
+      }
+
+      // Stratégie 2 : Token plateforme (sans Auth-Assertion pour apps Partner)
       const baseHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`
       };
-
-      // Ajouter le PayPal-Auth-Assertion si le vendeur a un email PayPal
       let useAuthAssertion = false;
-      if (seller?.paypalEmail) {
-        const clientId = process.env.PAYPAL_CLIENT_ID;
-        const headerPart1 = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64');
-        const headerPart2 = Buffer.from(JSON.stringify({ iss: clientId, email: seller.paypalEmail })).toString('base64');
-        baseHeaders['PayPal-Auth-Assertion'] = `${headerPart1}.${headerPart2}.`;
-        useAuthAssertion = true;
-      }
 
       // Tenter la capture directement avec retry
       let response;

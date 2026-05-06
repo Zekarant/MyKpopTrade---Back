@@ -13,7 +13,8 @@ import {
   fetchPaymentStatus,
   listUserPayments,
   fetchPaymentDetails,
-  processRefund
+  processRefund,
+  confirmManualRefund
 } from '../services/paymentService';
 import {
   markShipped,
@@ -141,7 +142,8 @@ export const connectPayPalByEmail = asyncHandler(async (req: Request, res: Respo
     }
 
     user.paypalEmail = paypalEmail.trim().toLowerCase();
-    user.paypalConnected = true;
+    // Note: paypalConnected reste inchangé — l'email seul ne suffit plus pour vendre.
+    // Le vendeur doit passer par OAuth pour obtenir les tokens nécessaires aux remboursements.
     await user.save();
 
     logger.info('Compte PayPal connecté manuellement', { userId: truncatedUserId(userId) });
@@ -166,11 +168,12 @@ export const checkPayPalConnection = asyncHandler(async (req: Request, res: Resp
   const userId = (req.user as any).id;
 
   try {
-    const { connected, expiresAt, email } = await getPayPalConnectionStatus(userId);
+    const { connected, oauthConnected, expiresAt, email } = await getPayPalConnectionStatus(userId);
 
     return res.status(200).json({
       success: true,
       connected,
+      oauthConnected,
       expiresAt,
       email
     });
@@ -655,6 +658,47 @@ export const getPayment = asyncHandler(async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: 'Une erreur est survenue lors de la récupération du paiement'
+    });
+  }
+});
+
+/**
+ * Le vendeur confirme avoir effectué un remboursement manuel sur PayPal.
+ * @route POST /api/payments/:paymentId/confirm-refund
+ * @access Private - Vendeur uniquement
+ */
+export const confirmRefund = asyncHandler(async (req: Request, res: Response) => {
+  const { paymentId } = req.params;
+  const userId = (req.user as any).id;
+
+  if (!userId) {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentification requise'
+    });
+  }
+
+  try {
+    const result = await confirmManualRefund({
+      userId,
+      paymentId: String(paymentId)
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Remboursement confirmé avec succès',
+      ...result
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return replyHttpError(res, error, { withSuccess: true });
+    }
+
+    GdprLogger.logPaymentError(error, userId, { action: 'confirm_manual_refund', paymentId });
+
+    return res.status(500).json({
+      success: false,
+      message: 'Une erreur est survenue lors de la confirmation du remboursement'
     });
   }
 });

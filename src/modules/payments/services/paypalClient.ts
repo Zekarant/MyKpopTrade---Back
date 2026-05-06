@@ -1,5 +1,6 @@
 import axios from 'axios';
 import logger from '../../../commons/utils/logger';
+import User from '../../../models/userModel';
 
 /**
  * URL de base de l'API PayPal (sandbox en non-production).
@@ -109,5 +110,85 @@ export class PayPalClient {
       });
       throw new Error('Impossible de récupérer les détails de la capture PayPal');
     }
+  }
+
+  /**
+   * Rafraîchit le token OAuth d'un vendeur via son refresh_token.
+   * Met à jour les champs paypalTokens du user en base.
+   * Retourne le nouveau access_token.
+   */
+  static async refreshSellerToken(sellerId: string): Promise<string> {
+    const user = await User.findById(sellerId).select('+paypalTokens.accessToken +paypalTokens.refreshToken +paypalTokens.expiresAt');
+    if (!user || !user.paypalTokens?.refreshToken) {
+      throw new Error('Aucun refresh token PayPal disponible pour ce vendeur');
+    }
+
+    const clientId = process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      throw new Error('Identifiants PayPal non configurés');
+    }
+
+    const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
+    try {
+      const response = await axios({
+        method: 'post',
+        url: `${paypalApiBaseUrl}/v1/oauth2/token`,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${auth}`
+        },
+        data: `grant_type=refresh_token&refresh_token=${user.paypalTokens.refreshToken}`
+      });
+
+      const { access_token, refresh_token, expires_in, scope: grantedScope } = response.data;
+
+      user.paypalTokens = {
+        accessToken: access_token,
+        refreshToken: refresh_token || user.paypalTokens.refreshToken,
+        expiresAt: new Date(Date.now() + (expires_in || 3600) * 1000)
+      };
+      await user.save();
+
+      logger.info('Token PayPal vendeur rafraîchi', {
+        sellerId: sellerId.substring(0, 5) + '...',
+        grantedScope,
+        canRefund: typeof grantedScope === 'string' && grantedScope.includes('https://uri.paypal.com/services/payments/refund')
+      });
+      return access_token;
+    } catch (error: any) {
+      logger.error('Échec du refresh token PayPal vendeur', {
+        sellerId: sellerId.substring(0, 5) + '...',
+        error: error.message,
+        status: error.response?.status
+      });
+      throw new Error('Impossible de rafraîchir le token PayPal du vendeur');
+    }
+  }
+
+  /**
+   * Récupère un access_token valide pour un vendeur.
+   * Si le token est expiré, le rafraîchit automatiquement.
+   * Retourne null si le vendeur n'a pas de tokens OAuth.
+   */
+  static async getSellerAccessToken(sellerId: string): Promise<string | null> {
+    const user = await User.findById(sellerId).select('+paypalTokens.accessToken +paypalTokens.refreshToken +paypalTokens.expiresAt');
+    if (!user || !user.paypalTokens?.accessToken) {
+      return null;
+    }
+
+    const now = new Date();
+    const expiresAt = user.paypalTokens.expiresAt ? new Date(user.paypalTokens.expiresAt) : null;
+
+    // Rafraîchir si expiré ou expire dans les 5 prochaines minutes
+    if (!expiresAt || expiresAt.getTime() - now.getTime() < 5 * 60 * 1000) {
+      if (!user.paypalTokens.refreshToken) {
+        return null;
+      }
+      return await PayPalClient.refreshSellerToken(sellerId);
+    }
+
+    return user.paypalTokens.accessToken;
   }
 }

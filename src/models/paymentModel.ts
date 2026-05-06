@@ -37,7 +37,7 @@ export interface IPayment extends Document {
   setPaymentIntentId(value: string): void; // Méthode pour définir la valeur chiffrée
   captureId?: string;
   captureIdEncrypted?: string; // Champ chiffré
-  status: 'pending' | 'completed' | 'failed' | 'refunded' | 'partially_refunded' | 'cancelled';
+  status: 'pending' | 'completed' | 'failed' | 'refunded' | 'partially_refunded' | 'cancelled' | 'refund_pending_seller';
   paymentMethod: 'paypal' | 'stripe' | 'other';
   paymentType: 'direct' | 'platform';
   paymentMetadata?: string;
@@ -155,7 +155,7 @@ const paymentSchema: Schema = new Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'completed', 'failed', 'refunded', 'partially_refunded', 'cancelled'],
+    enum: ['pending', 'completed', 'failed', 'refunded', 'partially_refunded', 'cancelled', 'refund_pending_seller'],
     default: 'pending'
   },
   paymentMethod: {

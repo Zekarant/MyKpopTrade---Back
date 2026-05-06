@@ -117,6 +117,28 @@ export async function createProductForSeller({
   imageUrls: string[];
   uploadedFiles?: Express.Multer.File[];
 }) {
+  // Vérifier que le vendeur a connecté son compte PayPal via OAuth
+  const seller = await User.findById(sellerId).select('paypalConnected +paypalTokens.accessToken +paypalTokens.refreshToken');
+  if (!seller) {
+    cleanupUploadedFiles(uploadedFiles);
+    throw new HttpError(404, 'Utilisateur non trouvé');
+  }
+
+  const hasOAuthConnection = Boolean(
+    seller.paypalConnected &&
+    seller.paypalTokens?.accessToken &&
+    seller.paypalTokens?.refreshToken
+  );
+
+  if (!hasOAuthConnection) {
+    cleanupUploadedFiles(uploadedFiles);
+    throw new HttpError(
+      403,
+      'Vous devez connecter votre compte PayPal (via OAuth) avant de pouvoir vendre. Rendez-vous dans Paramètres > PayPal.',
+      'PAYPAL_OAUTH_REQUIRED'
+    );
+  }
+
   if (imageUrls.length === 0) {
     cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(400, 'Au moins une image est requise pour créer un produit');
