@@ -159,8 +159,14 @@ const UserSchema: Schema = new Schema({
   },
   stripeAccountId: {
     type: String,
-    default: null,
-    index: { sparse: true, unique: true }
+    index: {
+      unique: true,
+      // Mongo's `sparse: true` n'exclut PAS les docs où le champ vaut null —
+      // seulement ceux où il est absent. Avec un schema partagé, plusieurs users
+      // peuvent finir avec `null` et faire collision sur l'index unique.
+      // partialFilterExpression vise explicitement les valeurs string non vides.
+      partialFilterExpression: { stripeAccountId: { $type: 'string' } }
+    }
   },
   stripePayoutsEnabled: {
     type: Boolean,
