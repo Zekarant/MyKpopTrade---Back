@@ -3,7 +3,8 @@ import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import {
-  createOnboardingLink,
+  createSellerAccount,
+  createAccountSession,
   getSellerStatus
 } from '../services/stripeConnectService';
 import { createStripeCheckoutSession } from '../services/stripeCheckoutService';
@@ -26,23 +27,53 @@ function replyHttpError(res: Response, error: HttpError) {
 }
 
 /**
- * Génère un lien d'onboarding Stripe Connect pour le vendeur courant.
- * @route POST /api/payments/stripe/onboarding-link
+ * Crée le compte Stripe Connect du vendeur sans passer par l'interface Stripe.
+ * Le compte existe immédiatement ; payouts_enabled reste false jusqu'au KYC.
+ * @route POST /api/payments/stripe/create-account
  */
-export const generateStripeOnboardingLink = asyncHandler(async (req: Request, res: Response) => {
+export const createStripeAccount = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   try {
-    const { url } = await createOnboardingLink(userId);
-    return res.status(200).json({ success: true, url });
+    const { accountId, alreadyExisted } = await createSellerAccount(userId);
+    return res.status(alreadyExisted ? 200 : 201).json({
+      success: true,
+      accountId,
+      alreadyExisted,
+      message: alreadyExisted ? 'Compte Stripe déjà existant' : 'Compte Stripe créé avec succès'
+    });
   } catch (error) {
     if (error instanceof HttpError) return replyHttpError(res, error);
-    logger.error('Erreur création onboarding Stripe', {
+    logger.error('Erreur création compte Stripe', {
       userId,
       error: error instanceof Error ? error.message : String(error)
     });
     return res.status(500).json({
       success: false,
-      message: 'Une erreur est survenue lors de la génération du lien d\'onboarding',
+      message: 'Une erreur est survenue lors de la création du compte Stripe',
+      error: devErrorDetails(error)
+    });
+  }
+});
+
+/**
+ * Crée une Account Session pour l'embedded onboarding Stripe Connect.
+ * Retourne un client_secret à passer à @stripe/connect-js côté frontend.
+ * @route POST /api/payments/stripe/account-session
+ */
+export const createStripeAccountSession = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.user as any).id;
+  try {
+    const { clientSecret, accountId } = await createAccountSession(userId);
+    return res.status(200).json({ success: true, clientSecret, accountId });
+  } catch (error) {
+    if (error instanceof HttpError) return replyHttpError(res, error);
+    logger.error('Erreur création account session Stripe', {
+      userId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return res.status(500).json({
+      success: false,
+      message: 'Une erreur est survenue lors de la création de la session Stripe',
       error: devErrorDetails(error)
     });
   }
