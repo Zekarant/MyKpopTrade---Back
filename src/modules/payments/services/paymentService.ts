@@ -437,16 +437,6 @@ export async function processRefund({
     throw new HttpError(400, 'Ce paiement ne contient pas de capture PayPal à rembourser');
   }
 
-  // Note: on ne bloque plus si seller.paypalEmail manque. Le paiement a forcément
-  // été émis vers un compte PayPal (payee défini sur l'order) ; les fonds sont
-  // donc présents et `paypalRefundService` retombe sur un appel sans
-  // Auth-Assertion en cas de besoin.
-
-  // Vérifier si le vendeur a des tokens OAuth — si non, déclencher le workflow manuel
-  const sellerForTokenCheck = await User.findById(payment.seller.toString())
-    .select('+paypalTokens.accessToken +paypalTokens.refreshToken +paypalTokens.expiresAt');
-  const hasOAuthTokens = Boolean(sellerForTokenCheck?.paypalTokens?.accessToken);
-
   // Confirmation par mot de passe (le front la demande déjà ; on la valide).
   // Les admins en sont exemptés (ils interviennent en arbitrage, pas via UI vendeur).
   if (!isAdmin) {
@@ -539,62 +529,6 @@ export async function processRefund({
       createdAt: refundResult.createdAt
     };
   } catch (error: any) {
-    // Filet : le vendeur n'a pas de tokens OAuth ET le token plateforme s'est
-    // fait rejeter pour une raison d'autorisation (cas typique en production
-    // hors PayPal Partner). On bascule vers un workflow où le vendeur rembourse
-    // manuellement depuis paypal.com puis confirme via /confirm-refund.
-    const isAuthFailure = error instanceof PayPalRefundError && error.kind === 'auth';
-    if (isAuthFailure && !hasOAuthTokens) {
-      const manualRefundId = `manual_pending_${Date.now()}`;
-      const refundAmountFinal = refundAmount !== null ? refundAmount : remaining;
-
-      payment.status = 'refund_pending_seller' as any;
-      payment.refunds = payment.refunds || [];
-      payment.refunds.push({
-        refundId: manualRefundId,
-        amount: refundAmountFinal,
-        currency: payment.currency,
-        reason: reason || undefined,
-        status: 'pending',
-        initiatedBy: new (require('mongoose').Types.ObjectId)(userId),
-        initiatedAt: new Date()
-      });
-      await payment.save();
-
-      await NotificationService.createNotification({
-        recipientId: payment.seller.toString(),
-        type: 'refund_manual_required',
-        title: 'Remboursement manuel requis',
-        content: `Vous devez rembourser ${refundAmountFinal} ${payment.currency} à l'acheteur depuis votre interface PayPal (capture ${payment.captureId}). Une fois fait, confirmez sur la plateforme.`,
-        link: `/payments/${paymentId}/confirm-refund`,
-        data: { paymentId, captureId: payment.captureId, amount: refundAmountFinal, currency: payment.currency }
-      });
-
-      await NotificationService.createNotification({
-        recipientId: payment.buyer.toString(),
-        type: 'refund_pending',
-        title: 'Remboursement en cours',
-        content: `Un remboursement de ${refundAmountFinal} ${payment.currency} a été initié. Le vendeur doit confirmer l'opération depuis PayPal.`,
-        link: `/payments/${paymentId}`,
-        data: { paymentId, amount: refundAmountFinal, currency: payment.currency }
-      });
-
-      GdprLogger.logPaymentAction('refund_manual_workflow_triggered', {
-        paymentId,
-        amount: refundAmountFinal
-      }, userId);
-
-      return {
-        refundId: manualRefundId,
-        status: 'PENDING_SELLER',
-        amount: refundAmountFinal,
-        currency: payment.currency,
-        remaining: subtract(remaining, refundAmountFinal),
-        createdAt: new Date(),
-        manualRefundRequired: true
-      };
-    }
-
     logger.error('Erreur lors du remboursement PayPal', {
       error: error instanceof Error ? error.message : String(error),
       paymentId,
@@ -603,7 +537,8 @@ export async function processRefund({
 
     if (error instanceof PayPalRefundError) {
       const httpStatus = error.kind === 'auth' ? 401 : 400;
-      throw new HttpError(httpStatus, error.message);
+      const code = error.kind === 'auth' ? 'RECONNECT_PAYPAL' : undefined;
+      throw new HttpError(httpStatus, error.message, code);
     }
     throw new HttpError(400, error.message || 'Erreur lors du remboursement');
   }
@@ -632,92 +567,3 @@ export async function fetchPaymentDetails(userId: string, paymentId: string) {
   return payment;
 }
 
-/**
- * Confirme un remboursement manuel effectué par le vendeur sur PayPal.
- * Vérifie optionnellement via l'API PayPal que la capture est bien remboursée.
- */
-export async function confirmManualRefund({
-  userId,
-  paymentId
-}: {
-  userId: string;
-  paymentId: string;
-}) {
-  const payment = await Payment.findById(paymentId);
-  if (!payment) {
-    throw new HttpError(404, 'Paiement non trouvé');
-  }
-
-  // Seul le vendeur peut confirmer
-  if (payment.seller.toString() !== userId) {
-    throw new HttpError(403, 'Seul le vendeur peut confirmer un remboursement manuel');
-  }
-
-  if (payment.status !== 'refund_pending_seller') {
-    throw new HttpError(400, 'Ce paiement n\'est pas en attente de confirmation de remboursement');
-  }
-
-  if (!payment.captureId) {
-    throw new HttpError(400, 'Aucune capture associée à ce paiement');
-  }
-
-  // Vérification optionnelle : interroger PayPal pour confirmer le refund
-  let verifiedByPayPal = false;
-  try {
-    const platformToken = await PayPalService.getAccessToken();
-    const captureDetails = await PayPalService.getCaptureDetails(payment.captureId, platformToken);
-    // PayPal renvoie 'REFUNDED' ou 'PARTIALLY_REFUNDED' quand un remboursement a été effectué
-    if (captureDetails.status === 'REFUNDED' || captureDetails.status === 'PARTIALLY_REFUNDED') {
-      verifiedByPayPal = true;
-    }
-  } catch (error) {
-    // Si on ne peut pas vérifier, on accepte quand même la confirmation du vendeur
-    logger.warn('Impossible de vérifier le remboursement via PayPal API', {
-      paymentId,
-      error: error instanceof Error ? error.message : String(error)
-    });
-  }
-
-  // Trouver le refund pending dans l'historique et le marquer completed
-  const pendingRefund = payment.refunds?.find((r: any) => r.status === 'pending');
-  if (pendingRefund) {
-    pendingRefund.status = 'completed';
-    pendingRefund.settledAt = new Date();
-  }
-
-  // Mettre à jour le totalRefunded et le statut
-  const refundedAmount = pendingRefund?.amount || 0;
-  payment.totalRefunded = (payment.totalRefunded || 0) + refundedAmount;
-
-  if (payment.totalRefunded >= payment.amount) {
-    payment.status = 'refunded';
-  } else {
-    payment.status = 'partially_refunded';
-  }
-
-  payment.refundedAt = new Date();
-  await payment.save();
-
-  // Notification à l'acheteur
-  await NotificationService.createNotification({
-    recipientId: payment.buyer.toString(),
-    type: 'refund_completed',
-    title: 'Remboursement confirmé',
-    content: `Le vendeur a confirmé le remboursement de ${refundedAmount} ${payment.currency}. ${verifiedByPayPal ? 'Vérifié par PayPal.' : 'Vérifiez votre compte PayPal.'}`,
-    link: `/payments/${paymentId}`,
-    data: { paymentId, amount: refundedAmount, currency: payment.currency, verifiedByPayPal }
-  });
-
-  GdprLogger.logPaymentAction('manual_refund_confirmed', {
-    paymentId,
-    amount: refundedAmount,
-    verifiedByPayPal
-  }, userId);
-
-  return {
-    status: payment.status,
-    totalRefunded: payment.totalRefunded,
-    verifiedByPayPal,
-    refundedAmount
-  };
-}

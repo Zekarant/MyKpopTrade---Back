@@ -15,6 +15,14 @@ export const paymentConfig = {
     returnUrl: process.env.PAYPAL_RETURN_URL || 'http://localhost:3000/payment/success',
     cancelUrl: process.env.PAYPAL_CANCEL_URL || 'http://localhost:3000/payment/cancel'
   },
+
+  // Configuration Stripe Connect
+  stripe: {
+    secretKey: process.env.STRIPE_SECRET_KEY || '',
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+    /** Pourcentage de commission plateforme (0 = pas de commission) */
+    platformFeePercent: parseFloat(process.env.PLATFORM_FEE_PERCENT || '0')
+  },
   
   // Configuration pour la conformité RGPD
   gdpr: {
@@ -43,6 +51,11 @@ export const validatePaymentConfig = () => {
     if (!paymentConfig.paypal.clientId || !paymentConfig.paypal.clientSecret) {
       throw new Error(
         'Configuration PayPal incomplète pour l\'environnement de production.'
+      );
+    }
+    if (!paymentConfig.stripe.secretKey || !paymentConfig.stripe.webhookSecret) {
+      throw new Error(
+        'Configuration Stripe incomplète pour l\'environnement de production.'
       );
     }
   }

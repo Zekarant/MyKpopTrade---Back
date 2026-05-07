@@ -13,8 +13,7 @@ import {
   fetchPaymentStatus,
   listUserPayments,
   fetchPaymentDetails,
-  processRefund,
-  confirmManualRefund
+  processRefund
 } from '../services/paymentService';
 import {
   markShipped,
@@ -116,48 +115,6 @@ export const handleConnectCallback = asyncHandler(async (req: Request, res: Resp
       userId: truncatedUserId(sellerId)
     });
     return res.redirect(`${process.env.FRONTEND_URL}/settings?error=server_error`);
-  }
-});
-
-/**
- * Connecte un compte PayPal via saisie manuelle de l'email
- */
-export const connectPayPalByEmail = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
-  const { paypalEmail } = req.body;
-
-  if (!paypalEmail || typeof paypalEmail !== 'string') {
-    return res.status(400).json({ success: false, message: 'Email PayPal requis' });
-  }
-
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(paypalEmail)) {
-    return res.status(400).json({ success: false, message: 'Email PayPal invalide' });
-  }
-
-  try {
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
-    }
-
-    user.paypalEmail = paypalEmail.trim().toLowerCase();
-    // Note: paypalConnected reste inchangé — l'email seul ne suffit plus pour vendre.
-    // Le vendeur doit passer par OAuth pour obtenir les tokens nécessaires aux remboursements.
-    await user.save();
-
-    logger.info('Compte PayPal connecté manuellement', { userId: truncatedUserId(userId) });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Email PayPal enregistré avec succès'
-    });
-  } catch (error) {
-    logger.error('Erreur connexion PayPal manuelle', {
-      error: error instanceof Error ? error.message : String(error),
-      userId: truncatedUserId(userId)
-    });
-    return res.status(500).json({ success: false, message: 'Erreur interne' });
   }
 });
 
@@ -662,43 +619,3 @@ export const getPayment = asyncHandler(async (req: Request, res: Response) => {
   }
 });
 
-/**
- * Le vendeur confirme avoir effectué un remboursement manuel sur PayPal.
- * @route POST /api/payments/:paymentId/confirm-refund
- * @access Private - Vendeur uniquement
- */
-export const confirmRefund = asyncHandler(async (req: Request, res: Response) => {
-  const { paymentId } = req.params;
-  const userId = (req.user as any).id;
-
-  if (!userId) {
-    return res.status(401).json({
-      success: false,
-      message: 'Authentification requise'
-    });
-  }
-
-  try {
-    const result = await confirmManualRefund({
-      userId,
-      paymentId: String(paymentId)
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Remboursement confirmé avec succès',
-      ...result
-    });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error, { withSuccess: true });
-    }
-
-    GdprLogger.logPaymentError(error, userId, { action: 'confirm_manual_refund', paymentId });
-
-    return res.status(500).json({
-      success: false,
-      message: 'Une erreur est survenue lors de la confirmation du remboursement'
-    });
-  }
-});

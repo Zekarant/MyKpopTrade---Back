@@ -106,18 +106,11 @@ export class PayPalRefundService {
   /**
    * Effectue un remboursement (total ou partiel) sur une capture PayPal.
    *
-   * Stratégie :
-   *  1. Si le vendeur a un access_token OAuth valide avec le scope refund
-   *     → appel direct avec son token (voie cible pour la production avec
-   *     scopes étendus / Partner setup).
-   *  2. Sinon → token plateforme client_credentials. Fonctionne en sandbox
-   *     PayPal (les apps sandbox peuvent rembourser leurs propres comptes
-   *     business sans Auth-Assertion). En production hors Partner, ce flux
-   *     échouera et l'erreur sera remontée explicitement.
-   *
-   * Note : `PayPal-Auth-Assertion` (mode partenaire) n'est plus tenté par
-   * défaut — il échoue systématiquement en 401 sur les apps non-Partner et
-   * ajoute du bruit dans les logs.
+   * Le remboursement est toujours fait avec le token OAuth du vendeur
+   * (scope `payments/refund`) : c'est lui qui détient les fonds, donc
+   * c'est lui qui rembourse. Si le vendeur n'a pas (ou plus) de tokens
+   * OAuth valides, on lève `RECONNECT_PAYPAL` pour que le front lui
+   * propose de relancer l'OAuth.
    */
   static async refundConnectedPayment(
     captureId: string,
@@ -132,8 +125,17 @@ export class PayPalRefundService {
       isPartial: amount !== null
     }, sellerId);
 
-    const platformAccessToken = await PayPalClient.getAccessToken();
-    const captureDetails = await PayPalClient.getCaptureDetails(captureId, platformAccessToken);
+    const sellerAccessToken = await PayPalClient.getSellerAccessToken(sellerId);
+    if (!sellerAccessToken) {
+      throw new PayPalRefundError(
+        'Votre connexion PayPal a expiré ou est insuffisante pour rembourser. Reconnectez votre compte PayPal.',
+        'auth',
+        401,
+        ['RECONNECT_PAYPAL']
+      );
+    }
+
+    const captureDetails = await PayPalClient.getCaptureDetails(captureId, sellerAccessToken);
 
     const requestBody: any = {};
     if (amount !== null) {
@@ -162,77 +164,56 @@ export class PayPalRefundService {
       requestBody.note_to_payer = (reason || 'Remboursement complet').slice(0, 255);
     }
 
-    const sellerAccessToken = await PayPalClient.getSellerAccessToken(sellerId);
-
     logger.info('Préparation d\'un remboursement ' + (amount !== null ? 'partiel' : 'complet'), {
       captureId: maskedCaptureId,
       amount,
       currency: captureDetails.currency,
-      maxRefundable: captureDetails.amount,
-      hasSellerOAuth: Boolean(sellerAccessToken)
+      maxRefundable: captureDetails.amount
     });
 
-    // Tentative 1 : token vendeur OAuth si présent (voie cible production
-    // avec scopes étendus). Tentative 2 : token plateforme — utilisée si la
-    // tentative 1 est rejetée pour raison d'autorisation (scopes insuffisants),
-    // ou directement si le vendeur n'a pas de tokens OAuth.
-    const attempts: Array<{ token: string; source: 'seller_oauth' | 'platform' }> = [];
-    if (sellerAccessToken) {
-      attempts.push({ token: sellerAccessToken, source: 'seller_oauth' });
-    }
-    attempts.push({ token: platformAccessToken, source: 'platform' });
+    try {
+      const result = await callPayPalRefund(captureId, requestBody, sellerAccessToken);
+      logger.info('Remboursement effectué', {
+        captureId: maskedCaptureId,
+        refundId: result.id,
+        status: result.status
+      });
+      return { id: result.id, status: result.status, createdAt: new Date() };
+    } catch (error: any) {
+      const desc = describePayPalError(error as AxiosError);
+      const kind = classifyError(desc);
 
-    let lastDesc: PayPalErrorDescription | null = null;
-    let lastKind: 'auth' | 'business' | 'unknown' = 'unknown';
-    let lastError: any = null;
+      logger.warn('Refund PayPal rejeté', {
+        captureId: maskedCaptureId,
+        status: desc.status,
+        issues: desc.issues,
+        message: desc.message,
+        debugId: desc.debugId,
+        kind
+      });
 
-    for (let i = 0; i < attempts.length; i++) {
-      const { token, source } = attempts[i];
-      try {
-        const result = await callPayPalRefund(captureId, requestBody, token);
-        logger.info('Remboursement effectué', {
-          captureId: maskedCaptureId,
-          refundId: result.id,
-          status: result.status,
-          tokenSource: source
-        });
-        return { id: result.id, status: result.status, createdAt: new Date() };
-      } catch (error: any) {
-        const desc = describePayPalError(error as AxiosError);
-        const kind = classifyError(desc);
-        lastDesc = desc;
-        lastKind = kind;
-        lastError = error;
+      GdprLogger.logPaymentError(error, sellerId, { captureId, statusCode: desc.status });
 
-        logger.warn('Refund PayPal rejeté', {
-          captureId: maskedCaptureId,
-          tokenSource: source,
-          status: desc.status,
-          issues: desc.issues,
-          message: desc.message,
-          debugId: desc.debugId,
-          kind
-        });
-
-        // Erreur métier (montant invalide, complaint case, déjà remboursé…) :
-        // un autre token donnerait la même réponse, inutile de retry.
-        if (kind === 'business') break;
-        // Sur erreur d'auth, on enchaîne avec le token suivant (plateforme).
+      // Une auth-failure ici signifie token vendeur invalidé côté PayPal :
+      // on signale au front qu'il faut relancer l'OAuth.
+      if (kind === 'auth') {
+        throw new PayPalRefundError(
+          'Votre connexion PayPal a expiré ou est insuffisante pour rembourser. Reconnectez votre compte PayPal.',
+          'auth',
+          401,
+          desc.issues.length ? desc.issues : ['RECONNECT_PAYPAL'],
+          desc.debugId
+        );
       }
-    }
 
-    if (lastDesc) {
-      GdprLogger.logPaymentError(lastError, sellerId, { captureId, statusCode: lastDesc.status });
       throw new PayPalRefundError(
-        translatePayPalIssue(lastDesc),
-        lastKind,
-        lastDesc.status || 502,
-        lastDesc.issues,
-        lastDesc.debugId
+        translatePayPalIssue(desc),
+        kind,
+        desc.status || 502,
+        desc.issues,
+        desc.debugId
       );
     }
-
-    throw new PayPalRefundError('Échec du remboursement PayPal', 'unknown', 502, []);
   }
 }
 

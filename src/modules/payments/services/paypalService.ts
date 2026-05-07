@@ -20,7 +20,6 @@ export class PayPalService {
   // Payment flow
   static createDirectPayment = PayPalPaymentService.createDirectPayment;
   static captureConnectedPayment = PayPalPaymentService.captureConnectedPayment;
-  static capturePayment = PayPalPaymentService.capturePayment;
 
   // Refund flow
   static refundConnectedPayment = PayPalRefundService.refundConnectedPayment;

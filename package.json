@@ -50,6 +50,7 @@
     "passport-jwt": "^4.0.1",
     "rate-limiter-flexible": "^7.1.0",
     "sharp": "^0.34.1",
+    "stripe": "^17.7.0",
     "twilio": "^5.5.2",
     "web-push": "^3.6.7",
     "wikipedia": "^2.1.2",

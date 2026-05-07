@@ -9,6 +9,7 @@ import { productRoutes } from './modules/products';
 import { messagingRoutes } from './modules/messaging';
 import notificationRoutes from './modules/notifications/routes';
 import paymentRoutes from './modules/payments/routes';
+import { handleStripeWebhookEndpoint } from './modules/payments/controllers/stripeController';
 import accountsRoutes from './modules/accounts/routes';
 import groupRoutes from './modules/groups/routes';
 import albumRoutes from './modules/albums/routes';
@@ -36,6 +37,16 @@ export function createApp(): express.Express {
   const app = express();
 
   app.use(cors());
+
+  // ⚠️ Le webhook Stripe doit recevoir le body BRUT pour valider la signature HMAC.
+  // Cette route est donc montée AVANT express.json(). Toutes les autres routes
+  // (dont le webhook PayPal qui n'a pas besoin du raw) continuent en JSON parsé.
+  app.post(
+    '/api/payments/stripe/webhook',
+    express.raw({ type: 'application/json' }),
+    handleStripeWebhookEndpoint
+  );
+
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 

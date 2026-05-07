@@ -81,6 +81,9 @@ export interface IUser extends Document {
     refreshToken?: string;
     expiresAt?: Date;
   };
+  stripeAccountId?: string;
+  stripePayoutsEnabled?: boolean;
+  stripeChargesEnabled?: boolean;
   isSellerVerified?: boolean;
   sellerRating?: number;
   
@@ -153,6 +156,19 @@ const UserSchema: Schema = new Schema({
     accessToken: { type: String, select: false },
     refreshToken: { type: String, select: false },
     expiresAt: { type: Date }
+  },
+  stripeAccountId: {
+    type: String,
+    default: null,
+    index: { sparse: true, unique: true }
+  },
+  stripePayoutsEnabled: {
+    type: Boolean,
+    default: false
+  },
+  stripeChargesEnabled: {
+    type: Boolean,
+    default: false
   },
   // Champs RGPD
   privacyPolicyAccepted: {

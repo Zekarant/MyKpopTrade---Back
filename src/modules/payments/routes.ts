@@ -1,6 +1,7 @@
 import express from 'express';
 import * as paymentController from './controllers/paymentController';
 import * as paymentGdprController from './controllers/paymentGdprController';
+import * as stripeController from './controllers/stripeController';
 import { authenticateJWT, requireAdmin } from '../../commons/middlewares/authMiddleware';
 import { sanitizeInputs } from '../../commons/middlewares/sanitizeMiddleware';
 import { validatePaymentConfig } from '../../config/paymentConfig';
@@ -46,7 +47,6 @@ router.post('/gdpr/anonymize-old-payments',
 
 // Routes de gestion de connexion PayPal
 router.get('/paypal/connect', paymentController.generateConnectUrl);
-router.post('/paypal/connect-email', paymentController.connectPayPalByEmail);
 router.get('/paypal/connection-status', paymentController.checkPayPalConnection);
 router.post('/paypal/disconnect', paymentController.disconnectPayPal);
 
@@ -56,9 +56,16 @@ router.post('/paypal/capture', paymentController.capturePayPalPayment);
 router.post('/paypal/cancel', paymentController.cancelPayPalPayment);
 router.get('/paypal/confirm', paymentController.confirmPayPalPayment);
 
+// Routes Stripe Connect (onboarding + checkout + refund)
+// Note : POST /api/payments/stripe/webhook est monté DIRECTEMENT dans app.ts
+// avec express.raw() — il n'apparaît pas ici car il doit by-pass express.json().
+router.post('/stripe/onboarding-link', stripeController.generateStripeOnboardingLink);
+router.get('/stripe/account-status', stripeController.checkStripeAccountStatus);
+router.post('/stripe/checkout', stripeController.initiateStripeCheckout);
+router.post('/stripe/:paymentId/refund', validateRefundRequest, stripeController.refundStripePaymentEndpoint);
+
 // Routes avec paramètres ensuite
 router.post('/:paymentId/refund', validateRefundRequest, paymentController.refundPayment);
-router.post('/:paymentId/confirm-refund', paymentController.confirmRefund);
 router.post('/:paymentId/shipment/delivered', paymentController.markShipmentDelivered);
 router.post('/:paymentId/shipment', paymentController.createShipment);
 router.get('/:paymentId/shipment', paymentController.fetchShipment);

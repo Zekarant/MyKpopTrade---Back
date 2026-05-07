@@ -37,7 +37,7 @@ export interface IPayment extends Document {
   setPaymentIntentId(value: string): void; // Méthode pour définir la valeur chiffrée
   captureId?: string;
   captureIdEncrypted?: string; // Champ chiffré
-  status: 'pending' | 'completed' | 'failed' | 'refunded' | 'partially_refunded' | 'cancelled' | 'refund_pending_seller';
+  status: 'pending' | 'completed' | 'failed' | 'refunded' | 'partially_refunded' | 'cancelled';
   paymentMethod: 'paypal' | 'stripe' | 'other';
   paymentType: 'direct' | 'platform';
   paymentMetadata?: string;
@@ -47,6 +47,11 @@ export interface IPayment extends Document {
   completedAt?: Date;
   // Ajout des propriétés pour les remboursements
   approvalUrl?: string;
+  stripeCheckoutSessionId?: string;
+  stripePaymentIntentId?: string;
+  stripeChargeId?: string;
+  /** Commission plateforme prélevée en centimes (Stripe travaille en plus petite unité) */
+  platformFeeCents?: number;
   refundAmount?: number;
   refundReason?: string;
   refundedAt?: Date;
@@ -153,9 +158,26 @@ const paymentSchema: Schema = new Schema({
   approvalUrl: {
     type: String
   },
+  stripeCheckoutSessionId: {
+    type: String,
+    index: { sparse: true }
+  },
+  stripePaymentIntentId: {
+    type: String,
+    index: { sparse: true }
+  },
+  stripeChargeId: {
+    type: String,
+    index: { sparse: true }
+  },
+  platformFeeCents: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   status: {
     type: String,
-    enum: ['pending', 'completed', 'failed', 'refunded', 'partially_refunded', 'cancelled', 'refund_pending_seller'],
+    enum: ['pending', 'completed', 'failed', 'refunded', 'partially_refunded', 'cancelled'],
     default: 'pending'
   },
   paymentMethod: {
