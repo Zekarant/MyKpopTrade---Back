@@ -117,25 +117,20 @@ export async function createProductForSeller({
   imageUrls: string[];
   uploadedFiles?: Express.Multer.File[];
 }) {
-  // Vérifier que le vendeur a connecté son compte PayPal via OAuth
-  const seller = await User.findById(sellerId).select('paypalConnected +paypalTokens.accessToken +paypalTokens.refreshToken');
+  const seller = await User.findById(sellerId).select('stripeAccountId stripePayoutsEnabled');
   if (!seller) {
     cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
 
-  const hasOAuthConnection = Boolean(
-    seller.paypalConnected &&
-    seller.paypalTokens?.accessToken &&
-    seller.paypalTokens?.refreshToken
-  );
+  const hasStripeConnection = Boolean(seller.stripeAccountId && seller.stripePayoutsEnabled);
 
-  if (!hasOAuthConnection) {
+  if (!hasStripeConnection) {
     cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(
       403,
-      'Vous devez connecter votre compte PayPal (via OAuth) avant de pouvoir vendre. Rendez-vous dans Paramètres > PayPal.',
-      'PAYPAL_OAUTH_REQUIRED'
+      'Vous devez connecter votre compte Stripe avant de pouvoir vendre. Rendez-vous dans Paramètres > Paiements.',
+      'STRIPE_CONNECT_REQUIRED'
     );
   }
 
@@ -190,6 +185,9 @@ export async function fetchProductById(productId: string, userId?: string) {
   const enrichedProduct: any = product.toObject();
 
   await enrichWithKpopNames(product, enrichedProduct);
+
+  const opts = enrichedProduct.shippingOptions || {};
+  enrichedProduct.shippingPrice = opts.nationalCost ?? opts.shippingCost ?? null;
 
   if (userId && userId !== product.seller._id.toString()) {
     product.views += 1;

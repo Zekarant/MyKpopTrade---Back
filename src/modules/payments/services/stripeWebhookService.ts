@@ -54,7 +54,7 @@ export async function handleStripeWebhook(event: Stripe.Event): Promise<void> {
   }
 }
 
-async function handleCheckoutCompleted(session: Stripe.Checkout.Session): Promise<void> {
+export async function handleCheckoutCompleted(session: Stripe.Checkout.Session): Promise<void> {
   const payment = await Payment.findOne({ stripeCheckoutSessionId: session.id });
   if (!payment) {
     logger.warn('Paiement Stripe introuvable pour session', { sessionId: session.id });
@@ -112,27 +112,37 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session): Promis
     }
   });
 
-  const conversation = await Conversation.findOne({
+  let conversation = await Conversation.findOne({
     productId: payment.product,
     participants: { $all: [payment.buyer, payment.seller] },
     isActive: true
   });
 
-  if (conversation) {
-    await Message.create({
-      conversation: conversation._id,
-      sender: payment.seller,
-      content: 'Paiement validé ☑️ — nous vous laissons organiser l\'envoi du colis avec le vendeur.',
-      contentType: 'system_notification',
-      isSystemMessage: true,
-      readBy: []
+  if (!conversation) {
+    conversation = await Conversation.create({
+      participants: [payment.buyer, payment.seller],
+      productId: payment.product,
+      createdBy: payment.buyer,
+      type: 'product_inquiry',
+      status: 'open',
+      isActive: true,
+      lastMessageAt: new Date()
     });
-
-    await Conversation.updateOne(
-      { _id: conversation._id },
-      { lastMessageAt: new Date() }
-    );
   }
+
+  const systemMessage = await Message.create({
+    conversation: conversation._id,
+    sender: payment.seller,
+    content: 'Paiement validé ☑️ — vous pouvez maintenant organiser l\'envoi du colis.',
+    contentType: 'system_notification',
+    isSystemMessage: true,
+    readBy: []
+  });
+
+  await Conversation.updateOne(
+    { _id: conversation._id },
+    { lastMessage: systemMessage._id, lastMessageAt: new Date() }
+  );
 }
 
 async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {

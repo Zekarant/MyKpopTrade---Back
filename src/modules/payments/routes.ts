@@ -62,6 +62,7 @@ router.get('/paypal/confirm', paymentController.confirmPayPalPayment);
 router.post('/stripe/create-account', stripeController.createStripeAccount);
 router.post('/stripe/account-session', stripeController.createStripeAccountSession);
 router.get('/stripe/account-status', stripeController.checkStripeAccountStatus);
+router.get('/stripe/verify-session', stripeController.verifyStripeSession);
 router.post('/stripe/checkout', stripeController.initiateStripeCheckout);
 router.post('/stripe/:paymentId/refund', validateRefundRequest, stripeController.refundStripePaymentEndpoint);
 

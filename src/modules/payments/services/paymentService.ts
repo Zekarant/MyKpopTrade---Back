@@ -1,5 +1,6 @@
 import { PayPalService } from './paypalService';
 import { PayPalRefundError } from './paypalRefundService';
+import { refundStripePayment } from './stripeRefundService';
 import Payment from '../../../models/paymentModel';
 import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
@@ -409,6 +410,10 @@ export async function processRefund({
 
   if (!payment) {
     throw new HttpError(404, 'Paiement non trouvé');
+  }
+
+  if (payment.paymentMethod === 'stripe') {
+    return refundStripePayment({ userId, paymentId, amount, reason, password });
   }
 
   const isSeller = payment.seller.toString() === userId;
