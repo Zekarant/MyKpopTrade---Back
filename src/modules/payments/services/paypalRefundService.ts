@@ -1,5 +1,6 @@
 import axios, { AxiosError } from 'axios';
-import { PayPalClient, paypalApiBaseUrl } from './paypalClient';
+import { PayPalClient, paypalApiBaseUrl, partnerHeaders } from './paypalClient';
+import User from '../../../models/userModel';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
 import logger from '../../../commons/utils/logger';
 import { formatForPayPal, gt } from '../../../commons/utils/moneyMath';
@@ -89,35 +90,57 @@ function classifyError(desc: PayPalErrorDescription): 'business' | 'auth' | 'unk
 async function callPayPalRefund(
   captureId: string,
   requestBody: any,
-  accessToken: string
-): Promise<{ id: string; status: string }> {
+  accessToken: string,
+  sellerMerchantId: string
+): Promise<{ id: string; status: string; amount: number | null; currency: string | null }> {
   const response = await axios.post(REFUND_ENDPOINT(captureId), requestBody, {
     headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-      'PayPal-Request-Id': `refund_${captureId}_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`,
+      ...partnerHeaders({
+        accessToken,
+        sellerMerchantId,
+        requestId: `refund_${captureId}_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`
+      }),
+      // `return=representation` fait renvoyer le montant réellement remboursé.
+      // Indispensable : PayPal plafonne silencieusement une demande qui dépasse
+      // le restant dû et répond COMPLETED — enregistrer le montant demandé
+      // plutôt que celui-ci désaligne la compta du site et celle de PayPal.
       Prefer: 'return=representation'
     }
   });
-  return { id: response.data.id, status: response.data.status };
+
+  const value = response.data.amount?.value;
+
+  return {
+    id: response.data.id,
+    status: response.data.status,
+    amount: value !== undefined ? parseFloat(value) : null,
+    currency: response.data.amount?.currency_code ?? null
+  };
 }
 
 export class PayPalRefundService {
   /**
    * Effectue un remboursement (total ou partiel) sur une capture PayPal.
    *
-   * Le remboursement est toujours fait avec le token OAuth du vendeur
-   * (scope `payments/refund`) : c'est lui qui détient les fonds, donc
-   * c'est lui qui rembourse. Si le vendeur n'a pas (ou plus) de tokens
-   * OAuth valides, on lève `RECONNECT_PAYPAL` pour que le front lui
-   * propose de relancer l'OAuth.
+   * Connected Path : l'appel est authentifié par le token plateforme et porte
+   * le header `PayPal-Auth-Assertion` avec le merchant ID du vendeur — c'est lui
+   * qui détient les fonds, donc c'est de son compte que part le remboursement.
+   * Si le vendeur n'est plus relié à PayPal, on lève `RECONNECT_PAYPAL` pour que
+   * le front lui propose de relancer l'onboarding.
    */
   static async refundConnectedPayment(
     captureId: string,
     amount: number | null,
     reason: string,
     sellerId: string
-  ): Promise<{ id: string; status: string; createdAt: Date }> {
+  ): Promise<{
+    id: string;
+    status: string;
+    /** Montant réellement remboursé par PayPal, qui peut différer du demandé. */
+    amount: number;
+    currency: string;
+    createdAt: Date;
+  }> {
     const maskedCaptureId = captureId.substring(0, 5) + '...';
 
     GdprLogger.logPaymentAction('remboursement_preparation', {
@@ -125,17 +148,19 @@ export class PayPalRefundService {
       isPartial: amount !== null
     }, sellerId);
 
-    const sellerAccessToken = await PayPalClient.getSellerAccessToken(sellerId);
-    if (!sellerAccessToken) {
+    const seller = await User.findById(sellerId).select('paypalMerchantId');
+    if (!seller?.paypalMerchantId) {
       throw new PayPalRefundError(
-        'Votre connexion PayPal a expiré ou est insuffisante pour rembourser. Reconnectez votre compte PayPal.',
+        'Votre compte PayPal n\'est plus relié à MyKpopTrade. Reconnectez-le pour pouvoir rembourser.',
         'auth',
         401,
         ['RECONNECT_PAYPAL']
       );
     }
 
-    const captureDetails = await PayPalClient.getCaptureDetails(captureId, sellerAccessToken);
+    const sellerMerchantId = seller.paypalMerchantId;
+    const accessToken = await PayPalClient.getAccessToken();
+    const captureDetails = await PayPalClient.getCaptureDetails(captureId, sellerMerchantId);
 
     const requestBody: any = {};
     if (amount !== null) {
@@ -172,13 +197,31 @@ export class PayPalRefundService {
     });
 
     try {
-      const result = await callPayPalRefund(captureId, requestBody, sellerAccessToken);
+      const result = await callPayPalRefund(captureId, requestBody, accessToken, sellerMerchantId);
+      const settledAmount = result.amount ?? amount ?? captureDetails.amount;
+
+      if (amount !== null && result.amount !== null && result.amount !== amount) {
+        logger.warn('PayPal a remboursé un montant différent de celui demandé', {
+          captureId: maskedCaptureId,
+          requested: amount,
+          settled: result.amount
+        });
+      }
+
       logger.info('Remboursement effectué', {
         captureId: maskedCaptureId,
         refundId: result.id,
-        status: result.status
+        status: result.status,
+        amount: settledAmount
       });
-      return { id: result.id, status: result.status, createdAt: new Date() };
+
+      return {
+        id: result.id,
+        status: result.status,
+        amount: settledAmount,
+        currency: result.currency ?? captureDetails.currency,
+        createdAt: new Date()
+      };
     } catch (error: any) {
       const desc = describePayPalError(error as AxiosError);
       const kind = classifyError(desc);
@@ -194,11 +237,11 @@ export class PayPalRefundService {
 
       GdprLogger.logPaymentError(error, sellerId, { captureId, statusCode: desc.status });
 
-      // Une auth-failure ici signifie token vendeur invalidé côté PayPal :
-      // on signale au front qu'il faut relancer l'OAuth.
+      // Une auth-failure ici signifie que le vendeur a révoqué les permissions
+      // accordées à MyKpopTrade côté PayPal : on demande un ré-onboarding.
       if (kind === 'auth') {
         throw new PayPalRefundError(
-          'Votre connexion PayPal a expiré ou est insuffisante pour rembourser. Reconnectez votre compte PayPal.',
+          'MyKpopTrade n\'est plus autorisé à rembourser depuis votre compte PayPal. Reconnectez votre compte pour réaccorder les permissions.',
           'auth',
           401,
           desc.issues.length ? desc.issues : ['RECONNECT_PAYPAL'],
@@ -225,6 +268,12 @@ export class PayPalRefundService {
  */
 function translatePayPalIssue(desc: PayPalErrorDescription): string {
   const known: Record<string, string> = {
+    // Exigence IWT : le solde vendeur insuffisant doit être traité proprement,
+    // avec une action claire, et non remonté comme une erreur technique.
+    INSUFFICIENT_FUNDS:
+      'Le solde de votre compte PayPal est insuffisant pour ce remboursement. Approvisionnez votre compte PayPal (ou reliez-y votre compte bancaire), puis relancez le remboursement.',
+    SENDER_RESTRICTED:
+      'Votre compte PayPal est actuellement restreint et ne permet pas d\'émettre ce remboursement. Contactez le support PayPal.',
     CAPTURE_FULLY_REFUNDED: 'Cette transaction a déjà été entièrement remboursée',
     AMOUNT_MISMATCH: 'Le montant du remboursement est invalide',
     INVALID_CURRENCY_CODE: 'La devise du remboursement est invalide',

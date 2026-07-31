@@ -2,7 +2,7 @@ import { PayPalClient } from './paypalClient';
 import { PayPalPaymentService } from './paypalPaymentService';
 import { PayPalRefundService } from './paypalRefundService';
 import { PayPalWebhookService } from './paypalWebhookService';
-import { PayPalConnectService } from './paypalConnectService';
+import { PayPalPartnerService } from './paypalPartnerService';
 
 /**
  * Façade PayPal — délègue aux modules spécialisés.
@@ -16,6 +16,7 @@ export class PayPalService {
   static getAccessToken = PayPalClient.getAccessToken;
   static checkPaymentStatus = PayPalClient.checkPaymentStatus;
   static getCaptureDetails = PayPalClient.getCaptureDetails;
+  static verifyWebhookSignature = PayPalClient.verifyWebhookSignature;
 
   // Payment flow
   static createDirectPayment = PayPalPaymentService.createDirectPayment;
@@ -27,9 +28,11 @@ export class PayPalService {
   // Webhook dispatcher
   static handleWebhook = PayPalWebhookService.handleWebhook;
 
-  // Legacy OAuth connect
-  static generateConnectUrl = PayPalConnectService.generateConnectUrl;
-  static handleConnectCallback = PayPalConnectService.handleConnectCallback;
+  // Onboarding vendeur (Connected Path / Partner Referrals)
+  static createOnboardingLink = PayPalPartnerService.createOnboardingLink;
+  static completeOnboarding = PayPalPartnerService.completeOnboarding;
+  static refreshSellerStatus = PayPalPartnerService.refreshSellerStatus;
+  static forgetSellerAccount = PayPalPartnerService.forgetSellerAccount;
 
   /**
    * Alias legacy pour compatibilité. Utiliser checkPaymentStatus directement.

@@ -60,8 +60,8 @@ export async function checkoutCart(
   const results: SellerPaymentResult[] = [];
 
   for (const [sellerId, items] of sellerGroups) {
-    const seller = await User.findById(sellerId).select('username paypalConnected paypalTokens');
-    if (!seller || !seller.paypalConnected) {
+    const seller = await User.findById(sellerId).select('username paypalConnected paypalMerchantId');
+    if (!seller?.paypalMerchantId || !seller.paypalConnected) {
       const productTitles = await Promise.all(
         items.map(async (item) => {
           const p = await Product.findById(item.product).select('title');

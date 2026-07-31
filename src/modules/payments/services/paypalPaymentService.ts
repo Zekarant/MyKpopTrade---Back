@@ -2,13 +2,27 @@ import axios from 'axios';
 import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
 import Payment from '../../../models/paymentModel';
-import { PayPalClient, paypalApiBaseUrl } from './paypalClient';
+import { PayPalClient, paypalApiBaseUrl, partnerHeaders, extractDebugId } from './paypalClient';
+import { PayPalPartnerService, SELLER_BLOCK_MESSAGES } from './paypalPartnerService';
+import { paymentConfig } from '../../../config/paymentConfig';
 import logger from '../../../commons/utils/logger';
+import { formatForPayPal } from '../../../commons/utils/moneyMath';
 import { resolveCheckout, ShippingAddress } from './checkoutService';
 
 export interface CheckoutInput {
   shippingMethod: unknown;
   shippingAddress?: unknown;
+}
+
+/** Erreur métier : le vendeur n'est pas en état d'encaisser. */
+export class SellerNotReadyError extends Error {
+  readonly code: string;
+
+  constructor(reason: keyof typeof SELLER_BLOCK_MESSAGES) {
+    super(SELLER_BLOCK_MESSAGES[reason]);
+    this.name = 'SellerNotReadyError';
+    this.code = reason;
+  }
 }
 
 function buildPayPalShipping(address: ShippingAddress) {
@@ -25,8 +39,24 @@ function buildPayPalShipping(address: ShippingAddress) {
 }
 
 /**
- * Flux de paiements PayPal : création d'ordre, capture.
- * Gère la logique métier (produit, négociation acceptée, réservation).
+ * Calcule la commission plateforme prélevée via `platform_fees`.
+ * Renvoie 0 si aucune commission n'est configurée (cas de la beta).
+ */
+function computePlatformFee(productAmount: number): number {
+  const percent = paymentConfig.paypal.platformFeePercent;
+  if (!Number.isFinite(percent) || percent <= 0) {
+    return 0;
+  }
+  return Math.round(productAmount * percent) / 100;
+}
+
+/**
+ * Flux de paiements PayPal Connected Path : création d'ordre, capture.
+ *
+ * L'ordre est créé par la plateforme (token API-caller) au bénéfice du vendeur
+ * (`payee.merchant_id`). La capture s'appuie sur le header
+ * `PayPal-Auth-Assertion` pour agir au nom du vendeur, sans jamais détenir
+ * d'access token lui appartenant.
  */
 export class PayPalPaymentService {
   /**
@@ -52,14 +82,10 @@ export class PayPalPaymentService {
         if (paymentStatus === 'CREATED' || paymentStatus === 'APPROVED') {
           const accessToken = await PayPalClient.getAccessToken();
 
-          const response = await axios({
-            method: 'get',
-            url: `${paypalApiBaseUrl}/v2/checkout/orders/${existingPayment.paymentIntentId}`,
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${accessToken}`
-            }
-          });
+          const response = await axios.get(
+            `${paypalApiBaseUrl}/v2/checkout/orders/${existingPayment.paymentIntentId}`,
+            { headers: partnerHeaders({ accessToken }) }
+          );
 
           const approvalUrl = response.data.links.find(
             (link: any) => link.rel === 'approve'
@@ -86,9 +112,15 @@ export class PayPalPaymentService {
         throw new Error('Vendeur non trouvé');
       }
 
-      if (!seller.paypalEmail) {
-        throw new Error('Le vendeur n\'a pas configuré son email PayPal');
+      // L'IWT interdit de proposer PayPal pour un vendeur qui ne peut pas
+      // encaisser : on bloque à la création de l'ordre plutôt que de laisser
+      // l'acheteur découvrir l'échec au moment de payer.
+      const blockReason = await PayPalPartnerService.assertSellerCanTransact(seller);
+      if (blockReason) {
+        throw new SellerNotReadyError(blockReason);
       }
+
+      const buyer = await User.findById(buyerId).select('email');
 
       let priceToPay = product.price;
 
@@ -109,56 +141,78 @@ export class PayPalPaymentService {
         checkout.shippingAddress
       );
       const currency = product.currency || 'EUR';
+      const platformFee = computePlatformFee(breakdown.productAmount);
 
       const accessToken = await PayPalClient.getAccessToken();
 
       const purchaseUnit: any = {
         amount: {
           currency_code: currency,
-          value: breakdown.total.toFixed(2),
+          value: formatForPayPal(breakdown.total),
           breakdown: {
-            item_total: { currency_code: currency, value: breakdown.productAmount.toFixed(2) },
-            shipping: { currency_code: currency, value: breakdown.shippingAmount.toFixed(2) }
+            item_total: { currency_code: currency, value: formatForPayPal(breakdown.productAmount) },
+            shipping: { currency_code: currency, value: formatForPayPal(breakdown.shippingAmount) }
           }
         },
         items: [{
           name: product.title.substring(0, 127),
           quantity: '1',
-          unit_amount: { currency_code: currency, value: breakdown.productAmount.toFixed(2) },
+          unit_amount: { currency_code: currency, value: formatForPayPal(breakdown.productAmount) },
           category: 'PHYSICAL_GOODS'
         }],
         description: `Achat sur MyKpopTrade: ${product.title.substring(0, 100)}`,
         custom_id: productId,
-        payee: { email_address: seller.paypalEmail }
+        // Connected Path : le vendeur est désigné par son merchant ID PayPal,
+        // pas par son email. C'est ce qui autorise la plateforme à encaisser
+        // pour son compte sans détenir ses identifiants.
+        payee: { merchant_id: seller.paypalMerchantId }
       };
 
       if (address) {
         purchaseUnit.shipping = buildPayPalShipping(address);
       }
 
-      const response = await axios({
-        method: 'post',
-        url: `${paypalApiBaseUrl}/v2/checkout/orders`,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`
-        },
-        data: {
+      if (platformFee > 0) {
+        purchaseUnit.payment_instruction = {
+          disbursement_mode: 'INSTANT',
+          platform_fees: [{
+            amount: { currency_code: currency, value: formatForPayPal(platformFee) },
+            payee: { merchant_id: paymentConfig.paypal.partnerMerchantId }
+          }]
+        };
+      }
+
+      const response = await axios.post(
+        `${paypalApiBaseUrl}/v2/checkout/orders`,
+        {
           intent: 'CAPTURE',
           purchase_units: [purchaseUnit],
-          application_context: {
-            return_url: `${process.env.FRONTEND_URL}/payment/success?source=paypal`,
-            cancel_url: `${process.env.FRONTEND_URL}/payment/cancel?source=paypal`,
-            brand_name: 'MyKpopTrade',
-            shipping_preference: address ? 'SET_PROVIDED_ADDRESS' : 'NO_SHIPPING',
-            user_action: 'PAY_NOW',
-            locale: 'fr-FR'
+          payment_source: {
+            paypal: {
+              // Prérempli la page de login PayPal côté acheteur (best practice
+              // « Prefill » de l'IWT).
+              email_address: buyer?.email,
+              experience_context: {
+                return_url: `${process.env.FRONTEND_URL}/payment/success?source=paypal`,
+                cancel_url: `${process.env.FRONTEND_URL}/payment/cancel?source=paypal`,
+                brand_name: 'MyKpopTrade',
+                shipping_preference: address ? 'SET_PROVIDED_ADDRESS' : 'NO_SHIPPING',
+                user_action: 'PAY_NOW',
+                locale: 'fr-FR'
+              }
+            }
           }
+        },
+        {
+          headers: partnerHeaders({
+            accessToken,
+            requestId: `order_${productId}_${buyerId}_${Date.now()}`
+          })
         }
-      });
+      );
 
       const approvalUrl = response.data.links.find(
-        (link: any) => link.rel === 'approve'
+        (link: any) => link.rel === 'payer-action' || link.rel === 'approve'
       )?.href;
 
       const payment = new Payment({
@@ -170,7 +224,7 @@ export class PayPalPaymentService {
         shippingAmount: breakdown.shippingAmount,
         shippingMethod: method,
         shippingAddress: address,
-        platformFee: 0,
+        platformFee,
         currency,
         paymentIntentId: response.data.id,
         approvalUrl,
@@ -200,23 +254,26 @@ export class PayPalPaymentService {
     } catch (error) {
       logger.error('Erreur lors de la création du paiement PayPal', {
         error: error instanceof Error ? error.message : String(error),
-        productId
+        productId,
+        debugId: extractDebugId(error)
       });
       throw error;
     }
   }
 
   /**
-   * Capture un paiement approuvé.
+   * Capture un paiement approuvé au nom du vendeur.
    *
-   * Utilise le token OAuth du **vendeur** (le `payee` de l'order). Sans
-   * statut PayPal Partner, c'est le seul moyen pour la plateforme de
-   * capturer un order au bénéfice d'un compte tiers : sinon PayPal
-   * répond `PAYEE_NOT_CONSENTED`. Si le vendeur n'a plus de tokens OAuth
-   * valides, la capture est impossible — il doit reconnecter PayPal.
+   * Utilise le token **plateforme** seul, sans `PayPal-Auth-Assertion`.
    *
-   * Retry sur `ORDER_NOT_APPROVED` (l'acheteur vient d'approuver, PayPal
-   * peut mettre quelques secondes à propager le statut).
+   * ⚠️ Ne pas ajouter l'auth assertion ici. L'ordre désigne déjà son vendeur via
+   * `payee.merchant_id` ; PayPal considère ces deux mécanismes comme exclusifs
+   * (« either through payee or through the PayPal-Auth-Assertion header ») et
+   * répond 404 INVALID_RESOURCE_ID si les deux sont présents. Le remboursement,
+   * lui, l'exige — une capture ne porte pas de `payee` (cf. paypalRefundService).
+   *
+   * Retry sur `ORDER_NOT_APPROVED` (l'acheteur vient d'approuver, PayPal peut
+   * mettre quelques secondes à propager le statut).
    */
   static async captureConnectedPayment(
     orderId: string,
@@ -227,19 +284,20 @@ export class PayPalPaymentService {
     amount: string;
     currency: string;
   }> {
-    const sellerAccessToken = await PayPalClient.getSellerAccessToken(sellerId);
-    if (!sellerAccessToken) {
+    const seller = await User.findById(sellerId).select('paypalMerchantId');
+    if (!seller?.paypalMerchantId) {
       throw new Error(
-        'Le vendeur n\'a plus de connexion PayPal valide. Il doit se reconnecter avant que ce paiement puisse être capturé.'
+        'Le vendeur n\'a pas de compte PayPal connecté. Il doit terminer son inscription PayPal avant que ce paiement puisse être capturé.'
       );
     }
 
+    const accessToken = await PayPalClient.getAccessToken();
     const captureUrl = `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}/capture`;
     const orderUrl = `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}`;
 
     const fetchExistingCapture = async () => {
       const orderDetails = await axios.get(orderUrl, {
-        headers: { Authorization: `Bearer ${sellerAccessToken}` }
+        headers: partnerHeaders({ accessToken })
       });
       const captureInfo = orderDetails.data.purchase_units[0]?.payments?.captures?.[0];
       if (!captureInfo) return null;
@@ -264,11 +322,13 @@ export class PayPalPaymentService {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         const response = await axios.post(captureUrl, undefined, {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${sellerAccessToken}`,
-            'PayPal-Request-Id': `capture_${orderId}_${attempt}`
-          }
+          headers: partnerHeaders({
+            accessToken,
+            // Même clé d'idempotence sur toutes les tentatives : si PayPal a
+            // déjà encaissé mais que la réponse s'est perdue, le retry renvoie
+            // la capture existante au lieu d'en créer une seconde.
+            requestId: `capture_${orderId}`
+          })
         });
 
         if (response.data.status !== 'COMPLETED') {
@@ -303,7 +363,8 @@ export class PayPalPaymentService {
             status,
             issue,
             attempt,
-            error: err.response?.data?.message || err.message
+            error: err.response?.data?.message || err.message,
+            debugId: extractDebugId(err)
           });
           throw err;
         }

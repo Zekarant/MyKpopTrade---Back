@@ -3,8 +3,8 @@ import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { PayPalService } from '../services/paypalService';
 import User from '../../../models/userModel';
 import {
-  buildConnectUrl,
-  getPayPalConnectionStatus,
+  buildOnboardingLink,
+  getPayPalAccountStatus,
   disconnectPayPalForUser,
   initiateDirectPayment,
   captureDirectPayment,
@@ -49,101 +49,101 @@ function replyHttpError(
 }
 
 /**
- * Génère l'URL pour connecter un compte vendeur à PayPal
+ * Génère le lien d'inscription PayPal (Partner Referrals) d'un vendeur.
  */
-export const generateConnectUrl = asyncHandler(async (req: Request, res: Response) => {
+export const generateOnboardingLink = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
 
   try {
-    const connectUrl = await buildConnectUrl(userId);
+    const actionUrl = await buildOnboardingLink(userId);
 
-    logger.info('URL de connexion PayPal générée', { userId: userId });
+    logger.info('Lien d\'onboarding PayPal généré', { userId: truncatedUserId(userId) });
 
     return res.status(200).json({
       success: true,
-      connectUrl,
-      message: 'URL de connexion PayPal générée avec succès'
+      actionUrl,
+      message: 'Lien d\'inscription PayPal généré avec succès'
     });
   } catch (error) {
     if (error instanceof HttpError) {
       return replyHttpError(res, error);
     }
-    logger.error('Erreur lors de la génération de l\'URL de connexion PayPal', {
+    logger.error('Erreur lors de la génération du lien d\'onboarding PayPal', {
       error: error instanceof Error ? error.message : String(error),
       userId: truncatedUserId(userId)
     });
     return res.status(500).json({
-      message: 'Une erreur est survenue lors de la génération de l\'URL de connexion PayPal',
+      message: 'Une erreur est survenue lors de la génération du lien d\'inscription PayPal',
       error: devErrorDetails(error)
     });
   }
 });
 
 /**
- * Gère le callback OAuth de PayPal après la connexion d'un compte vendeur
+ * Retour du vendeur après le parcours d'onboarding PayPal.
+ *
+ * PayPal renvoie `merchantIdInPayPal` en query param. Cette valeur transite par
+ * le navigateur du vendeur : elle sert uniquement à savoir quel compte
+ * interroger. Le statut réel est ensuite confirmé par « show seller status ».
+ * Le rapprochement avec le vendeur MyKpopTrade se fait sur le `tracking_id`,
+ * jamais sur un identifiant fourni par le client.
  */
-export const handleConnectCallback = asyncHandler(async (req: Request, res: Response) => {
-  const { code, state } = req.query;
+export const handleOnboardingReturn = asyncHandler(async (req: Request, res: Response) => {
+  const frontendSettings = `${process.env.FRONTEND_URL}/settings`;
+  const merchantIdInPayPal = req.query.merchantIdInPayPal as string | undefined;
+  const trackingId = req.query.merchantId as string | undefined;
 
-  if (!code || !state) {
-    return res.status(400).redirect(`${process.env.FRONTEND_URL}/settings?error=missing_parameters`);
+  if (!merchantIdInPayPal || !trackingId) {
+    return res.redirect(`${frontendSettings}?paypal_error=missing_parameters`);
   }
 
   try {
-    const sellerId = state as string;
-
-    const seller = await User.findById(sellerId);
+    const seller = await User.findOne({ paypalTrackingId: trackingId }).select('_id');
     if (!seller) {
-      return res.status(404).redirect(`${process.env.FRONTEND_URL}/settings?error=user_not_found`);
+      logger.warn('Retour d\'onboarding PayPal avec un tracking_id inconnu', { trackingId });
+      return res.redirect(`${frontendSettings}?paypal_error=unknown_tracking_id`);
     }
 
-    const success = await PayPalService.handleConnectCallback(code as string, sellerId);
+    // Le merchant ID est enregistré même si la vérification de statut échoue —
+    // la page de paramètres affichera l'état réel et proposera de rafraîchir.
+    await PayPalService.completeOnboarding(
+      (seller._id as any).toString(),
+      merchantIdInPayPal
+    );
 
-    if (success) {
-      logger.info('Compte PayPal connecté avec succès', {
-        userId: truncatedUserId(sellerId)
-      });
-
-      return res.redirect(`${process.env.FRONTEND_URL}/settings?paypal_connected=true`);
-    } else {
-      return res.redirect(`${process.env.FRONTEND_URL}/settings?error=connection_failed`);
-    }
+    return res.redirect(`${frontendSettings}?paypal_onboarding=complete`);
   } catch (error) {
-    const sellerId = state as string;
-    logger.error('Erreur lors du callback de connexion PayPal', {
+    logger.error('Erreur lors du retour d\'onboarding PayPal', {
       error: error instanceof Error ? error.message : String(error),
-      userId: truncatedUserId(sellerId)
+      trackingId
     });
-    return res.redirect(`${process.env.FRONTEND_URL}/settings?error=server_error`);
+    return res.redirect(`${frontendSettings}?paypal_error=server_error`);
   }
 });
 
 /**
- * Vérifie l'état de connexion PayPal du vendeur
+ * Statut d'onboarding PayPal du vendeur (merchant ID, drapeaux, permissions).
+ * `?refresh=true` force un appel « show seller status » auprès de PayPal.
  */
 export const checkPayPalConnection = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
 
   try {
-    const { connected, oauthConnected, expiresAt, email } = await getPayPalConnectionStatus(userId);
-
-    return res.status(200).json({
-      success: true,
-      connected,
-      oauthConnected,
-      expiresAt,
-      email
+    const status = await getPayPalAccountStatus(userId, {
+      refresh: req.query.refresh === 'true'
     });
+
+    return res.status(200).json({ success: true, ...status });
   } catch (error) {
     if (error instanceof HttpError) {
       return replyHttpError(res, error);
     }
-    logger.error('Erreur lors de la vérification de la connexion PayPal', {
+    logger.error('Erreur lors de la vérification du statut PayPal', {
       error: error instanceof Error ? error.message : String(error),
       userId: truncatedUserId(userId)
     });
     return res.status(500).json({
-      message: 'Une erreur est survenue lors de la vérification de la connexion PayPal',
+      message: 'Une erreur est survenue lors de la vérification du statut PayPal',
       error: devErrorDetails(error)
     });
   }
@@ -349,8 +349,16 @@ export const handleWebhook = asyncHandler(async (req: Request, res: Response) =>
       resourceType: event.resource_type || 'non spécifié'
     });
 
-    if (process.env.NODE_ENV === 'production') {
-      logger.debug('Vérification de la signature du webhook ignorée en développement');
+    // Vérification systématique de la signature : sans elle, n'importe qui
+    // connaissant l'URL peut forger un PAYMENT.CAPTURE.COMPLETED et faire
+    // passer une commande en payée.
+    const isAuthentic = await PayPalService.verifyWebhookSignature(req.headers, event);
+    if (!isAuthentic) {
+      logger.warn('Webhook PayPal rejeté : signature invalide', {
+        eventType: event.event_type,
+        eventId: event.id
+      });
+      return res.status(401).json({ message: 'Signature de webhook invalide' });
     }
 
     await PayPalService.handleWebhook(event);

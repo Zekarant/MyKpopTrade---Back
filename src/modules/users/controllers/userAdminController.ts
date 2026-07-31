@@ -191,7 +191,7 @@ export const adminExportUserData = asyncHandler(async (req: Request, res: Respon
       { username: { $regex: `^${search}$`, $options: 'i' } },
       { email: { $regex: `^${search}$`, $options: 'i' } }
     ]
-  }).select('-password -emailVerificationToken -passwordResetToken -phoneVerificationCode -paypalTokens');
+  }).select('-password -emailVerificationToken -passwordResetToken -phoneVerificationCode');
 
   if (!user) {
     return res.status(404).json({ message: 'Utilisateur introuvable' });

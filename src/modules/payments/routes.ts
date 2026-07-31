@@ -19,8 +19,9 @@ router.use(sanitizeInputs);
 // Webhook PayPal (sans authentification)
 router.post('/webhook/paypal', paymentController.handleWebhook);
 
-// Callback OAuth PayPal (sans authentification — l'utilisateur est redirigé par PayPal)
-router.get('/paypal/callback', paymentController.handleConnectCallback);
+// Retour d'onboarding PayPal (sans authentification — le vendeur est redirigé
+// par PayPal ; le rapprochement se fait sur le tracking_id)
+router.get('/paypal/onboarding-return', paymentController.handleOnboardingReturn);
 
 // Routes nécessitant une authentification
 router.use(authenticateJWT);
@@ -45,9 +46,9 @@ router.post('/gdpr/anonymize-old-payments',
   paymentGdprController.anonymizeOldPayments
 );
 
-// Routes de gestion de connexion PayPal
-router.get('/paypal/connect', paymentController.generateConnectUrl);
-router.get('/paypal/connection-status', paymentController.checkPayPalConnection);
+// Onboarding vendeur PayPal (Connected Path / Partner Referrals)
+router.post('/paypal/onboarding-link', paymentController.generateOnboardingLink);
+router.get('/paypal/account-status', paymentController.checkPayPalConnection);
 router.post('/paypal/disconnect', paymentController.disconnectPayPal);
 
 // Routes de paiement PayPal

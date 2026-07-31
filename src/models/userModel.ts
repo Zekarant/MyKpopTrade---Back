@@ -76,10 +76,23 @@ export interface IUser extends Document {
   verificationLevel: 'none' | 'basic' | 'advanced' | 'complete';
   paypalEmail?: string;
   paypalConnected?: boolean;
-  paypalTokens?: {
-    accessToken?: string;
-    refreshToken?: string;
-    expiresAt?: Date;
+  /** `merchant_id` PayPal du vendeur (merchantIdInPayPal), renvoyé au retour d'onboarding. */
+  paypalMerchantId?: string;
+  /** `tracking_id` unique envoyé dans la « create partner referral », pour rapprocher le retour. */
+  paypalTrackingId?: string;
+  /**
+   * Instantané du dernier « show seller status ». Un vendeur ne peut encaisser
+   * que si les trois conditions sont réunies (cf. Integration Guide, Onboarding).
+   */
+  paypalOnboarding?: {
+    paymentsReceivable?: boolean;
+    primaryEmailConfirmed?: boolean;
+    /** `true` si l'array OAUTH_INTEGRATIONS renvoyé par PayPal n'est pas vide. */
+    consentGranted?: boolean;
+    scopes?: string[];
+    /** Raison sociale du compte PayPal, seul identifiant que « show seller status » expose. */
+    legalName?: string;
+    checkedAt?: Date;
   };
   stripeAccountId?: string;
   stripePayoutsEnabled?: boolean;
@@ -152,10 +165,25 @@ const UserSchema: Schema = new Schema({
     type: Boolean,
     default: false
   },
-  paypalTokens: {
-    accessToken: { type: String, select: false },
-    refreshToken: { type: String, select: false },
-    expiresAt: { type: Date }
+  paypalMerchantId: {
+    type: String,
+    default: null,
+    index: {
+      unique: true,
+      partialFilterExpression: { paypalMerchantId: { $type: 'string' } }
+    }
+  },
+  paypalTrackingId: {
+    type: String,
+    default: null
+  },
+  paypalOnboarding: {
+    paymentsReceivable: { type: Boolean, default: false },
+    primaryEmailConfirmed: { type: Boolean, default: false },
+    consentGranted: { type: Boolean, default: false },
+    scopes: { type: [String], default: [] },
+    legalName: { type: String },
+    checkedAt: { type: Date }
   },
   stripeAccountId: {
     type: String,

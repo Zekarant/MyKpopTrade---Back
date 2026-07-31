@@ -1,5 +1,9 @@
+import mongoose from 'mongoose';
 import { PayPalService } from './paypalService';
 import { PayPalRefundError } from './paypalRefundService';
+import { applyRefundToPayment, notifyRefund, remainingRefundable } from './refundLedger';
+import { SELLER_BLOCK_MESSAGES, SellerBlockReason } from './paypalPartnerService';
+import { SellerNotReadyError } from './paypalPaymentService';
 import Payment from '../../../models/paymentModel';
 import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
@@ -88,51 +92,121 @@ function decryptPaymentMetadata(paymentObj: any, paymentId: any): void {
   }
 }
 
-export async function buildConnectUrl(userId: string): Promise<string> {
+/**
+ * Génère le lien d'inscription PayPal (Partner Referrals) pour un vendeur.
+ */
+export async function buildOnboardingLink(userId: string): Promise<string> {
   const seller = await User.findById(userId);
   if (!seller) {
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
 
-  return PayPalService.generateConnectUrl(userId);
+  return PayPalService.createOnboardingLink(userId);
 }
 
-export async function getPayPalConnectionStatus(userId: string): Promise<{
+export interface PayPalAccountStatus {
   connected: boolean;
-  oauthConnected: boolean;
-  expiresAt: Date | null;
+  merchantId: string | null;
   email: string | null;
-}> {
-  const user = await User.findById(userId).select('paypalConnected paypalEmail paypalTokens.expiresAt +paypalTokens.accessToken +paypalTokens.refreshToken');
+  /** Raison sociale du compte PayPal relié — PayPal n'expose pas l'email ici. */
+  legalName: string | null;
+  paymentsReceivable: boolean;
+  primaryEmailConfirmed: boolean;
+  consentGranted: boolean;
+  scopes: string[];
+  checkedAt: Date | null;
+  /** Raison du blocage, `null` si le vendeur peut encaisser. */
+  blockReason: SellerBlockReason | null;
+  /** Message à afficher tel quel au vendeur, `null` si tout va bien. */
+  blockMessage: string | null;
+}
+
+/**
+ * Renvoie le statut d'onboarding PayPal d'un vendeur.
+ *
+ * L'IWT impose que le vendeur puisse consulter son statut, y compris son
+ * merchant ID et les permissions accordées à la plateforme. `refresh` force un
+ * appel « show seller status » — utilisé quand le vendeur clique explicitement
+ * sur « rafraîchir » après avoir corrigé son compte chez PayPal.
+ */
+export async function getPayPalAccountStatus(
+  userId: string,
+  options: { refresh?: boolean } = {}
+): Promise<PayPalAccountStatus> {
+  const user = await User.findById(userId).select(
+    'paypalConnected paypalEmail paypalMerchantId paypalOnboarding'
+  );
 
   if (!user) {
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
 
-  const hasOAuthTokens = Boolean(
-    user.paypalTokens?.accessToken &&
-    user.paypalTokens?.refreshToken
-  );
+  if (!user.paypalMerchantId) {
+    return {
+      connected: false,
+      merchantId: null,
+      email: null,
+      legalName: null,
+      paymentsReceivable: false,
+      primaryEmailConfirmed: false,
+      consentGranted: false,
+      scopes: [],
+      checkedAt: null,
+      blockReason: 'NOT_ONBOARDED',
+      blockMessage: SELLER_BLOCK_MESSAGES.NOT_ONBOARDED
+    };
+  }
 
-  const hasManualEmail = Boolean(user.paypalEmail);
+  if (options.refresh) {
+    await PayPalService.refreshSellerStatus(userId);
+  }
+
+  const fresh = options.refresh
+    ? await User.findById(userId).select('paypalConnected paypalEmail paypalMerchantId paypalOnboarding')
+    : user;
+
+  const onboarding = fresh?.paypalOnboarding || {};
+  // `checkedAt` absent = le compte est relié mais PayPal n'a jamais répondu.
+  // On le distingue d'un vrai refus, sinon on accuse le vendeur d'une
+  // inscription incomplète alors que c'est notre appel qui a échoué.
+  const blockReason: SellerBlockReason | null = !onboarding.checkedAt
+    ? 'STATUS_UNKNOWN'
+    : !onboarding.consentGranted
+      ? 'CONSENT_MISSING'
+      : !onboarding.primaryEmailConfirmed
+        ? 'EMAIL_UNCONFIRMED'
+        : !onboarding.paymentsReceivable
+          ? 'PAYMENTS_NOT_RECEIVABLE'
+          : null;
 
   return {
-    connected: Boolean(user.paypalConnected && (hasOAuthTokens || hasManualEmail)),
-    oauthConnected: hasOAuthTokens,
-    expiresAt: user.paypalTokens?.expiresAt || null,
-    email: user.paypalEmail || null
+    connected: Boolean(fresh?.paypalConnected) && blockReason === null,
+    merchantId: fresh?.paypalMerchantId || null,
+    email: fresh?.paypalEmail || null,
+    legalName: onboarding.legalName || null,
+    paymentsReceivable: Boolean(onboarding.paymentsReceivable),
+    primaryEmailConfirmed: Boolean(onboarding.primaryEmailConfirmed),
+    consentGranted: Boolean(onboarding.consentGranted),
+    scopes: onboarding.scopes || [],
+    checkedAt: onboarding.checkedAt || null,
+    blockReason,
+    blockMessage: blockReason ? SELLER_BLOCK_MESSAGES[blockReason] : null
   };
 }
 
+/**
+ * Délie le compte PayPal du vendeur.
+ *
+ * MyKpopTrade ne peut pas révoquer les permissions côté PayPal : on « oublie »
+ * l'association pour que le vendeur puisse relier un autre compte.
+ */
 export async function disconnectPayPalForUser(userId: string): Promise<void> {
-  const user = await User.findByIdAndUpdate(userId, {
-    paypalConnected: false,
-    $unset: { paypalTokens: 1 }
-  }, { new: true });
-
+  const user = await User.findById(userId).select('_id');
   if (!user) {
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
+
+  await PayPalService.forgetSellerAccount(userId);
 }
 
 export interface InitiateDirectPaymentInput {
@@ -211,7 +285,16 @@ export async function initiateDirectPayment(
     throw new HttpError(400, 'Vous ne pouvez pas acheter votre propre produit');
   }
 
-  return await PayPalService.createDirectPayment(productId, userId, checkout);
+  try {
+    return await PayPalService.createDirectPayment(productId, userId, checkout);
+  } catch (error) {
+    // Le vendeur n'est pas (ou plus) en état d'encaisser : c'est une erreur
+    // métier attendue, pas un 500. Le front affiche le message tel quel.
+    if (error instanceof SellerNotReadyError) {
+      throw new HttpError(400, error.message, ERROR_CODES.SELLER_UNAVAILABLE);
+    }
+    throw error;
+  }
 }
 
 export async function captureDirectPayment(userId: string, orderId: string) {
@@ -230,10 +313,10 @@ export async function captureDirectPayment(userId: string, orderId: string) {
   }
 
   const seller = await User.findById(payment.seller);
-  if (!seller || !seller.paypalConnected) {
+  if (!seller?.paypalMerchantId) {
     throw new HttpError(
       400,
-      'Vendeur non disponible ou non connecté à PayPal',
+      'Le vendeur n\'a plus de compte PayPal relié : ce paiement ne peut pas être encaissé.',
       ERROR_CODES.SELLER_UNAVAILABLE
     );
   }
@@ -450,8 +533,10 @@ export async function processRefund({
     }
   }
 
-  const alreadyRefunded = payment.totalRefunded || 0;
-  const remaining = subtract(payment.amount, alreadyRefunded);
+  // Calculé à partir de l'historique détaillé, pas du seul `totalRefunded` :
+  // ce compteur n'était alimenté que par le webhook, si bien qu'un webhook
+  // manquant rouvrait la totalité du montant à un second remboursement.
+  const remaining = remainingRefundable(payment);
 
   if (gt(0.01, remaining)) {
     throw new HttpError(400, 'Ce paiement a déjà été entièrement remboursé');
@@ -482,27 +567,36 @@ export async function processRefund({
       payment.seller.toString()
     );
 
-    // Persistance immédiate (statut 'pending') — le webhook PAYMENT.CAPTURE.REFUNDED
-    // basculera l'entrée en 'completed' et mettra à jour totalRefunded/status.
-    // En cas de webhook manqué, l'opération reste tracée.
-    payment.refunds = payment.refunds || [];
-    payment.refunds.push({
+    // PayPal a confirmé : on applique tout de suite le montant qu'il a
+    // réellement remboursé (il plafonne silencieusement une demande trop
+    // élevée). Le webhook PAYMENT.CAPTURE.REFUNDED repassera sur la même
+    // entrée sans rien doubler — mais l'état est correct sans lui.
+    const ledger = applyRefundToPayment(payment, {
       refundId: refundResult.id,
-      amount: refundAmount !== null ? refundAmount : remaining,
-      currency: payment.currency,
-      reason: reason || undefined,
-      status: refundResult.status === 'COMPLETED' ? 'completed' : 'pending',
-      initiatedBy: new (require('mongoose').Types.ObjectId)(userId),
-      initiatedAt: new Date()
+      amount: refundResult.amount,
+      currency: refundResult.currency,
+      reason,
+      initiatedBy: new mongoose.Types.ObjectId(userId)
     });
     await payment.save();
+
+    if (ledger.isFullyRefunded) {
+      await Product.findByIdAndUpdate(payment.product, {
+        isAvailable: true,
+        isSold: false,
+        soldAt: null,
+        soldTo: null
+      });
+    }
+
+    await notifyRefund(payment, refundResult.amount, ledger);
 
     GdprLogger.logPaymentAction('refund_initiated', {
       paymentId,
       refundId: refundResult.id,
-      isPartial: refundAmount !== null,
-      amount: refundAmount,
-      remaining: subtract(remaining, refundAmount !== null ? refundAmount : remaining)
+      isPartial: !ledger.isFullyRefunded,
+      amount: refundResult.amount,
+      remaining: subtract(remaining, refundResult.amount)
     }, userId);
 
     if (isAdmin) {
@@ -514,7 +608,7 @@ export async function processRefund({
         details: reason || undefined,
         metadata: {
           refundId: refundResult.id,
-          amount: refundAmount,
+          amount: refundResult.amount,
           currency: payment.currency
         }
       });
@@ -523,9 +617,9 @@ export async function processRefund({
     return {
       refundId: refundResult.id,
       status: refundResult.status,
-      amount: refundAmount !== null ? refundAmount : remaining,
-      currency: payment.currency,
-      remaining: subtract(remaining, refundAmount !== null ? refundAmount : remaining),
+      amount: refundResult.amount,
+      currency: refundResult.currency,
+      remaining: subtract(remaining, refundResult.amount),
       createdAt: refundResult.createdAt
     };
   } catch (error: any) {

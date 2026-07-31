@@ -117,25 +117,26 @@ export async function createProductForSeller({
   imageUrls: string[];
   uploadedFiles?: Express.Multer.File[];
 }) {
-  // Vérifier que le vendeur a connecté son compte PayPal via OAuth
-  const seller = await User.findById(sellerId).select('paypalConnected +paypalTokens.accessToken +paypalTokens.refreshToken');
+  // Vérifier que le vendeur a terminé son onboarding PayPal et peut encaisser
+  const seller = await User.findById(sellerId).select('paypalConnected paypalMerchantId paypalOnboarding');
   if (!seller) {
     cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
 
-  const hasOAuthConnection = Boolean(
-    seller.paypalConnected &&
-    seller.paypalTokens?.accessToken &&
-    seller.paypalTokens?.refreshToken
+  const canReceivePayments = Boolean(
+    seller.paypalMerchantId &&
+    seller.paypalOnboarding?.paymentsReceivable &&
+    seller.paypalOnboarding?.primaryEmailConfirmed &&
+    seller.paypalOnboarding?.consentGranted
   );
 
-  if (!hasOAuthConnection) {
+  if (!canReceivePayments) {
     cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(
       403,
-      'Vous devez connecter votre compte PayPal (via OAuth) avant de pouvoir vendre. Rendez-vous dans Paramètres > PayPal.',
-      'PAYPAL_OAUTH_REQUIRED'
+      'Vous devez connecter votre compte PayPal avant de pouvoir vendre. Rendez-vous dans Paramètres > PayPal.',
+      'PAYPAL_ONBOARDING_REQUIRED'
     );
   }
 
