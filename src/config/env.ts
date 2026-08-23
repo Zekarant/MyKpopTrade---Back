@@ -48,6 +48,17 @@ const envSchema = z.object({
   PAYPAL_CLIENT_ID: z.string().optional(),
   PAYPAL_CLIENT_SECRET: z.string().optional(),
 
+  // Stripe
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_PUBLISHABLE_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  // URL publique de la marketplace, pré-remplie sur les comptes connectés
+  // (évite à Stripe de demander un site web aux vendeurs particuliers — voir
+  // stripeConnectService.ts).
+  MARKETPLACE_URL: z.string().url().default('https://mykpoptrade.com'),
+  // Email de support, pré-rempli sur les comptes connectés.
+  SUPPORT_EMAIL: z.string().email().default('support@mykpoptrade.com'),
+
   // Chiffrement des messages
   MESSAGE_ENCRYPTION_KEY: z.string().min(32).optional(),
 

@@ -4,6 +4,7 @@ import { PayPalRefundError } from './paypalRefundService';
 import { applyRefundToPayment, notifyRefund, remainingRefundable } from './refundLedger';
 import { SELLER_BLOCK_MESSAGES, SellerBlockReason } from './paypalPartnerService';
 import { SellerNotReadyError } from './paypalPaymentService';
+import { refundStripePayment } from './stripeRefundService';
 import Payment from '../../../models/paymentModel';
 import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
@@ -492,6 +493,10 @@ export async function processRefund({
 
   if (!payment) {
     throw new HttpError(404, 'Paiement non trouvé');
+  }
+
+  if (payment.paymentMethod === 'stripe') {
+    return refundStripePayment({ userId, paymentId, amount, reason, password });
   }
 
   const isSeller = payment.seller.toString() === userId;

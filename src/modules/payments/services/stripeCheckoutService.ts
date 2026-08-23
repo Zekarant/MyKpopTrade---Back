@@ -46,7 +46,11 @@ export async function createStripeCheckoutSession(input: InitStripeCheckoutInput
     throw new HttpError(400, 'Vendeur introuvable');
   }
 
-  if (!seller.stripeAccountId || !seller.stripeChargesEnabled) {
+  // Marketplace C2C en Destination Charges : on vérifie payoutsEnabled (le vendeur
+  // peut recevoir des virements) et pas chargesEnabled (qui resterait toujours
+  // false puisqu'on ne demande pas la capability card_payments — voir
+  // stripeConnectService.ts pour le détail).
+  if (!seller.stripeAccountId || !seller.stripePayoutsEnabled) {
     throw new HttpError(
       400,
       'Le vendeur n\'a pas activé les paiements Stripe',

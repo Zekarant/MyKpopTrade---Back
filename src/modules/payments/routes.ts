@@ -60,8 +60,10 @@ router.get('/paypal/confirm', paymentController.confirmPayPalPayment);
 // Routes Stripe Connect (onboarding + checkout + refund)
 // Note : POST /api/payments/stripe/webhook est monté DIRECTEMENT dans app.ts
 // avec express.raw() — il n'apparaît pas ici car il doit by-pass express.json().
-router.post('/stripe/onboarding-link', stripeController.generateStripeOnboardingLink);
+router.post('/stripe/create-account', stripeController.createStripeAccount);
+router.post('/stripe/account-session', stripeController.createStripeAccountSession);
 router.get('/stripe/account-status', stripeController.checkStripeAccountStatus);
+router.get('/stripe/verify-session', stripeController.verifyStripeSession);
 router.post('/stripe/checkout', stripeController.initiateStripeCheckout);
 router.post('/stripe/:paymentId/refund', validateRefundRequest, stripeController.refundStripePaymentEndpoint);
 

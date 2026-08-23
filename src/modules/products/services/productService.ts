@@ -117,26 +117,30 @@ export async function createProductForSeller({
   imageUrls: string[];
   uploadedFiles?: Express.Multer.File[];
 }) {
-  // Vérifier que le vendeur a terminé son onboarding PayPal et peut encaisser
-  const seller = await User.findById(sellerId).select('paypalConnected paypalMerchantId paypalOnboarding');
+  // Vérifier que le vendeur peut encaisser via au moins un des deux PSP
+  const seller = await User.findById(sellerId).select(
+    'paypalConnected paypalMerchantId paypalOnboarding stripeAccountId stripePayoutsEnabled'
+  );
   if (!seller) {
     cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
 
-  const canReceivePayments = Boolean(
+  const canReceiveViaPayPal = Boolean(
     seller.paypalMerchantId &&
     seller.paypalOnboarding?.paymentsReceivable &&
     seller.paypalOnboarding?.primaryEmailConfirmed &&
     seller.paypalOnboarding?.consentGranted
   );
 
-  if (!canReceivePayments) {
+  const canReceiveViaStripe = Boolean(seller.stripeAccountId && seller.stripePayoutsEnabled);
+
+  if (!canReceiveViaPayPal && !canReceiveViaStripe) {
     cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(
       403,
-      'Vous devez connecter votre compte PayPal avant de pouvoir vendre. Rendez-vous dans Paramètres > PayPal.',
-      'PAYPAL_ONBOARDING_REQUIRED'
+      'Vous devez connecter votre compte PayPal ou Stripe avant de pouvoir vendre. Rendez-vous dans Paramètres > Paiements.',
+      'SELLER_PAYOUT_ACCOUNT_REQUIRED'
     );
   }
 
@@ -191,6 +195,9 @@ export async function fetchProductById(productId: string, userId?: string) {
   const enrichedProduct: any = product.toObject();
 
   await enrichWithKpopNames(product, enrichedProduct);
+
+  const opts = enrichedProduct.shippingOptions || {};
+  enrichedProduct.shippingPrice = opts.nationalCost ?? opts.shippingCost ?? null;
 
   if (userId && userId !== product.seller._id.toString()) {
     product.views += 1;
