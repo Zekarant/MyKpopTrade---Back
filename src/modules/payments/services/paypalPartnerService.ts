@@ -20,6 +20,31 @@ const REQUESTED_FEATURES = ['PAYMENT', 'REFUND', 'PARTNER_FEE'] as const;
 
 const SELLER_STATUS_STALE_MS = 15 * 60 * 1000;
 
+/** Langue des écrans d'onboarding PayPal. La plateforme est franco-française. */
+const ONBOARDING_LANGUAGE = 'fr-FR';
+
+/**
+ * Découpe un numéro français au format attendu par PayPal
+ * (`{ country_code, national_number }`).
+ *
+ * Renvoie `null` dès que le numéro n'est pas reconnaissable : un numéro invalide
+ * ferait échouer la « create partner referral » entière, alors que l'absence de
+ * pré-remplissage ne coûte qu'un champ à ressaisir.
+ */
+export function parseFrenchPhone(raw?: string): { country_code: string; national_number: string } | null {
+  if (!raw) return null;
+
+  const digits = raw.replace(/\D/g, '');
+  let national: string | null = null;
+  if (digits.startsWith('0033')) national = digits.slice(4);
+  else if (digits.startsWith('33')) national = digits.slice(2);
+  else if (digits.startsWith('0')) national = digits.slice(1);
+
+  return national && /^\d{9}$/.test(national)
+    ? { country_code: '33', national_number: national }
+    : null;
+}
+
 export interface SellerStatus {
   merchantId: string;
   paymentsReceivable: boolean;
@@ -61,7 +86,7 @@ export class PayPalPartnerService {
    * partagées entre vendeurs.
    */
   static async createOnboardingLink(sellerId: string): Promise<string> {
-    const seller = await User.findById(sellerId).select('email paypalTrackingId');
+    const seller = await User.findById(sellerId).select('email phoneNumber paypalTrackingId');
     if (!seller) {
       throw new Error('Vendeur non trouvé');
     }
@@ -69,9 +94,14 @@ export class PayPalPartnerService {
     const trackingId = `${sellerId}-${randomUUID().slice(0, 8)}`;
     const accessToken = await PayPalClient.getAccessToken();
 
-    const body = {
+    // Pré-remplissage : PayPal ne présente un formulaire allégé au vendeur que si
+    // le partenaire lui transmet les données qu'il détient déjà. MyKpopTrade ne
+    // collecte ni nom légal, ni date de naissance, ni adresse structurée — seuls
+    // l'email, le téléphone et la langue sont transmissibles aujourd'hui.
+    const body: Record<string, unknown> = {
       tracking_id: trackingId,
       email: seller.email,
+      preferred_language_code: ONBOARDING_LANGUAGE,
       partner_config_override: {
         return_url: PayPalPartnerService.returnUrl(),
         return_url_description:
@@ -92,6 +122,14 @@ export class PayPalPartnerService {
       products: ['PPCP'],
       legal_consents: [{ type: 'SHARE_DATA_CONSENT', granted: true }]
     };
+
+    // Le téléphone décrit la personne, pas une société : il va dans
+    // `individual_owners`, dont l'enum accepte MOBILE (`business_entity.phones`
+    // n'accepte que CUSTOMER_SERVICE/BUSINESS — vérifié contre l'API sandbox).
+    const phone = parseFrenchPhone(seller.phoneNumber);
+    if (phone) {
+      body.individual_owners = [{ type: 'PRIMARY', phones: [{ ...phone, type: 'MOBILE' }] }];
+    }
 
     try {
       const response = await axios.post(
