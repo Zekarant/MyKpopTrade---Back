@@ -23,6 +23,7 @@ build/
 coverage/
 
 # IDE specific files
+.claude/
 .idea/
 .vscode/
 *.sublime-project
