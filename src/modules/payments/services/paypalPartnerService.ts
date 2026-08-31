@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import User, { IUser } from '../../../models/userModel';
 import { paypalApiBaseUrl, PayPalClient, partnerHeaders, extractDebugId } from './paypalClient';
 import { paymentConfig } from '../../../config/paymentConfig';
+import env from '../../../config/env';
 import logger from '../../../commons/utils/logger';
 
 /**
@@ -22,6 +23,26 @@ const SELLER_STATUS_STALE_MS = 15 * 60 * 1000;
 
 /** Langue des écrans d'onboarding PayPal. La plateforme est franco-française. */
 const ONBOARDING_LANGUAGE = 'fr-FR';
+
+/**
+ * Volume de vente mensuel déclaré par défaut pour tous les vendeurs — cohérent
+ * avec un usage C2C occasionnel. Évite à PayPal de demander ce champ au
+ * vendeur (vérifié acceptable par l'API sandbox, cf. `business_entity`
+ * ci-dessous).
+ */
+const SELLER_MONTHLY_VOLUME_RANGE = {
+  minimum_amount: { currency_code: 'EUR', value: '0' },
+  maximum_amount: { currency_code: 'EUR', value: '10000' }
+};
+
+/**
+ * Merchant Category Code déclaré pour tous les vendeurs — même code que le
+ * `business_profile.mcc` envoyé à Stripe (cf. stripeConnectService.ts).
+ * « Hobby, Toy, and Game Shops » (Magasins de loisirs, jouets et jeux) : le
+ * plus proche de la revente de cartes/goodies K-pop entre particuliers,
+ * confirmé présent dans la vraie liste MCC du dropdown PayPal.
+ */
+const SELLER_MCC = '5945';
 
 /**
  * Découpe un numéro français au format attendu par PayPal
@@ -86,7 +107,9 @@ export class PayPalPartnerService {
    * partagées entre vendeurs.
    */
   static async createOnboardingLink(sellerId: string): Promise<string> {
-    const seller = await User.findById(sellerId).select('email phoneNumber paypalTrackingId');
+    const seller = await User.findById(sellerId).select(
+      'username email phoneNumber paypalTrackingId legalName address'
+    );
     if (!seller) {
       throw new Error('Vendeur non trouvé');
     }
@@ -95,13 +118,19 @@ export class PayPalPartnerService {
     const accessToken = await PayPalClient.getAccessToken();
 
     // Pré-remplissage : PayPal ne présente un formulaire allégé au vendeur que si
-    // le partenaire lui transmet les données qu'il détient déjà. MyKpopTrade ne
-    // collecte ni nom légal, ni date de naissance, ni adresse structurée — seuls
-    // l'email, le téléphone et la langue sont transmissibles aujourd'hui.
+    // le partenaire lui transmet les données qu'il détient déjà. `legalName` et
+    // `address` sont facultatifs (renseignés par le vendeur dans ses paramètres,
+    // cf. authProfileService.ts) — s'ils sont absents, PayPal les redemande
+    // normalement à l'onboarding, sans bloquer.
     const body: Record<string, unknown> = {
       tracking_id: trackingId,
       email: seller.email,
       preferred_language_code: ONBOARDING_LANGUAGE,
+      // Pays de constitution/résidence légale — sans ça, PayPal semble le
+      // déduire du compte personnel utilisé pour se connecter (vu en sandbox :
+      // un testeur belge se voit proposer « Belgique » par défaut). La
+      // plateforme n'opère qu'en France.
+      legal_country_code: 'FR',
       partner_config_override: {
         return_url: PayPalPartnerService.returnUrl(),
         return_url_description:
@@ -120,15 +149,93 @@ export class PayPalPartnerService {
         }
       ],
       products: ['PPCP'],
-      legal_consents: [{ type: 'SHARE_DATA_CONSENT', granted: true }]
+      legal_consents: [{ type: 'SHARE_DATA_CONSENT', granted: true }],
+      // `business_type: INDIVIDUAL` + volume/site déjà connus par la
+      // plateforme évitent à PayPal de les redemander au vendeur (formulaire
+      // « Devise / Ventes mensuelles / Site web » vu à l'onboarding) — vérifié
+      // accepté par l'API sandbox (`names` n'est pas requis pour un compte
+      // INDIVIDUAL). Pour le secteur d'activité, seul `mcc_code` est envoyé
+      // (`5945` = Hobby, Toy, and Game Shops — même code que côté Stripe, cf.
+      // stripeConnectService.ts) : `category`/`subcategory` ont été retirés
+      // après avoir constaté en sandbox qu'ils font afficher un secteur sans
+      // rapport (ex. « Électriciens ») quand on leur donne un code MCC —
+      // ce sont visiblement des champs distincts, pas de table de
+      // correspondance publique connue pour eux. Le dropdown « Que vendez-vous »
+      // du formulaire PayPal est, lui, directement indexé par code MCC
+      // standard (vérifié via le DOM du composant réel).
+      business_entity: {
+        business_type: { type: 'INDIVIDUAL' },
+        website: env.MARKETPLACE_URL,
+        average_monthly_volume_range: SELLER_MONTHLY_VOLUME_RANGE,
+        business_industry: { mcc_code: SELLER_MCC },
+        // Adresse visible par les clients (factures, relevés) — l'email de
+        // support de la plateforme, pas celui du vendeur.
+        emails: [{ email: env.SUPPORT_EMAIL, type: 'CUSTOMER_SERVICE' }]
+      }
     };
+
+    const businessEntity = body.business_entity as Record<string, unknown>;
+    const individualOwner: Record<string, unknown> = { type: 'PRIMARY' };
+
+    // Le pseudo n'est qu'un nom d'usage (DOING_BUSINESS_AS), pas une identité
+    // légale : il remplit « Nom commercial (facultatif) » sans risque, contrairement
+    // au nom légal ci-dessous, requis pour le champ obligatoire « Nom de
+    // l'entreprise » et donc réservé aux vendeurs l'ayant explicitement déclaré.
+    const businessNames: Array<{ business_name: string; type: string }> = [
+      { business_name: seller.username, type: 'DOING_BUSINESS_AS' }
+    ];
+
+    // Nom légal auto-déclaré par le vendeur (paramètres du profil) — remplit
+    // le champ obligatoire « Nom de l'entreprise » côté business_entity ET le
+    // nom légal individuel, pour un compte INDIVIDUAL où les deux se
+    // confondent (un vendeur particulier n'a pas de raison sociale distincte).
+    if (seller.legalName) {
+      businessNames.push({ business_name: seller.legalName, type: 'LEGAL_NAME' });
+
+      // `full_name` seul ne suffit pas : certaines variantes du formulaire
+      // PayPal affichent Prénom/Nom en deux champs séparés, qui restent vides
+      // si on n'envoie pas `given_name`/`surname` — vérifié en sandbox.
+      // MyKpopTrade ne stocke qu'un nom complet : on le découpe au premier
+      // espace (dernier recours si un seul mot : même valeur des deux côtés,
+      // pour qu'aucun des deux champs ne reste vide).
+      const [givenName, ...rest] = seller.legalName.trim().split(/\s+/);
+      const surname = rest.join(' ') || givenName;
+      individualOwner.names = [{
+        given_name: givenName,
+        surname,
+        full_name: seller.legalName,
+        type: 'LEGAL'
+      }];
+    }
+
+    businessEntity.names = businessNames;
+
+    // Adresse structurée auto-déclarée — remplit « Adresse du siège social ».
+    // `type` diffère entre les deux objets : `WORK` pour business_entity,
+    // `HOME` pour individual_owners (`WORK` y est rejeté avec 400 — vérifié
+    // contre l'API sandbox).
+    if (seller.address) {
+      const portableAddress = {
+        address_line_1: seller.address.streetLine1,
+        address_line_2: seller.address.streetLine2,
+        admin_area_2: seller.address.city,
+        postal_code: seller.address.postalCode,
+        country_code: seller.address.country
+      };
+      businessEntity.addresses = [{ ...portableAddress, type: 'WORK' }];
+      individualOwner.addresses = [{ ...portableAddress, type: 'HOME' }];
+    }
 
     // Le téléphone décrit la personne, pas une société : il va dans
     // `individual_owners`, dont l'enum accepte MOBILE (`business_entity.phones`
     // n'accepte que CUSTOMER_SERVICE/BUSINESS — vérifié contre l'API sandbox).
     const phone = parseFrenchPhone(seller.phoneNumber);
     if (phone) {
-      body.individual_owners = [{ type: 'PRIMARY', phones: [{ ...phone, type: 'MOBILE' }] }];
+      individualOwner.phones = [{ ...phone, type: 'MOBILE' }];
+    }
+
+    if (Object.keys(individualOwner).length > 1) {
+      body.individual_owners = [individualOwner];
     }
 
     try {

@@ -61,7 +61,7 @@ if (process.env.NODE_ENV !== 'production') {
 // Configuration pour ne pas enregistrer d'informations sensibles
 const logsSanitizer = winston.format((info) => {
   // Liste des champs sensibles à masquer dans les logs
-  const sensitiveFields = ['password', 'token', 'email', 'paypalEmail', 'address', 'phoneNumber', 'fullName'];
+  const sensitiveFields = ['password', 'token', 'email', 'paypalEmail', 'address', 'phoneNumber', 'fullName', 'legalName'];
   
   // Fonction récursive pour masquer les données sensibles
   const sanitizeObject = (obj: any): any => {

@@ -64,7 +64,9 @@ export async function updateProfileData(userId: string, body: any) {
     bio,
     location,
     socialLinks,
-    preferences
+    preferences,
+    legalName,
+    address
   } = body;
 
   let emailUpdated = false;
@@ -148,6 +150,30 @@ export async function updateProfileData(userId: string, body: any) {
   if (socialLinks) user.socialLinks = { ...user.socialLinks, ...socialLinks };
   if (preferences) user.preferences = { ...user.preferences, ...preferences };
 
+  // Uniquement utilisés pour pré-remplir l'onboarding PayPal (cf.
+  // paypalPartnerService.ts) — facultatifs, jamais requis pour vendre.
+  if (legalName !== undefined) {
+    user.legalName = legalName === '' ? undefined : legalName.substring(0, 300);
+  }
+
+  if (address !== undefined) {
+    if (address === null || address === '') {
+      user.address = undefined;
+    } else {
+      const { streetLine1, streetLine2, postalCode, city, country } = address;
+      if (!streetLine1 || !postalCode || !city) {
+        throw new HttpError(400, 'Adresse incomplète : rue, code postal et ville sont requis');
+      }
+      user.address = {
+        streetLine1,
+        streetLine2: streetLine2 || undefined,
+        postalCode,
+        city,
+        country: country || 'FR'
+      };
+    }
+  }
+
   await user.save();
 
   let message = 'Profil mis à jour avec succès';
@@ -172,7 +198,9 @@ export async function updateProfileData(userId: string, body: any) {
       location: user.location,
       socialLinks: user.socialLinks,
       preferences: user.preferences,
-      isEmailVerified: user.isEmailVerified
+      isEmailVerified: user.isEmailVerified,
+      legalName: user.legalName,
+      address: user.address
     }
   };
 }

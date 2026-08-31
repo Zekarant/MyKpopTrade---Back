@@ -74,6 +74,24 @@ export interface IUser extends Document {
   isIdentityVerified?: boolean;
   identityVerifiedAt?: Date;
   verificationLevel: 'none' | 'basic' | 'advanced' | 'complete';
+  /**
+   * Nom légal déclaré par l'utilisateur lui-même (saisi dans les paramètres du
+   * profil), à ne pas confondre avec `paypalOnboarding.legalName` qui est la
+   * raison sociale renvoyée PAR PayPal après onboarding. Sert uniquement à
+   * pré-remplir l'onboarding PayPal — jamais vérifié par MyKpopTrade.
+   */
+  legalName?: string;
+  /**
+   * Adresse structurée déclarée par l'utilisateur, distincte du champ libre
+   * `location`. Sert uniquement à pré-remplir l'onboarding PayPal.
+   */
+  address?: {
+    streetLine1: string;
+    streetLine2?: string;
+    postalCode: string;
+    city: string;
+    country: string;
+  };
   paypalEmail?: string;
   paypalConnected?: boolean;
   /** `merchant_id` PayPal du vendeur (merchantIdInPayPal), renvoyé au retour d'onboarding. */
@@ -147,6 +165,21 @@ const UserSchema: Schema = new Schema({
   profileBanner: {
     type: String,
     default: null
+  },
+  legalName: {
+    type: String,
+    trim: true,
+    maxlength: 300
+  },
+  address: {
+    type: new Schema({
+      streetLine1: { type: String, required: true, trim: true, maxlength: 200 },
+      streetLine2: { type: String, trim: true, maxlength: 200 },
+      postalCode: { type: String, required: true, trim: true, maxlength: 16 },
+      city: { type: String, required: true, trim: true, maxlength: 100 },
+      country: { type: String, required: true, trim: true, maxlength: 2, default: 'FR' }
+    }, { _id: false }),
+    default: undefined
   },
   paypalEmail: {
     type: String,
