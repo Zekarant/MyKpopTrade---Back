@@ -18,8 +18,8 @@ export const errorHandler = (
 ): void => {
   const statusCode = err.statusCode || 500;
   const message = err.message || 'Erreur interne du serveur';
-  
-  // Journaliser l'erreur
+
+  // Journaliser l'erreur (le body passe par le sanitizer du logger, cf. logger.ts)
   logger.error(`[${req.method}] ${req.path} - ${statusCode}: ${message}`, {
     error: err.stack,
     body: req.body,
@@ -27,10 +27,20 @@ export const errorHandler = (
     query: req.query,
     user: (req.user as any)?.id || 'non authentifié'
   });
-  
+
+  // Les erreurs 4xx sont volontaires et destinées au client : on renvoie leur
+  // message tel quel. Les 5xx sont des bugs : leur message peut contenir des
+  // détails d'infrastructure (requêtes Mongo, chemins, noms de champs internes)
+  // qu'on ne divulgue pas en production.
+  const isServerError = statusCode >= 500;
+  const clientMessage =
+    isServerError && process.env.NODE_ENV === 'production'
+      ? 'Une erreur interne est survenue. Veuillez réessayer plus tard.'
+      : message;
+
   res.status(statusCode).json({
     error: {
-      message,
+      message: clientMessage,
       code: err.code || 'INTERNAL_SERVER_ERROR'
     }
   });

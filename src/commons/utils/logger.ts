@@ -59,31 +59,72 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Configuration pour ne pas enregistrer d'informations sensibles
+//
+// Le masquage raisonne par MOTIF et non par nom exact : une liste exacte laissait
+// passer toutes les variantes (`newPayPalEmail`, `passwordResetToken`,
+// `shippingAddress`, `ipAddress`…). Un motif couvre la famille entière.
+const SENSITIVE_PATTERNS = [
+  /pass(word|phrase)/i,
+  /token/i,
+  /secret/i,
+  /api-?key/i,
+  /credential/i,
+  /authorization/i,
+  /e-?mail/i,
+  /phone/i,
+  /address/i
+];
+
+/**
+ * Champs personnels dont le nom ne suit aucun motif générique. Volontairement
+ * limité : `albumName`, `artistName`, `groupName` ou `memberName` sont des
+ * métadonnées K-pop publiques et doivent rester lisibles pour le diagnostic.
+ */
+const SENSITIVE_EXACT_FIELDS = new Set([
+  'fullName',
+  'legalName',
+  'recipientName',
+  'iban',
+  'bic',
+  'cvv'
+]);
+
+const isSensitiveKey = (key: string): boolean =>
+  SENSITIVE_EXACT_FIELDS.has(key) || SENSITIVE_PATTERNS.some(pattern => pattern.test(key));
+
+/** Pseudonymise un email en conservant de quoi diagnostiquer sans l'exposer. */
+const maskEmail = (value: string): string => {
+  const [localPart, domain] = value.split('@');
+  const tld = domain.substring(domain.lastIndexOf('.'));
+  return `${localPart.substring(0, 3)}***@***${tld}`;
+};
+
 const logsSanitizer = winston.format((info) => {
-  // Liste des champs sensibles à masquer dans les logs
-  const sensitiveFields = ['password', 'token', 'email', 'paypalEmail', 'address', 'phoneNumber', 'fullName', 'legalName'];
-  
   // Fonction récursive pour masquer les données sensibles
   const sanitizeObject = (obj: any): any => {
     if (!obj) return obj;
-    
+
+    // Les tableaux doivent être parcourus, sinon un tableau d'objets contenant
+    // des données personnelles échappait entièrement au masquage.
+    if (Array.isArray(obj)) {
+      return obj.map(item =>
+        typeof item === 'object' && item !== null ? sanitizeObject(item) : item
+      );
+    }
+
     const newObj = { ...obj };
-    
+
     Object.keys(newObj).forEach(key => {
-      // Si c'est un champ sensible et une chaîne
-      if (sensitiveFields.includes(key) && typeof newObj[key] === 'string') {
-        // Masquer l'email en ne gardant que les 3 premiers caractères
-        if (key.includes('email') && newObj[key].includes('@')) {
-          const [localPart, domain] = newObj[key].split('@');
-          newObj[key] = `${localPart.substring(0, 3)}***@***${domain.substring(domain.lastIndexOf('.'))}`;
-        } else {
-          // Masquer complètement les autres données sensibles
-          newObj[key] = '******';
-        }
-      } 
-      // Traiter les objets imbriqués
-      else if (typeof newObj[key] === 'object' && newObj[key] !== null) {
-        newObj[key] = sanitizeObject(newObj[key]);
+      const value = newObj[key];
+
+      if (typeof value === 'string' && isSensitiveKey(key)) {
+        // Un email garde ses 3 premiers caractères et son TLD : assez pour
+        // rapprocher deux événements, pas assez pour identifier la personne.
+        newObj[key] = /e-?mail/i.test(key) && value.includes('@')
+          ? maskEmail(value)
+          : '******';
+      } else if (typeof value === 'object' && value !== null) {
+        newObj[key] = sanitizeObject(value);
       }
     });
     
@@ -101,8 +142,12 @@ const logger = winston.createLogger({
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.errors({ stack: true }),
     winston.format.splat(),
-    winston.format.json(),
-    logsSanitizer()
+    // ⚠️ ORDRE CRITIQUE : logsSanitizer() doit passer AVANT json(). json() fige
+    // la ligne finale dans info[MESSAGE] ; tout format placé après n'a plus aucun
+    // effet sur ce qui est écrit dans les fichiers de log (les mots de passe et
+    // tokens repartaient donc en clair dans logs/error.log).
+    logsSanitizer(),
+    winston.format.json()
   ),
   defaultMeta: { service: 'mykpoptrade-api' },
   transports

@@ -7,6 +7,7 @@ import {
   rateLimitMessages,
   verifyConversationAccess
 } from './middleware/messageSecurityMiddleware';
+import { allowAttachmentTokenInQuery } from './middleware/attachmentAuthMiddleware';
 
 const router = express.Router();
 
@@ -131,6 +132,9 @@ router.delete(
 
 router.get(
   '/messages/:messageId/attachments/:attachment',
+  // Accepte le jeton en query param : une balise <img> ne peut pas envoyer
+  // d'en-tête Authorization. Portée strictement limitée à cette route.
+  allowAttachmentTokenInQuery,
   authenticateJWT,
   messageController.getMessageAttachment
 );

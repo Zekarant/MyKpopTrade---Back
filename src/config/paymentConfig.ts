@@ -32,14 +32,6 @@ export const paymentConfig = {
     cancelUrl: process.env.PAYPAL_CANCEL_URL || 'http://localhost:3000/payment/cancel'
   },
 
-  // Configuration Stripe Connect
-  stripe: {
-    secretKey: process.env.STRIPE_SECRET_KEY || '',
-    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
-    /** Pourcentage de commission plateforme (0 = pas de commission) */
-    platformFeePercent: parseFloat(process.env.PLATFORM_FEE_PERCENT || '0')
-  },
-  
   // Configuration pour la conformité RGPD
   gdpr: {
     // Période avant anonymisation des données de contact (en jours)
@@ -86,11 +78,6 @@ export const validatePaymentConfig = () => {
     if (!paymentConfig.paypal.webhookId) {
       throw new Error(
         'PAYPAL_WEBHOOK_ID est requis : sans lui, la signature des webhooks PayPal ne peut pas être vérifiée.'
-      );
-    }
-    if (!paymentConfig.stripe.secretKey || !paymentConfig.stripe.webhookSecret) {
-      throw new Error(
-        'Configuration Stripe incomplète pour l\'environnement de production.'
       );
     }
   }

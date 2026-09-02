@@ -7,7 +7,14 @@ import {
   verifyRefreshToken,
   tokenBlacklist 
 } from '../../../commons/services/tokenService';
+import jwt from 'jsonwebtoken';
 import logger from '../../../commons/utils/logger';
+import env from '../../../config/env';
+import {
+  isTwoFactorEnabled,
+  TWO_FACTOR_TOKEN_PURPOSE,
+  TWO_FACTOR_TOKEN_EXPIRES_IN
+} from '../services/twoFactorService';
 
 /**
  * Connexion utilisateur
@@ -50,6 +57,28 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       res.status(403).json({
         message: 'Votre compte est suspendu. Contactez le support.',
         code: 'ACCOUNT_SUSPENDED'
+      });
+      return;
+    }
+
+    // Double authentification active : le mot de passe seul ne suffit pas.
+    // Aucun jeton d'accès n'est délivré ici ; on rend un jeton de défi
+    // à courte durée de vie, utilisable uniquement sur /auth/2fa/verify.
+    if (isTwoFactorEnabled(user)) {
+      const twoFactorToken = jwt.sign(
+        { userId: user._id.toString(), purpose: TWO_FACTOR_TOKEN_PURPOSE },
+        env.JWT_SECRET,
+        { expiresIn: TWO_FACTOR_TOKEN_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
+      );
+
+      logger.info('Défi de double authentification émis', {
+        userId: user._id.toString().substring(0, 5) + '...'
+      });
+
+      res.status(200).json({
+        requiresTwoFactor: true,
+        twoFactorToken,
+        message: "Saisissez le code de votre application d'authentification."
       });
       return;
     }

@@ -1,28 +1,25 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import crypto from 'crypto';
 
-// Clé de chiffrement pour les données sensibles (à placer dans les variables d'environnement en production)
-const ENCRYPTION_KEY = process.env.PAYMENT_ENCRYPTION_KEY || 'yourSecretKeyForEncryption32Bytes';
-const IV_LENGTH = 16; // Pour AES
-
-// Fonction pour chiffrer les données sensibles
-function encrypt(text: string): string {
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
-  let encrypted = cipher.update(text, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  return `${iv.toString('hex')}:${encrypted}`;
-}
-
-// Fonction pour déchiffrer les données sensibles
-function decrypt(text: string): string {
-  const [ivHex, encryptedHex] = text.split(':');
-  const iv = Buffer.from(ivHex, 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
-  let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
-}
+/**
+ * Note sur les champs `*Encrypted`.
+ *
+ * Ce modèle embarquait un chiffrement AES des identifiants de paiement, retiré
+ * car il était à la fois mort et cassé :
+ * - `getPaymentIntentId()` / `setPaymentIntentId()` n'avaient aucun appelant ;
+ * - la clé de repli en dur (`'yourSecretKeyForEncryption32Bytes'`, présente dans
+ *   le dépôt public) fait 33 octets alors qu'AES-256 en exige 32 : tout appel
+ *   levait « Invalid key length » ;
+ * - `PAYMENT_ENCRYPTION_KEY` n'était pas déclarée dans le schéma de configuration,
+ *   donc rien ne signalait l'absence de clé au démarrage.
+ *
+ * Les champs `paymentIntentEncrypted` et `captureIdEncrypted` sont conservés :
+ * `src/scripts/dataRetention.ts` les remet à `undefined` lors de la purge, et des
+ * documents existants peuvent les porter. Ils ne sont plus jamais écrits.
+ *
+ * Si le chiffrement au repos de ces identifiants redevient un besoin, passer par
+ * `EncryptionService` (clé validée au démarrage, IV aléatoire) plutôt que par une
+ * quatrième implémentation locale d'AES.
+ */
 
 export interface IPayment extends Document {
   product: mongoose.Types.ObjectId;
@@ -32,11 +29,14 @@ export interface IPayment extends Document {
   currency: string;
   platformFee: number;
   paymentIntentId: string;
-  paymentIntentEncrypted: string; // Champ chiffré
-  getPaymentIntentId(): string; // Méthode pour récupérer la valeur déchiffrée
-  setPaymentIntentId(value: string): void; // Méthode pour définir la valeur chiffrée
+  /**
+   * Champs hérités d'une tentative de chiffrement des identifiants de paiement,
+   * jamais aboutie : voir le commentaire au-dessus du schéma. Conservés pour
+   * rester compatible avec les documents existants et src/scripts/dataRetention.ts.
+   */
+  paymentIntentEncrypted?: string;
   captureId?: string;
-  captureIdEncrypted?: string; // Champ chiffré
+  captureIdEncrypted?: string;
   status: 'pending' | 'completed' | 'failed' | 'refunded' | 'partially_refunded' | 'cancelled';
   paymentMethod: 'paypal' | 'stripe' | 'other';
   paymentType: 'direct' | 'platform';
@@ -308,19 +308,6 @@ const paymentSchema: Schema = new Schema({
 }, {
   timestamps: true
 });
-
-// Middleware pour chiffrer/déchiffrer les données sensibles
-paymentSchema.methods.getPaymentIntentId = function(): string {
-  if (this.paymentIntentEncrypted) {
-    return decrypt(this.paymentIntentEncrypted);
-  }
-  return this.paymentIntentId;
-};
-
-paymentSchema.methods.setPaymentIntentId = function(value: string): void {
-  this.paymentIntentId = value; // Conservé pour compatibilité
-  this.paymentIntentEncrypted = encrypt(value);
-};
 
 // Middleware pre-save pour définir la date d'expiration de la rétention
 paymentSchema.pre('save', function(next) {

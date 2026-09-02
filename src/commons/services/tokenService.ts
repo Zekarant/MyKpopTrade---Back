@@ -1,6 +1,7 @@
 import jwt, { SignOptions } from 'jsonwebtoken';
 import crypto from 'crypto';
 import RefreshToken from '../../models/tokenModel';
+import env from '../../config/env';
 
 // Liste des tokens d'accès révoqués (utiliser Redis en production)
 export const tokenBlacklist = new Set<string>();
@@ -16,10 +17,9 @@ export const generateAccessToken = (user: any): string => {
     role: user.role
   };
   
-  const secret = process.env.JWT_SECRET || 'default_secret';
-  const options: SignOptions = { expiresIn: (process.env.JWT_EXPIRE || '15m') as jwt.SignOptions['expiresIn'] };
-  
-  return jwt.sign(payload, secret, options);
+  const options: SignOptions = { expiresIn: env.JWT_EXPIRE as jwt.SignOptions['expiresIn'] };
+
+  return jwt.sign(payload, env.JWT_SECRET, options);
 };
 
 /**

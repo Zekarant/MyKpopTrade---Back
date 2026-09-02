@@ -1,3 +1,11 @@
+// Le changement d'email déclenche sendVerificationEmail, qui construit un
+// transporteur nodemailer — en test cela appelait réellement ethereal.email et
+// rendait cette suite instable (timeouts intermittents). Même mock que les
+// autres suites d'intégration.
+jest.mock('../../../../commons/services/emailService', () => ({
+  sendVerificationEmail: jest.fn().mockResolvedValue(undefined)
+}));
+
 import {
   startInMemoryMongo,
   stopInMemoryMongo,

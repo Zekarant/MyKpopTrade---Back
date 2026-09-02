@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { tokenBlacklist } from '../services/tokenService';
+import env from '../../config/env';
 import User from '../../models/userModel';
 import logger from '../utils/logger';
 
@@ -47,7 +48,7 @@ export const authenticateJWT = async (req: Request, res: Response, next: NextFun
     
     try {
       // Décodage avec typage du payload
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_jwt_secret') as JwtPayload;
+      const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
       
       // Vérifier que l'ID est présent
       if (!decoded.id) {

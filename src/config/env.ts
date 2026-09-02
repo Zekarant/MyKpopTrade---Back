@@ -13,6 +13,16 @@ const envSchema = z.object({
   PORT: z.string().transform(val => parseInt(val, 10)).default('3000'),
   API_URL: z.string().url().default('http://localhost:3000'),
   FRONTEND_URL: z.string().url().default('http://localhost:8080'),
+  // Origines autorisées par CORS, séparées par des virgules. FRONTEND_URL est
+  // toujours autorisée en plus de cette liste (cf. app.ts).
+  CORS_ORIGINS: z.string().default(''),
+  // Nombre de reverse proxies devant l'API (0 = aucun). Indispensable pour que
+  // req.ip soit l'IP réelle du client et non celle du proxy : sans ça, le rate
+  // limiting par IP s'applique à tous les utilisateurs en même temps.
+  // ⚠️ Ne jamais surévaluer : une valeur trop haute permet de forger X-Forwarded-For.
+  TRUST_PROXY: z.string().transform(val => parseInt(val, 10)).default('0'),
+  // Taille maximale d'un corps de requête JSON / urlencoded.
+  BODY_LIMIT: z.string().default('1mb'),
   
   // Base de données
   MONGODB_URI: z.string().default('mongodb://localhost:27017/mykpoptrade'),
@@ -48,19 +58,19 @@ const envSchema = z.object({
   PAYPAL_CLIENT_ID: z.string().optional(),
   PAYPAL_CLIENT_SECRET: z.string().optional(),
 
-  // Stripe
-  STRIPE_SECRET_KEY: z.string().optional(),
-  STRIPE_PUBLISHABLE_KEY: z.string().optional(),
-  STRIPE_WEBHOOK_SECRET: z.string().optional(),
-  // URL publique de la marketplace, pré-remplie sur les comptes connectés
-  // (évite à Stripe de demander un site web aux vendeurs particuliers — voir
-  // stripeConnectService.ts).
+  // URL publique de la marketplace et email de support, pré-remplis sur les
+  // comptes vendeurs connectés.
   MARKETPLACE_URL: z.string().url().default('https://mykpoptrade.com'),
-  // Email de support, pré-rempli sur les comptes connectés.
   SUPPORT_EMAIL: z.string().email().default('support@mykpoptrade.com'),
 
   // Chiffrement des messages
   MESSAGE_ENCRYPTION_KEY: z.string().min(32).optional(),
+  // Chiffrement des données personnelles (anonymisation RGPD des paiements,
+  // documents d'identité). Doit faire 32 caractères au minimum : AES-256 en
+  // consomme exactement 32 octets.
+  // Cette variable était lue directement via process.env, sans validation :
+  // son absence faisait échouer le démarrage sur une exception opaque.
+  ENCRYPTION_KEY: z.string().min(32).optional(),
 
   // Logs
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
@@ -72,12 +82,13 @@ const envSchema = z.object({
       Boolean(data.PAYPAL_CLIENT_ID) &&
       Boolean(data.PAYPAL_CLIENT_SECRET) &&
       Boolean(data.MESSAGE_ENCRYPTION_KEY) &&
+      Boolean(data.ENCRYPTION_KEY) &&
       data.JWT_SECRET !== 'this_is_a_development_secret_key_do_not_use_in_production'
     );
   },
   {
     message:
-      'En production, PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, MESSAGE_ENCRYPTION_KEY et un JWT_SECRET custom sont requis.'
+      'En production, PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, MESSAGE_ENCRYPTION_KEY, ENCRYPTION_KEY et un JWT_SECRET custom sont requis.'
   }
 );
 

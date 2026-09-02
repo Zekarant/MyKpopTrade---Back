@@ -67,6 +67,22 @@ export interface IUser extends Document {
   passwordResetExpires?: Date;
   phoneVerificationCode?: string;
   phoneVerificationExpires?: Date;
+  /**
+   * Double authentification par TOTP (RFC 6238), optionnelle.
+   *
+   * `secret` et `pendingSecret` sont chiffrés au repos via EncryptionService :
+   * ce sont des identifiants d'authentification, pas des métadonnées.
+   * `recoveryCodes` contient des empreintes SHA-256, jamais les codes en clair.
+   * `lastUsedTimeStep` bloque le rejeu d'un code déjà consommé.
+   */
+  twoFactor?: {
+    enabled: boolean;
+    secret?: string;
+    pendingSecret?: string;
+    recoveryCodes?: string[];
+    lastUsedTimeStep?: number;
+    enabledAt?: Date;
+  };
   comparePassword(candidatePassword: string): Promise<boolean>;
   generateVerificationToken(): string;
   generatePasswordResetToken(): string;
@@ -362,6 +378,16 @@ const UserSchema: Schema = new Schema({
   passwordResetExpires: Date,
   phoneVerificationCode: String,
   phoneVerificationExpires: Date,
+  twoFactor: {
+    enabled: { type: Boolean, default: false },
+    // `select: false` : ces champs ne partent jamais dans une réponse API par
+    // défaut, il faut les demander explicitement (cf. twoFactorService).
+    secret: { type: String, select: false },
+    pendingSecret: { type: String, select: false },
+    recoveryCodes: { type: [String], select: false, default: undefined },
+    lastUsedTimeStep: { type: Number, select: false },
+    enabledAt: { type: Date }
+  },
   favorites: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product'

@@ -32,6 +32,21 @@ describe('HTTP — routes publiques (via supertest)', () => {
     });
   });
 
+  describe('sondes de supervision', () => {
+    it('GET /health → 200 sans tester les dépendances', async () => {
+      const res = await request(app).get('/health');
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ok');
+      expect(typeof res.body.uptime).toBe('number');
+    });
+
+    it('GET /ready → 200 quand MongoDB est connecté', async () => {
+      const res = await request(app).get('/ready');
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ status: 'ready', database: 'connected' });
+    });
+  });
+
   describe('GET /api/groups/search', () => {
     it('retourne 400 sans paramètre query', async () => {
       const res = await request(app).get('/api/groups/search');

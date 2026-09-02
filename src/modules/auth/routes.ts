@@ -8,28 +8,48 @@ import * as phoneVerificationController from './controllers/phoneVerificationCon
 import * as passwordController from './controllers/passwordController';
 import * as profileController from './controllers/profileController';
 import * as socialAuthController from './controllers/socialAuthController';
+import * as twoFactorController from './controllers/twoFactorController';
 import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
+import {
+  rateLimitLogin,
+  rateLimitRegister,
+  rateLimitEmailDispatch,
+  rateLimitSmsDispatch,
+  rateLimitSmsVerify,
+  rateLimitTwoFactorVerify
+} from './middleware/authRateLimiter';
+import env from '../../config/env';
 
 const router = Router();
 
 // Routes d'enregistrement et de connexion
-router.post('/register', registerController.register);
-router.post('/login', loginController.login);
+router.post('/register', rateLimitRegister, registerController.register);
+router.post('/login', rateLimitLogin, loginController.login);
 router.post('/logout', authenticateJWT, loginController.logout);
 router.post('/refresh-token', loginController.refreshToken);
 
 // Routes de vérification d'email
 router.get('/verify-email/:token', emailVerificationController.verifyEmail);
-router.post('/resend-verification', emailVerificationController.resendVerification);
+router.post('/resend-verification', rateLimitEmailDispatch, emailVerificationController.resendVerification);
 
 // Routes de réinitialisation de mot de passe
-router.post('/forgot-password', passwordController.forgotPassword);
-router.post('/reset-password/:token', passwordController.resetPassword);
+router.post('/forgot-password', rateLimitEmailDispatch, passwordController.forgotPassword);
+router.post('/reset-password/:token', rateLimitLogin, passwordController.resetPassword);
 router.put('/update-password', authenticateJWT, passwordController.updatePassword);
 
+// Routes de double authentification (TOTP)
+// La vérification du défi est publique : elle est protégée par le jeton de défi
+// émis à la connexion, pas par une session déjà établie.
+router.post('/2fa/verify', rateLimitTwoFactorVerify, twoFactorController.verifyChallenge);
+router.get('/2fa/status', authenticateJWT, twoFactorController.status);
+router.post('/2fa/setup', authenticateJWT, twoFactorController.setup);
+router.post('/2fa/enable', authenticateJWT, twoFactorController.enable);
+router.post('/2fa/disable', authenticateJWT, twoFactorController.disable);
+router.post('/2fa/recovery-codes', authenticateJWT, twoFactorController.regenerate);
+
 // Routes de vérification téléphonique
-router.post('/send-phone-verification', authenticateJWT, phoneVerificationController.sendVerificationCode);
-router.post('/verify-phone', authenticateJWT, phoneVerificationController.verifyPhoneNumber);
+router.post('/send-phone-verification', authenticateJWT, rateLimitSmsDispatch, phoneVerificationController.sendVerificationCode);
+router.post('/verify-phone', authenticateJWT, rateLimitSmsVerify, phoneVerificationController.verifyPhoneNumber);
 
 // Routes de profil
 router.get('/profile', authenticateJWT, profileController.getProfile);
@@ -48,7 +68,7 @@ router.get('/google/callback', (req: Request, res: Response, next: NextFunction)
     try {
       const state = JSON.parse(stateParam);
       if (state.linkToken) {
-        const decoded = jwt.verify(state.linkToken, process.env.JWT_SECRET || 'default_jwt_secret') as any;
+        const decoded = jwt.verify(state.linkToken, env.JWT_SECRET) as any;
         (req as any).linkUserId = decoded.userId;
       }
     } catch {
@@ -92,7 +112,7 @@ router.get('/discord/callback', (req: Request, res: Response, next: NextFunction
     try {
       const state = JSON.parse(decodeURIComponent(stateParam));
       if (state.linkToken) {
-        const decoded = jwt.verify(state.linkToken, process.env.JWT_SECRET || 'default_jwt_secret') as any;
+        const decoded = jwt.verify(state.linkToken, env.JWT_SECRET) as any;
         (req as any).linkUserId = decoded.userId;
         isLinkFlow = true;
       }
@@ -129,11 +149,11 @@ router.get('/google/link', (req: Request, res: Response, next: NextFunction) => 
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_jwt_secret') as any;
+    const decoded = jwt.verify(token, env.JWT_SECRET) as any;
     const userId = decoded.id;
     const linkToken = jwt.sign(
       { userId, purpose: 'social_link' },
-      process.env.JWT_SECRET || 'default_jwt_secret',
+      env.JWT_SECRET,
       { expiresIn: '5m' }
     );
     passport.authenticate('google', {
@@ -152,11 +172,11 @@ router.get('/discord/link', (req: Request, res: Response, next: NextFunction) =>
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_jwt_secret') as any;
+    const decoded = jwt.verify(token, env.JWT_SECRET) as any;
     const userId = decoded.id;
     const linkToken = jwt.sign(
       { userId, purpose: 'social_link' },
-      process.env.JWT_SECRET || 'default_jwt_secret',
+      env.JWT_SECRET,
       { expiresIn: '5m' }
     );
     passport.authenticate('discord', {

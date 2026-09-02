@@ -1,7 +1,6 @@
 import express from 'express';
 import * as paymentController from './controllers/paymentController';
 import * as paymentGdprController from './controllers/paymentGdprController';
-import * as stripeController from './controllers/stripeController';
 import { authenticateJWT, requireAdmin } from '../../commons/middlewares/authMiddleware';
 import { sanitizeInputs } from '../../commons/middlewares/sanitizeMiddleware';
 import { validatePaymentConfig } from '../../config/paymentConfig';
@@ -57,15 +56,6 @@ router.post('/paypal/capture', paymentController.capturePayPalPayment);
 router.post('/paypal/cancel', paymentController.cancelPayPalPayment);
 router.get('/paypal/confirm', paymentController.confirmPayPalPayment);
 
-// Routes Stripe Connect (onboarding + checkout + refund)
-// Note : POST /api/payments/stripe/webhook est monté DIRECTEMENT dans app.ts
-// avec express.raw() — il n'apparaît pas ici car il doit by-pass express.json().
-router.post('/stripe/create-account', stripeController.createStripeAccount);
-router.post('/stripe/account-session', stripeController.createStripeAccountSession);
-router.get('/stripe/account-status', stripeController.checkStripeAccountStatus);
-router.get('/stripe/verify-session', stripeController.verifyStripeSession);
-router.post('/stripe/checkout', stripeController.initiateStripeCheckout);
-router.post('/stripe/:paymentId/refund', validateRefundRequest, stripeController.refundStripePaymentEndpoint);
 
 // Routes avec paramètres ensuite
 router.post('/:paymentId/refund', validateRefundRequest, paymentController.refundPayment);

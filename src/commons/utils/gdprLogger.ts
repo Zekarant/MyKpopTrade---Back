@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import logger from './logger';
 import { EncryptionService } from './encryptionService';
 import User from '../../models/userModel';
@@ -148,10 +149,20 @@ export class GdprLogger {
    * @returns true si un seuil d'alerte est atteint
    */
   static checkSuspiciousActivity(userId: string, resourceType: string, ip: string): boolean {
-    // Créer une empreinte unique pour cette combinaison d'utilisateur et d'IP
-    const key = EncryptionService.generateTransactionHash(`${userId}:${ip}:${resourceType}`, Date.now());
-    
+    // Empreinte STABLE pour la combinaison utilisateur + IP + ressource.
+    //
+    // Elle passait auparavant par generateTransactionHash(), qui incorpore
+    // Date.now() et Math.random() : la clé était donc différente à chaque appel,
+    // le compteur ne retrouvait jamais d'enregistrement et la détection ne s'est
+    // jamais déclenchée — tout en faisant croître la Map à chaque requête.
+    const key = crypto
+      .createHash('sha256')
+      .update(`${userId}:${ip}:${resourceType}`)
+      .digest('hex');
+
     const now = new Date();
+
+    this.pruneExpiredCounts(now);
     const record = this.requestCounts.get(key);
     
     if (!record) {
@@ -176,6 +187,26 @@ export class GdprLogger {
     }
     
     return false;
+  }
+
+  /**
+   * Supprime les compteurs sortis de la fenêtre de surveillance.
+   * Sans cette purge, la Map conserve une entrée par combinaison
+   * utilisateur/IP/ressource pour toute la durée de vie du process.
+   */
+  private static pruneExpiredCounts(now: Date): void {
+    for (const [key, record] of this.requestCounts) {
+      if (now.getTime() - record.firstSeen.getTime() > this.TIME_WINDOW_MS) {
+        this.requestCounts.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Réinitialise les compteurs. Réservé aux tests.
+   */
+  static resetSuspiciousActivityCounters(): void {
+    this.requestCounts.clear();
   }
 
   /**

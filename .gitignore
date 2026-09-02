@@ -12,8 +12,11 @@ yarn-error.log*
 
 # Dependencies
 node_modules/
-package-lock.json
 yarn.lock
+# package-lock.json est volontairement versionné : il garantit des installations
+# reproductibles (même arbre de dépendances en CI et en production).
+# Il était listé ici alors qu'il est suivi depuis le début — règle sans effet
+# et trompeuse.
 
 # Build output
 dist/

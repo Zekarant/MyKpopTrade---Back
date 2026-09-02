@@ -14,18 +14,13 @@ export const dataBreachDetection = (resourceType: string) => {
         return next();
       }
       
-      // Récupérer l'adresse IP, en tenant compte des proxys
-      const ip = req.headers['x-forwarded-for'] || 
-                req.connection.remoteAddress || 
-                req.socket.remoteAddress || 
-                'unknown';
-      
-      // Utiliser le GdprLogger existant pour vérifier les activités suspectes
-      const isSuspicious = GdprLogger.checkSuspiciousActivity(
-        userId, 
-        resourceType, 
-        typeof ip === 'string' ? ip : Array.isArray(ip) ? ip[0] : 'unknown'
-      );
+      // `req.ip` résolu par Express selon le réglage `trust proxy` (cf. app.ts).
+      // On lisait auparavant l'en-tête X-Forwarded-For brut : le client la
+      // contrôle, il suffisait donc de la faire varier à chaque requête pour
+      // rendre le comptage par IP inopérant.
+      const ip = req.ip || 'unknown';
+
+      const isSuspicious = GdprLogger.checkSuspiciousActivity(userId, resourceType, ip);
       
       // Si activité suspecte, ralentir les requêtes mais ne pas bloquer
       if (isSuspicious) {

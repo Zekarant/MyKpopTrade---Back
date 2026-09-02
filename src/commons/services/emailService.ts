@@ -1,16 +1,26 @@
-import nodemailer from 'nodemailer';
+import nodemailer, { type Transporter } from 'nodemailer';
 import { IUser } from '../../models/userModel';
-import dotenv from 'dotenv';
+import env from '../../config/env';
 
-dotenv.config();
+const BASE_URL = env.FRONTEND_URL;
+const FROM_EMAIL = env.FROM_EMAIL;
 
-const BASE_URL = process.env.FRONTEND_URL || 'http://localhost:8080';
-const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@mykpoptrade.com';
+/**
+ * Transporteur mémoïsé.
+ *
+ * Il était auparavant reconstruit à chaque envoi : en développement cela
+ * déclenchait un appel réseau à Ethereal par email (lent et soumis à quota), et
+ * en production cela ouvrait un nouveau pool SMTP à chaque fois, sans jamais
+ * réutiliser de connexion. On le construit donc une seule fois.
+ *
+ * La promesse est mise en cache (et non le transporteur résolu) pour que des
+ * envois concurrents au démarrage partagent la même initialisation.
+ */
+let transporterPromise: Promise<Transporter> | null = null;
 
-// Création du transporteur d'emails
-const createTransporter = async () => {
-  // En développement, créer un compte Ethereal temporaire
-  if (process.env.NODE_ENV !== 'production') {
+const buildTransporter = async (): Promise<Transporter> => {
+  // Hors production : compte Ethereal jetable, aucun email réellement délivré.
+  if (env.NODE_ENV !== 'production') {
     const testAccount = await nodemailer.createTestAccount();
     return nodemailer.createTransport({
       host: 'smtp.ethereal.email',
@@ -18,18 +28,30 @@ const createTransporter = async () => {
       secure: false,
       auth: {
         user: testAccount.user,
-        pass: testAccount.pass,
-      },
-    });
-  } else {
-    return nodemailer.createTransport({
-      service: process.env.EMAIL_SERVICE,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
+        pass: testAccount.pass
+      }
     });
   }
+
+  return nodemailer.createTransport({
+    service: env.EMAIL_SERVICE,
+    auth: {
+      user: env.EMAIL_USER,
+      pass: env.EMAIL_PASS
+    },
+    pool: true
+  });
+};
+
+const createTransporter = async (): Promise<Transporter> => {
+  if (!transporterPromise) {
+    transporterPromise = buildTransporter().catch((error) => {
+      // Ne pas mettre en cache un échec : le prochain envoi doit pouvoir réessayer.
+      transporterPromise = null;
+      throw error;
+    });
+  }
+  return transporterPromise;
 };
 
 /**

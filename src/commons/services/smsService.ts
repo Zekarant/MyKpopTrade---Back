@@ -1,17 +1,17 @@
 import twilio from 'twilio';
-import dotenv from 'dotenv';
-
-dotenv.config();
+import crypto from 'crypto';
+import env from '../../config/env';
+import logger from '../utils/logger';
 
 // Configuration Twilio
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const fromPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
-const smsEnabled = process.env.SMS_ENABLED === 'true';
+const accountSid = env.TWILIO_ACCOUNT_SID;
+const authToken = env.TWILIO_AUTH_TOKEN;
+const fromPhoneNumber = env.TWILIO_PHONE_NUMBER;
+const smsEnabled = env.SMS_ENABLED;
 
 // Client Twilio (seulement si la configuration est disponible)
-const client = smsEnabled && accountSid && authToken ? 
-  twilio(accountSid, authToken) : 
+const client = smsEnabled && accountSid && authToken ?
+  twilio(accountSid, authToken) :
   null;
 
 /**
@@ -30,17 +30,33 @@ export const sendVerificationSMS = async (phoneNumber: string, code: string): Pr
         to: phoneNumber
       });
     } catch (error) {
-      console.error('Erreur lors de l\'envoi du SMS:', error);
+      logger.error('Échec de l\'envoi du SMS Twilio', {
+        error: error instanceof Error ? error.message : String(error),
+        phoneNumber
+      });
       throw new Error('Impossible d\'envoyer le SMS. Veuillez réessayer plus tard.');
     }
-  } else {
-    // Mode développement - simulation d'envoi
+    return;
   }
+
+  // Hors configuration Twilio : on trace le code pour rendre le parcours
+  // testable en développement. `code` n'est pas dans la liste des champs
+  // masqués du logger, c'est volontaire ici et sans risque : ce chemin est
+  // inatteignable dès que SMS_ENABLED est vrai.
+  logger.warn('SMS désactivé — code de vérification non envoyé', {
+    phoneNumber,
+    simulatedCode: code
+  });
 };
 
 /**
- * Génère un code de vérification à 6 chiffres
+ * Génère un code de vérification à 6 chiffres.
+ *
+ * `crypto.randomInt` et non `Math.random()` : ce code est un facteur
+ * d'authentification. `Math.random()` n'est pas cryptographiquement sûr — son
+ * état interne est reconstituable à partir de quelques sorties observées, ce qui
+ * rendait les codes suivants prédictibles (CWE-338).
  */
 export const generateVerificationCode = (): string => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 };

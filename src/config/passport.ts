@@ -4,9 +4,31 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as FacebookStrategy } from 'passport-facebook';
 import { Strategy as DiscordStrategy } from 'passport-discord';
 import User from '../models/userModel';
-import dotenv from 'dotenv';
+import crypto from 'crypto';
+import env from './env';
 
-dotenv.config();
+/**
+ * Génère le mot de passe d'un compte créé via authentification sociale.
+ *
+ * L'utilisateur ne connaît jamais cette valeur : il se connecte via son
+ * fournisseur, ou définit un vrai mot de passe via « mot de passe oublié ».
+ * Elle doit donc être imprédictible, et non issue de `Math.random()` — qui
+ * n'est pas cryptographiquement sûr (CWE-338). Comme /auth/login n'interdit pas
+ * la connexion par mot de passe sur un compte social, une valeur prédictible
+ * ouvrait un chemin de prise de contrôle de compte.
+ */
+function generateUnusablePassword(): string {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+/**
+ * Nom d'utilisateur provisoire pour un compte social.
+ * `Date.now()` seul collisionnait dès deux inscriptions dans la même
+ * milliseconde, sur un champ unique.
+ */
+function generateProvisionalUsername(): string {
+  return `user_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+}
 
 // Custom state store that bypasses session-based state verification
 // We handle state verification manually via JWT linkToken
@@ -25,7 +47,7 @@ export const initializePassport = (): void => {
     new JwtStrategy(
       {
         jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-        secretOrKey: process.env.JWT_SECRET || 'default_jwt_secret'
+        secretOrKey: env.JWT_SECRET
       },
       async (payload, done) => {
         try {
@@ -108,9 +130,9 @@ export const initializePassport = (): void => {
               } else {
                 isNew = true;
                 user = new User({
-                  username: `user_${Date.now()}`,
+                  username: generateProvisionalUsername(),
                   email,
-                  password: Math.random().toString(36).substring(2),
+                  password: generateUnusablePassword(),
                   isEmailVerified: true,
                   socialAuth: {
                     google: {
@@ -167,9 +189,9 @@ export const initializePassport = (): void => {
               }
             } else {
               user = new User({
-                username: `user_${Date.now()}`,
+                username: generateProvisionalUsername(),
                 email,
-                password: Math.random().toString(36).substring(2),
+                password: generateUnusablePassword(),
                 isEmailVerified: true,
                 socialAuth: {
                   facebook: {
@@ -273,9 +295,9 @@ export const initializePassport = (): void => {
                 }
               } else {
                 user = new User({
-                  username: `user_${Date.now()}`,
+                  username: generateProvisionalUsername(),
                   email,
-                  password: Math.random().toString(36).substring(2),
+                  password: generateUnusablePassword(),
                   isEmailVerified: true,
                   socialAuth: {
                     discord: {

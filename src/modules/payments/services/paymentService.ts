@@ -4,7 +4,6 @@ import { PayPalRefundError } from './paypalRefundService';
 import { applyRefundToPayment, notifyRefund, remainingRefundable } from './refundLedger';
 import { SELLER_BLOCK_MESSAGES, SellerBlockReason } from './paypalPartnerService';
 import { SellerNotReadyError } from './paypalPaymentService';
-import { refundStripePayment } from './stripeRefundService';
 import Payment from '../../../models/paymentModel';
 import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
@@ -495,8 +494,14 @@ export async function processRefund({
     throw new HttpError(404, 'Paiement non trouvé');
   }
 
+  // Stripe a été retiré de la plateforme. Les paiements historiques encaissés par
+  // ce canal restent lisibles, mais ne peuvent plus être remboursés depuis l'API :
+  // le remboursement se fait alors depuis le tableau de bord Stripe du vendeur.
   if (payment.paymentMethod === 'stripe') {
-    return refundStripePayment({ userId, paymentId, amount, reason, password });
+    throw new HttpError(
+      409,
+      "Ce paiement a été encaissé via Stripe, qui n'est plus pris en charge. Le remboursement doit être effectué depuis votre tableau de bord Stripe."
+    );
   }
 
   const isSeller = payment.seller.toString() === userId;

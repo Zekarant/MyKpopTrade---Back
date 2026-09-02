@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import User, { IUser } from '../../../models/userModel';
 
 /**
@@ -28,13 +29,20 @@ export const findOrCreateSocialUser = async (
         await user.save({ validateBeforeSave: false });
       }
     } else {
-      // Créer un nouvel utilisateur
-      const username = `${provider}_${Date.now()}`;
+      // Créer un nouvel utilisateur.
+      // Le suffixe aléatoire évite une collision sur `username` (champ unique)
+      // entre deux inscriptions dans la même milliseconde.
+      const username = `${provider}_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
 
       user = new User({
         username,
         email,
-        password: Math.random().toString(36).substring(2),
+        // Mot de passe que l'utilisateur ne connaîtra jamais : il se connecte via
+        // son fournisseur, ou en définit un via « mot de passe oublié ». Doit
+        // être imprédictible — `Math.random()` n'est pas un CSPRNG (CWE-338), et
+        // /auth/login n'interdit pas la connexion par mot de passe sur un compte
+        // social, ce qui en faisait un chemin de prise de contrôle de compte.
+        password: crypto.randomBytes(32).toString('hex'),
         isEmailVerified: true,
         // Flag à `false` pour les comptes OAuth fraîchement créés : ils n'ont pas
         // pu remplir téléphone / RGPD à l'inscription, le front les redirigera

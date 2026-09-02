@@ -37,7 +37,7 @@ const SELLER_MONTHLY_VOLUME_RANGE = {
 
 /**
  * Merchant Category Code déclaré pour tous les vendeurs — même code que le
- * `business_profile.mcc` envoyé à Stripe (cf. stripeConnectService.ts).
+ * profil commerçant du vendeur.
  * « Hobby, Toy, and Game Shops » (Magasins de loisirs, jouets et jeux) : le
  * plus proche de la revente de cartes/goodies K-pop entre particuliers,
  * confirmé présent dans la vraie liste MCC du dropdown PayPal.
@@ -155,8 +155,7 @@ export class PayPalPartnerService {
       // « Devise / Ventes mensuelles / Site web » vu à l'onboarding) — vérifié
       // accepté par l'API sandbox (`names` n'est pas requis pour un compte
       // INDIVIDUAL). Pour le secteur d'activité, seul `mcc_code` est envoyé
-      // (`5945` = Hobby, Toy, and Game Shops — même code que côté Stripe, cf.
-      // stripeConnectService.ts) : `category`/`subcategory` ont été retirés
+      // (`5945` = Hobby, Toy, and Game Shops) : `category`/`subcategory` ont été retirés
       // après avoir constaté en sandbox qu'ils font afficher un secteur sans
       // rapport (ex. « Électriciens ») quand on leur donne un code MCC —
       // ce sont visiblement des champs distincts, pas de table de

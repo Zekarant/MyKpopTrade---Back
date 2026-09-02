@@ -1,8 +1,30 @@
 import { Request, Response } from 'express';
+import crypto from 'crypto';
 import User from '../../../models/userModel';
 import { sendVerificationSMS, generateVerificationCode } from '../../../commons/services/smsService';
 import { validatePhoneNumber } from '../../../commons/utils/validators';
 import logger from '../../../commons/utils/logger';
+
+/**
+ * Compare le code attendu et le code fourni à temps constant.
+ *
+ * `!==` s'arrête au premier caractère différent : le temps de réponse fuit la
+ * longueur du préfixe correct. Le gain est marginal sur un code à 6 chiffres
+ * derrière un rate limiter, mais comparer un secret en temps constant est le
+ * comportement attendu par défaut.
+ */
+function isVerificationCodeEqual(expected: string, provided: unknown): boolean {
+  if (typeof provided !== 'string') return false;
+
+  const expectedBuffer = Buffer.from(expected, 'utf8');
+  const providedBuffer = Buffer.from(provided, 'utf8');
+
+  // timingSafeEqual exige des longueurs identiques ; on compare donc la longueur
+  // séparément (elle n'est pas secrète : le code fait toujours 6 chiffres).
+  if (expectedBuffer.length !== providedBuffer.length) return false;
+
+  return crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+}
 
 /**
  * Envoie un code de vérification par SMS au numéro de téléphone de l'utilisateur
@@ -107,7 +129,7 @@ export const verifyPhoneNumber = async (req: Request, res: Response): Promise<vo
       return;
     }
     
-    if (user.phoneVerificationCode !== code) {
+    if (!isVerificationCodeEqual(user.phoneVerificationCode, code)) {
       res.status(400).json({ message: 'Code de vérification incorrect' });
       return;
     }

@@ -1,15 +1,47 @@
 import crypto from 'crypto';
-import dotenv from 'dotenv';
+import env from '../../config/env';
 
-dotenv.config();
+const ENCRYPTION_KEY = env.ENCRYPTION_KEY;
 
-// Récupérer les clés depuis les variables d'environnement
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '';
-const ENCRYPTION_IV = process.env.ENCRYPTION_IV || '';
+/** AES-256 exige une clé de 32 octets et un IV de 16 octets. */
+const KEY_BYTES = 32;
+const IV_BYTES = 16;
 
-if (!ENCRYPTION_KEY || !ENCRYPTION_IV || ENCRYPTION_KEY.length < 32 || ENCRYPTION_IV.length < 16) {
-  throw new Error('Les clés de chiffrement ne sont pas correctement configurées');
-}
+/**
+ * Préfixe marquant le format actuel : `v2:<iv hex>:<chiffré hex>`.
+ *
+ * Le format d'origine réutilisait un IV FIXE lu dans `ENCRYPTION_IV`, ce qui
+ * rendait le chiffrement déterministe : deux valeurs identiques produisaient le
+ * même chiffré, révélant leur égalité à qui lit la base. Le nouveau format tire
+ * un IV aléatoire par opération. Le déchiffrement reconnaît les deux formats
+ * pour que les données déjà en base restent lisibles.
+ */
+const CURRENT_FORMAT_PREFIX = 'v2';
+
+/** IV historique, uniquement pour déchiffrer les données antérieures. */
+const legacyIv = (): Buffer | null => {
+  const raw = process.env.ENCRYPTION_IV;
+  if (!raw || raw.length < IV_BYTES) return null;
+  return Buffer.from(raw.slice(0, IV_BYTES), 'utf8');
+};
+
+/**
+ * Clé de chiffrement, résolue à l'appel et non à l'import.
+ *
+ * `ENCRYPTION_KEY` est obligatoire en production (cf. config/env.ts) mais
+ * optionnelle ailleurs : vérifier à l'import ferait échouer le chargement du
+ * module dans les tests qui ne chiffrent rien. L'erreur est donc levée au
+ * premier usage réel, avec un message actionnable.
+ */
+const encryptionKey = (): Buffer => {
+  if (!ENCRYPTION_KEY) {
+    throw new Error(
+      'ENCRYPTION_KEY est requise pour chiffrer ou déchiffrer des données personnelles. ' +
+      'Générer une clé de 32 caractères minimum : openssl rand -hex 32'
+    );
+  }
+  return Buffer.from(ENCRYPTION_KEY.slice(0, KEY_BYTES), 'utf8');
+};
 
 /**
  * Service de chiffrement pour les données sensibles (conforme RGPD)
@@ -25,15 +57,14 @@ export class EncryptionService {
       // Convertir les données en chaîne JSON si nécessaire
       const dataString = typeof data === 'object' ? JSON.stringify(data) : String(data);
       
-      // Utiliser les 32 premiers caractères de la clé et les 16 premiers caractères de l'IV
-      const key = Buffer.from(ENCRYPTION_KEY.slice(0, 32), 'utf8');
-      const iv = Buffer.from(ENCRYPTION_IV.slice(0, 16), 'utf8');
-      
-      const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+      // IV aléatoire par opération, transporté avec le chiffré.
+      const iv = crypto.randomBytes(IV_BYTES);
+
+      const cipher = crypto.createCipheriv('aes-256-cbc', encryptionKey(), iv);
       let encrypted = cipher.update(dataString, 'utf8', 'hex');
       encrypted += cipher.final('hex');
-      
-      return encrypted;
+
+      return `${CURRENT_FORMAT_PREFIX}:${iv.toString('hex')}:${encrypted}`;
     } catch (error) {
       console.error('Erreur lors du chiffrement:', error);
       throw new Error('Erreur lors du chiffrement des données');
@@ -47,12 +78,27 @@ export class EncryptionService {
    */
   static decrypt(encryptedData: string): any {
     try {
-      // Utiliser les 32 premiers caractères de la clé et les 16 premiers caractères de l'IV
-      const key = Buffer.from(ENCRYPTION_KEY.slice(0, 32), 'utf8');
-      const iv = Buffer.from(ENCRYPTION_IV.slice(0, 16), 'utf8');
-      
-      const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-      let decrypted = decipher.update(encryptedData, 'hex', 'utf8');
+      const parts = encryptedData.split(':');
+      let iv: Buffer;
+      let payload: string;
+
+      if (parts.length === 3 && parts[0] === CURRENT_FORMAT_PREFIX) {
+        iv = Buffer.from(parts[1], 'hex');
+        payload = parts[2];
+      } else {
+        // Format historique : IV fixe issu de l'environnement.
+        const fallbackIv = legacyIv();
+        if (!fallbackIv) {
+          throw new Error(
+            "Donnée chiffrée au format historique mais ENCRYPTION_IV n'est plus configurée : impossible de la déchiffrer."
+          );
+        }
+        iv = fallbackIv;
+        payload = encryptedData;
+      }
+
+      const decipher = crypto.createDecipheriv('aes-256-cbc', encryptionKey(), iv);
+      let decrypted = decipher.update(payload, 'hex', 'utf8');
       decrypted += decipher.final('utf8');
       
       // Tenter de parser en JSON si possible
@@ -65,16 +111,6 @@ export class EncryptionService {
       console.error('Erreur lors du déchiffrement:', error);
       throw new Error('Erreur lors du déchiffrement des données');
     }
-  }
-  
-  /**
-   * Génère un hash pour les identifiants de transaction
-   */
-  static generateTransactionHash(userId: string, timestamp: number): string {
-    return crypto
-      .createHash('sha256')
-      .update(`${userId}-${timestamp}-${Math.random()}`)
-      .digest('hex');
   }
   
   /**

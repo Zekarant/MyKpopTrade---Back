@@ -117,9 +117,10 @@ export async function createProductForSeller({
   imageUrls: string[];
   uploadedFiles?: Express.Multer.File[];
 }) {
-  // Vérifier que le vendeur peut encaisser via au moins un des deux PSP
+  // Vérifier que le vendeur peut encaisser. PayPal est désormais le seul canal :
+  // Stripe a été retiré de la plateforme.
   const seller = await User.findById(sellerId).select(
-    'paypalConnected paypalMerchantId paypalOnboarding stripeAccountId stripePayoutsEnabled'
+    'paypalConnected paypalMerchantId paypalOnboarding'
   );
   if (!seller) {
     cleanupUploadedFiles(uploadedFiles);
@@ -133,13 +134,11 @@ export async function createProductForSeller({
     seller.paypalOnboarding?.consentGranted
   );
 
-  const canReceiveViaStripe = Boolean(seller.stripeAccountId && seller.stripePayoutsEnabled);
-
-  if (!canReceiveViaPayPal && !canReceiveViaStripe) {
+  if (!canReceiveViaPayPal) {
     cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(
       403,
-      'Vous devez connecter votre compte PayPal ou Stripe avant de pouvoir vendre. Rendez-vous dans Paramètres > Paiements.',
+      'Vous devez connecter votre compte PayPal avant de pouvoir vendre. Rendez-vous dans Paramètres > Paiements.',
       'SELLER_PAYOUT_ACCOUNT_REQUIRED'
     );
   }
