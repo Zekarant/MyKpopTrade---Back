@@ -155,6 +155,8 @@ export async function fetchMyProfile(userId: string) {
     profile: {
       id: user._id,
       username: user.username,
+      firstName: user.firstName,
+      lastName: user.lastName,
       email: user.email,
       role: user.role,
       profilePicture: user.profilePicture,

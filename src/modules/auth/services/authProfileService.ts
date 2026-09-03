@@ -58,6 +58,8 @@ export async function updateProfileData(userId: string, body: any) {
 
   const {
     username,
+    firstName,
+    lastName,
     email,
     paypalEmail,
     phoneNumber,
@@ -145,6 +147,14 @@ export async function updateProfileData(userId: string, body: any) {
     user.markModified('paypalEmail');
   }
 
+  // Chaîne vide = effacement : on stocke `undefined` pour retirer le champ.
+  if (firstName !== undefined) {
+    user.firstName = firstName.trim().substring(0, 100) || undefined;
+  }
+  if (lastName !== undefined) {
+    user.lastName = lastName.trim().substring(0, 100) || undefined;
+  }
+
   if (bio !== undefined) user.bio = bio.substring(0, 500);
   if (location !== undefined) user.location = location.substring(0, 100);
   if (socialLinks) user.socialLinks = { ...user.socialLinks, ...socialLinks };
@@ -190,6 +200,8 @@ export async function updateProfileData(userId: string, body: any) {
     user: {
       id: user._id,
       username: user.username,
+      firstName: user.firstName,
+      lastName: user.lastName,
       email: user.email,
       paypalEmail: user.paypalEmail,
       phoneNumber: user.phoneNumber,

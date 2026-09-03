@@ -6,6 +6,10 @@ import { Strategy as DiscordStrategy } from 'passport-discord';
 import User from '../models/userModel';
 import crypto from 'crypto';
 import env from './env';
+import {
+  generateUniqueUsername,
+  splitDisplayName
+} from '../modules/auth/services/usernameService';
 
 /**
  * Génère le mot de passe d'un compte créé via authentification sociale.
@@ -21,13 +25,22 @@ function generateUnusablePassword(): string {
   return crypto.randomBytes(32).toString('hex');
 }
 
-/**
- * Nom d'utilisateur provisoire pour un compte social.
- * `Date.now()` seul collisionnait dès deux inscriptions dans la même
- * milliseconde, sur un champ unique.
- */
-function generateProvisionalUsername(): string {
-  return `user_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+/** Valeur par défaut de `profilePicture` déclarée dans le schéma utilisateur. */
+const DEFAULT_PROFILE_PICTURE = 'https://mykpoptrade.com/images/avatar-default.png';
+
+/** Complète prénom / nom et photo sans écraser une valeur déjà saisie. */
+function fillMissingIdentity(
+  user: any,
+  identity: { firstName?: string; lastName?: string; picture?: string }
+): void {
+  if (!user.firstName && identity.firstName) user.firstName = identity.firstName;
+  if (!user.lastName && identity.lastName) user.lastName = identity.lastName;
+
+  const hasCustomPicture =
+    user.profilePicture && user.profilePicture !== DEFAULT_PROFILE_PICTURE;
+  if (!hasCustomPicture && identity.picture) {
+    user.profilePicture = identity.picture;
+  }
 }
 
 // Custom state store that bypasses session-based state verification
@@ -101,6 +114,11 @@ export const initializePassport = (): void => {
                 email,
                 name: profile.displayName
               };
+              fillMissingIdentity(user, {
+                firstName: profile.name?.givenName,
+                lastName: profile.name?.familyName,
+                picture: profile.photos?.[0]?.value
+              });
               await user.save({ validateBeforeSave: false });
               return done(null, user, { isLink: true });
             }
@@ -124,16 +142,33 @@ export const initializePassport = (): void => {
                     name: profile.displayName
                   };
                   user.isEmailVerified = true;
+                  fillMissingIdentity(user, {
+                    firstName: profile.name?.givenName,
+                    lastName: profile.name?.familyName,
+                    picture: profile.photos?.[0]?.value
+                  });
                 } else if (user.socialAuth.google.id !== profile.id) {
                   return done(null, false, { message: 'email_linked_other_google' });
                 }
               } else {
                 isNew = true;
+                const { firstName, lastName } = splitDisplayName(profile.displayName);
+
                 user = new User({
-                  username: generateProvisionalUsername(),
+                  username: await generateUniqueUsername({
+                    displayName: profile.displayName,
+                    givenName: profile.name?.givenName,
+                    familyName: profile.name?.familyName,
+                    email
+                  }),
+                  firstName: profile.name?.givenName || firstName,
+                  lastName: profile.name?.familyName || lastName,
+                  profilePicture: profile.photos?.[0]?.value || undefined,
                   email,
                   password: generateUnusablePassword(),
                   isEmailVerified: true,
+                  // Le front redirige vers /profile-completion tant que `false`.
+                  profileCompleted: false,
                   socialAuth: {
                     google: {
                       id: profile.id,
@@ -185,14 +220,30 @@ export const initializePassport = (): void => {
                   name: profile.displayName
                 };
                 user.isEmailVerified = true;
+                fillMissingIdentity(user, {
+                  firstName: (profile.name as any)?.givenName,
+                  lastName: (profile.name as any)?.familyName,
+                  picture: profile.photos?.[0]?.value
+                });
                 await user.save({ validateBeforeSave: false });
               }
             } else {
+              const { firstName, lastName } = splitDisplayName(profile.displayName);
+
               user = new User({
-                username: generateProvisionalUsername(),
+                username: await generateUniqueUsername({
+                  displayName: profile.displayName,
+                  givenName: (profile.name as any)?.givenName,
+                  familyName: (profile.name as any)?.familyName,
+                  email
+                }),
+                firstName: (profile.name as any)?.givenName || firstName,
+                lastName: (profile.name as any)?.familyName || lastName,
+                profilePicture: profile.photos?.[0]?.value || undefined,
                 email,
                 password: generateUnusablePassword(),
                 isEmailVerified: true,
+                profileCompleted: false,
                 socialAuth: {
                   facebook: {
                     id: profile.id,
@@ -295,10 +346,17 @@ export const initializePassport = (): void => {
                 }
               } else {
                 user = new User({
-                  username: generateProvisionalUsername(),
+                  username: await generateUniqueUsername({
+                    displayName: profile.global_name || profile.username,
+                    email
+                  }),
+                  profilePicture: profile.avatar
+                    ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
+                    : undefined,
                   email,
                   password: generateUnusablePassword(),
                   isEmailVerified: true,
+                  profileCompleted: false,
                   socialAuth: {
                     discord: {
                       id: profile.id,

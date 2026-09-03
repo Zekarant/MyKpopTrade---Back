@@ -4,6 +4,9 @@ import crypto from 'crypto';
 
 export interface IUser extends Document {
   username: string;
+  /** Distincts de `legalName`, qui sert au pré-remplissage PayPal. */
+  firstName?: string;
+  lastName?: string;
   email: string;
   password: string;
   isActive: boolean;
@@ -51,14 +54,17 @@ export interface IUser extends Document {
     google?: {
       id: string;
       email: string;
+      name?: string;
     };
     facebook?: {
       id: string;
       email: string;
+      name?: string;
     };
     discord?: {
       id: string;
       email: string;
+      username?: string;
     };
   };
   emailVerificationToken?: string;
@@ -152,6 +158,16 @@ const UserSchema: Schema = new Schema({
     unique: true,
     trim: true,
     maxlength: [50, 'Le nom d\'utilisateur ne peut pas dépasser 50 caractères']
+  },
+  firstName: {
+    type: String,
+    trim: true,
+    maxlength: [100, 'Le prénom ne peut pas dépasser 100 caractères']
+  },
+  lastName: {
+    type: String,
+    trim: true,
+    maxlength: [100, 'Le nom ne peut pas dépasser 100 caractères']
   },
   email: {
     type: String,
@@ -359,17 +375,22 @@ const UserSchema: Schema = new Schema({
     }
   },
   socialAuth: {
+    // Mongoose écarte les chemins absents du schéma : `name` / `username`
+    // doivent être déclarés pour être enregistrés.
     google: {
       id: String,
-      email: String
+      email: String,
+      name: String
     },
     facebook: {
       id: String,
-      email: String
+      email: String,
+      name: String
     },
     discord: {
       id: String,
-      email: String
+      email: String,
+      username: String
     }
   },
   emailVerificationToken: String,
