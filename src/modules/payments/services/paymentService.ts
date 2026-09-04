@@ -14,6 +14,7 @@ import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { gt, subtract } from '../../../commons/utils/moneyMath';
 import { recordAuditLog } from '../../../commons/utils/auditService';
+import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 
 const PAYMENT_STATUS = {
   PENDING: 'pending',
@@ -637,6 +638,16 @@ export async function processRefund({
       error: error instanceof Error ? error.message : String(error),
       paymentId,
       userId: userId.substring(0, USER_ID_LOG_PREFIX_LENGTH) + '...'
+    });
+
+    dispatchAdminAlert({
+      event: 'payment.refund_failed',
+      severity: 'critical',
+      title: 'Échec d\'un remboursement PayPal',
+      summary: error instanceof Error ? error.message : String(error),
+      adminTab: 'audit',
+      fields: [{ name: 'Paiement', value: paymentId, inline: true }],
+      data: { paymentId }
     });
 
     if (error instanceof PayPalRefundError) {

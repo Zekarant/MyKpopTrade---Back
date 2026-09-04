@@ -5,8 +5,15 @@ import { sendVerificationResultEmail } from '../../../commons/services/emailServ
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { recordAuditLog } from '../../../commons/utils/auditService';
+import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 
 const VALID_DOCUMENT_TYPES = ['id_card', 'passport', 'driver_license'];
+
+const DOCUMENT_TYPE_LABELS: Record<string, string> = {
+  id_card: 'Carte d\'identité',
+  passport: 'Passeport',
+  driver_license: 'Permis de conduire'
+};
 
 function safelyDeleteDocument(referenceId: string) {
   try {
@@ -91,6 +98,18 @@ export async function submitIdentityVerification({
   logger.info(`Demande de vérification d'identité soumise: ${verification._id}`, {
     userId,
     verificationType: documentType
+  });
+
+  const applicant = await User.findById(userId).select('username');
+
+  dispatchAdminAlert({
+    event: 'verification.submitted',
+    severity: 'warning',
+    title: `Vérification d'identité à examiner : ${applicant?.username || 'utilisateur inconnu'}`,
+    summary: `Document de type « ${DOCUMENT_TYPE_LABELS[documentType] || documentType} » déposé.`,
+    adminTab: 'verifications',
+    fields: [{ name: 'Utilisateur', value: applicant?.username || 'inconnu', inline: true }],
+    data: { verificationId: verification._id, documentType }
   });
 
   return {

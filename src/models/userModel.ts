@@ -28,6 +28,25 @@ export interface IUser extends Document {
   isEmailVerified: boolean;
   isPhoneVerified: boolean;
   accountStatus: 'active' | 'suspended' | 'deleted';
+  suspension?: {
+    reason: string;
+    until?: Date;
+    suspendedAt: Date;
+    suspendedBy?: mongoose.Types.ObjectId;
+  };
+  sanctions?: Array<{
+    action: 'suspend' | 'unsuspend';
+    reason?: string;
+    until?: Date;
+    at: Date;
+    by?: mongoose.Types.ObjectId;
+  }>;
+  adminNotes?: Array<{
+    _id?: mongoose.Types.ObjectId;
+    content: string;
+    author?: mongoose.Types.ObjectId;
+    createdAt: Date;
+  }>;
   role: 'user' | 'moderator' | 'admin';
   lastLogin?: Date;
   bio?: string;
@@ -318,6 +337,33 @@ const UserSchema: Schema = new Schema({
     enum: ['active', 'suspended', 'deleted'],
     default: 'active'
   },
+  suspension: {
+    type: new mongoose.Schema({
+      reason: { type: String, required: true, maxlength: 500 },
+      until: { type: Date },
+      suspendedAt: { type: Date, required: true },
+      suspendedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+    }, { _id: false }),
+    default: undefined
+  },
+  sanctions: {
+    type: [new mongoose.Schema({
+      action: { type: String, enum: ['suspend', 'unsuspend'], required: true },
+      reason: { type: String, maxlength: 500 },
+      until: { type: Date },
+      at: { type: Date, required: true },
+      by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+    }, { _id: false })],
+    default: undefined
+  },
+  adminNotes: {
+    type: [new mongoose.Schema({
+      content: { type: String, required: true, maxlength: 2000 },
+      author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      createdAt: { type: Date, required: true }
+    })],
+    default: undefined
+  },
   lastLogin: {
     type: Date
   },
@@ -505,5 +551,7 @@ UserSchema.methods.generatePasswordResetToken = function(): string {
   this.passwordResetExpires = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 heure
   return token;
 };
+
+UserSchema.index({ accountStatus: 1, 'suspension.until': 1 });
 
 export default mongoose.models.User || mongoose.model<IUser>('User', UserSchema);

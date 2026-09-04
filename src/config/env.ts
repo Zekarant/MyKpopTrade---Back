@@ -40,6 +40,8 @@ const envSchema = z.object({
   EMAIL_PASS: z.string().optional(),
   FROM_EMAIL: z.string().email().default('noreply@mykpoptrade.com'),
   
+  ADMIN_DISCORD_WEBHOOK_URL: z.string().url().optional(),
+
   // SMS
   SMS_ENABLED: z.string().transform(val => val === 'true').default('false'),
   TWILIO_ACCOUNT_SID: z.string().optional(),

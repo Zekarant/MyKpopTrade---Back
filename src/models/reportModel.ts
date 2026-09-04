@@ -1,8 +1,12 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+export type ReportTargetType = 'rating' | 'product' | 'user' | 'post';
+
+export const REPORT_TARGET_TYPES: ReportTargetType[] = ['rating', 'product', 'user', 'post'];
+
 export interface IReport extends Document {
   reporter: mongoose.Types.ObjectId;
-  targetType: 'rating' | 'product';
+  targetType: ReportTargetType;
   targetId: mongoose.Types.ObjectId;
   reason: string;
   details?: string;
@@ -22,12 +26,11 @@ const ReportSchema: Schema = new Schema({
   targetType: {
     type: String,
     required: true,
-    enum: ['rating', 'product']
+    enum: REPORT_TARGET_TYPES
   },
   targetId: {
     type: mongoose.Schema.Types.ObjectId,
-    required: true,
-    refPath: 'targetType'
+    required: true
   },
   reason: {
     type: String,

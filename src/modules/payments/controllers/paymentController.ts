@@ -1,5 +1,9 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
+import {
+  ALERT_BURST_COOLDOWN_MS,
+  dispatchAdminAlert
+} from '../../../commons/services/adminAlertService';
 import { PayPalService } from '../services/paypalService';
 import User from '../../../models/userModel';
 import {
@@ -358,6 +362,17 @@ export const handleWebhook = asyncHandler(async (req: Request, res: Response) =>
         eventType: event.event_type,
         eventId: event.id
       });
+
+      dispatchAdminAlert({
+        event: 'payment.webhook_rejected',
+        severity: 'critical',
+        title: 'Webhook PayPal rejeté (signature invalide)',
+        summary: 'Vérifiez PAYPAL_WEBHOOK_ID. Tant que la signature échoue, aucun paiement n\'est confirmé par webhook.',
+        adminTab: 'audit',
+        fields: [{ name: 'Type d\'évènement', value: String(event.event_type), inline: true }],
+        throttleMs: ALERT_BURST_COOLDOWN_MS
+      });
+
       return res.status(401).json({ message: 'Signature de webhook invalide' });
     }
 

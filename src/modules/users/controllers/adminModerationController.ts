@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import Post from '../../posts/model';
 import AuditLog from '../../../models/auditLogModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
+import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 
 /**
  * Lister tous les posts (admin) avec filtres
@@ -90,6 +91,19 @@ export const adminDeletePost = asyncHandler(async (req: Request, res: Response) 
       authorUsername: (post.author as any)?.username,
       contentPreview: post.content.substring(0, 100)
     }
+  });
+
+  dispatchAdminAlert({
+    event: 'post.deleted',
+    severity: 'info',
+    title: `${post.isReply ? 'Réponse' : 'Post'} supprimé par un administrateur`,
+    summary: reason || 'Suppression par modération',
+    adminTab: 'moderation',
+    fields: [
+      { name: 'Auteur', value: (post.author as any)?.username || 'inconnu', inline: true },
+      { name: 'Contenu', value: post.content.substring(0, 200) }
+    ],
+    data: { postId, isReply: post.isReply }
   });
 
   return res.status(200).json({ message: 'Post supprimé' });

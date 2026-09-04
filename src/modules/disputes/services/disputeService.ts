@@ -6,6 +6,7 @@ import { NotificationService } from '../../notifications/services/notificationSe
 import { processRefund } from '../../payments/services/paymentService';
 import logger from '../../../commons/utils/logger';
 import { recordAuditLog } from '../../../commons/utils/auditService';
+import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 
 const VALID_REASONS: DisputeReason[] = [
   'not_received', 'damaged', 'not_as_described', 'counterfeit',
@@ -146,11 +147,17 @@ export async function openDispute({
   });
 
   // Notifie tous les admins pour qu'ils puissent prendre le litige en main.
-  await NotificationService.notifyAllAdmins({
-    type: 'admin_alert',
+  dispatchAdminAlert({
+    event: 'dispute.opened',
+    severity: 'warning',
     title: 'Nouveau litige à arbitrer',
-    content: `Litige ouvert par ${openedByRole === 'buyer' ? 'l\'acheteur' : 'le vendeur'} (motif : ${reason}).`,
-    link: `/admin?tab=disputes&id=${dispute._id}`,
+    summary: `Litige ouvert par ${openedByRole === 'buyer' ? 'l\'acheteur' : 'le vendeur'} (motif : ${reason}).`,
+    adminTab: 'disputes',
+    fields: [
+      { name: 'Ouvert par', value: openedByRole === 'buyer' ? 'Acheteur' : 'Vendeur', inline: true },
+      { name: 'Motif', value: reason, inline: true },
+      { name: 'Description', value: desc }
+    ],
     data: { disputeId: dispute._id, paymentId, reason, openedByRole }
   });
 

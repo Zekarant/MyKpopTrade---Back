@@ -6,6 +6,7 @@ import Conversation from '../../../models/conversationModel';
 import { NotificationService } from '../../notifications/services/notificationService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 
 async function loadUserOr404(userId: string) {
   const user = await User.findById(userId);
@@ -167,6 +168,19 @@ export async function scheduleAccountDeletion(userId: string, confirmation: unkn
     }
   });
 
+  dispatchAdminAlert({
+    event: 'gdpr.deletion_requested',
+    severity: 'warning',
+    title: `Demande de suppression de compte : ${user.username}`,
+    summary: `Le compte sera supprimé le ${deletionDate.toLocaleDateString('fr-FR')} sauf annulation.`,
+    adminTab: 'rgpd',
+    fields: [
+      { name: 'Utilisateur', value: user.username, inline: true },
+      { name: 'Échéance', value: deletionDate.toISOString().slice(0, 10), inline: true }
+    ],
+    data: { userId, scheduledDeletionDate: deletionDate }
+  });
+
   return deletionDate;
 }
 
@@ -200,6 +214,7 @@ export async function anonymizeAccount(userId: string, confirmation: unknown) {
   }
 
   const user = await loadUserOr404(userId);
+  const previousUsername = user.username;
 
   const anonymousId = `anon_${createHash('sha256').update(userId + Date.now().toString()).digest('hex').substring(0, 10)}`;
 
@@ -215,5 +230,15 @@ export async function anonymizeAccount(userId: string, confirmation: unknown) {
 
   logger.info('Données utilisateur anonymisées', {
     userId: userId.substring(0, 5) + '...'
+  });
+
+  dispatchAdminAlert({
+    event: 'gdpr.self_anonymized',
+    severity: 'warning',
+    title: 'Anonymisation demandée par un utilisateur',
+    summary: `${previousUsername} a anonymisé ses données (RGPD Art. 17).`,
+    adminTab: 'rgpd',
+    fields: [{ name: 'Nouvel identifiant', value: anonymousId, inline: true }],
+    data: { userId, anonymousId }
   });
 }

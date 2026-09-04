@@ -7,6 +7,7 @@ import { PayPalPartnerService } from './paypalPartnerService';
 import { applyRefundToPayment, notifyRefund } from './refundLedger';
 import { NotificationService } from '../../notifications/services/notificationService';
 import logger from '../../../commons/utils/logger';
+import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 
 /**
  * Dispatcher + handlers des webhooks PayPal.
@@ -375,6 +376,19 @@ export class PayPalWebhookService {
         isAvailable: true,
         isReserved: false,
         reservedFor: null
+      });
+
+      dispatchAdminAlert({
+        event: 'payment.capture_denied',
+        severity: 'critical',
+        title: 'Capture de paiement refusée par PayPal',
+        summary: `Le paiement de ${payment.amount} ${payment.currency} a échoué, le produit est remis en vente.`,
+        adminTab: 'audit',
+        fields: [
+          { name: 'Montant', value: `${payment.amount} ${payment.currency}`, inline: true },
+          { name: 'Order PayPal', value: String(orderId), inline: true }
+        ],
+        data: { paymentId: payment._id, orderId }
       });
     } catch (error) {
       logger.error('Erreur lors du traitement de l\'événement de capture refusée', { error });

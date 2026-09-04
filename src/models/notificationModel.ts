@@ -8,6 +8,7 @@ export interface INotification extends Document {
     link?: string;
     isRead: boolean;
     data?: any;
+    expiresAt?: Date;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -61,6 +62,9 @@ const NotificationSchema: Schema = new Schema({
     data: {
         type: Schema.Types.Mixed,
         default: null
+    },
+    expiresAt: {
+        type: Date
     }
 }, { timestamps: true });
 

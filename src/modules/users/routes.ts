@@ -22,6 +22,9 @@ router.post('/me/anonymize', authenticateJWT, userPrivacyController.anonymizeUse
 // Routes admin
 router.get('/admin/list', authenticateJWT, requireAdmin, userAdminController.getUsers);
 router.get('/admin/stats', authenticateJWT, requireAdmin, userAdminController.getAdminStats);
+router.get('/admin/stats/timeseries', authenticateJWT, requireAdmin, userAdminController.getStatsTimeseries);
+router.get('/admin/queue', authenticateJWT, requireAdmin, userAdminController.getAdminQueue);
+router.get('/admin/search', authenticateJWT, requireAdmin, userAdminController.adminGlobalSearch);
 router.get('/admin/deletion-requests', authenticateJWT, requireAdmin, userAdminController.getDeletionRequests);
 router.get('/admin/rgpd-stats', authenticateJWT, requireAdmin, userAdminController.getRgpdStats);
 router.get('/admin/export-data', authenticateJWT, requireAdmin, userAdminController.adminExportUserData);
@@ -35,6 +38,10 @@ router.delete('/admin/posts/:postId', authenticateJWT, requireAdmin, adminModera
 // Admin audit
 router.get('/admin/audit', authenticateJWT, requireAdmin, adminModerationController.getAuditLogs);
 router.get('/admin/audit/stats', authenticateJWT, requireAdmin, adminModerationController.getAuditStats);
+
+router.get('/admin/:userId/detail', authenticateJWT, requireAdmin, userAdminController.getUserDetail);
+router.post('/admin/:userId/notes', authenticateJWT, requireAdmin, userAdminController.addUserNote);
+router.delete('/admin/:userId/notes/:noteId', authenticateJWT, requireAdmin, userAdminController.deleteUserNote);
 
 router.post('/admin/:userId/confirm-deletion', authenticateJWT, requireAdmin, userAdminController.confirmDeletion);
 router.post('/admin/:userId/cancel-deletion', authenticateJWT, requireAdmin, userAdminController.adminCancelDeletion);
