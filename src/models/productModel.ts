@@ -1,5 +1,28 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+/**
+ * Analyse IA de modération, déclenchée quand un mot-clé suspect est détecté
+ * dans le titre ou la description (`suspectKeywords.ts`). Consultative sur le
+ * fond (l'admin garde la main), mais `suspect: true` met l'annonce en pause
+ * automatiquement (`isAvailable = false`) le temps de la revue.
+ */
+export interface IProductModerationFlag {
+  suspect: boolean;
+  confidence: 'low' | 'medium' | 'high';
+  reasoning: string;
+  categories: string[];
+  matchedKeywords: string[];
+  keywordsVersion: string;
+  policyVersion: string;
+  model: string;
+  /** Fournisseur IA ayant produit l'analyse (mistral | gemini). */
+  provider: string;
+  analyzedAt: Date;
+  reviewedBy?: mongoose.Types.ObjectId;
+  reviewedAt?: Date;
+  reviewDecision?: 'approved' | 'rejected';
+}
+
 export interface IProduct extends Document {
   seller: mongoose.Types.ObjectId;
   title: string;
@@ -14,6 +37,7 @@ export interface IProduct extends Document {
   albumName?: string;
   images: string[];
   isAvailable: boolean;
+  moderationFlag?: IProductModerationFlag;
   isReserved: boolean;
   isSold: boolean; // Nouveau champ
   soldAt?: Date; // Nouveau champ
@@ -122,6 +146,24 @@ const ProductSchema: Schema = new Schema({
   isAvailable: {
     type: Boolean,
     default: true
+  },
+  moderationFlag: {
+    type: new Schema({
+      suspect: { type: Boolean, required: true },
+      confidence: { type: String, enum: ['low', 'medium', 'high'], required: true },
+      reasoning: { type: String, required: true, maxlength: 500 },
+      categories: [{ type: String, maxlength: 50 }],
+      matchedKeywords: [{ type: String, maxlength: 100 }],
+      keywordsVersion: { type: String, required: true },
+      policyVersion: { type: String, required: true },
+      model: { type: String, required: true },
+      provider: { type: String, required: true },
+      analyzedAt: { type: Date, required: true },
+      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      reviewedAt: { type: Date },
+      reviewDecision: { type: String, enum: ['approved', 'rejected'] }
+    }, { _id: false }),
+    default: undefined
   },
   isReserved: {
     type: Boolean,

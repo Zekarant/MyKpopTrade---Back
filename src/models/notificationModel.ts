@@ -40,7 +40,8 @@ const NotificationSchema: Schema = new Schema({
             'dispute_opened',
             'dispute_message',
             'dispute_resolved',
-            'admin_alert'
+            'admin_alert',
+            'product_flagged'
         ]
     },
     title: {

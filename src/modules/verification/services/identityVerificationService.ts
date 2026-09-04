@@ -93,7 +93,18 @@ export async function submitIdentityVerification({
     expiresAt
   });
 
-  await verification.save();
+  try {
+    await verification.save();
+  } catch (error) {
+    // Doublon détecté par l'index unique (user, status: 'pending') : deux
+    // soumissions quasi simultanées ont toutes les deux passé le contrôle
+    // `existingVerification` ci-dessus avant que l'une des deux n'insère.
+    if ((error as { code?: number }).code === 11000) {
+      safelyDeleteDocument(documentReferenceId);
+      throw new HttpError(409, 'Une demande de vérification est déjà en cours de traitement');
+    }
+    throw error;
+  }
 
   logger.info(`Demande de vérification d'identité soumise: ${verification._id}`, {
     userId,

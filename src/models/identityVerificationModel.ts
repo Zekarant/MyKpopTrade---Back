@@ -48,6 +48,10 @@ const IIdentityVerificationSchema: Schema = new Schema({
     }
 });
 
-IIdentityVerificationSchema.index({ user: 1, expiresAt: 1 }, { unique: true, partialFilterExpression: { status: 'pending' } });
+// Un seul dossier "pending" par utilisateur. L'ancien index incluait `expiresAt`
+// (calculé à la milliseconde près par requête), donc deux soumissions quasi
+// simultanées passaient toutes les deux le contrôle d'unicité et créaient
+// chacune une alerte Discord distincte pour le même utilisateur.
+IIdentityVerificationSchema.index({ user: 1 }, { unique: true, partialFilterExpression: { status: 'pending' } });
 
 export default mongoose.models.IIdentityVerification || mongoose.model<IIdentityVerification>('IIdentityVerification', IIdentityVerificationSchema);

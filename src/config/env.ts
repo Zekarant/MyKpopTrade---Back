@@ -40,7 +40,20 @@ const envSchema = z.object({
   EMAIL_PASS: z.string().optional(),
   FROM_EMAIL: z.string().email().default('noreply@mykpoptrade.com'),
   
-  ADMIN_DISCORD_WEBHOOK_URL: z.string().url().optional(),
+  // Chaîne vide acceptée (webhook non configuré en local) : `isDiscordWebhookConfigured`
+  // fait déjà `Boolean(...)` dessus, donc '' est traité comme "absent" en aval.
+  ADMIN_DISCORD_WEBHOOK_URL: z.union([z.string().url(), z.literal('')]).optional(),
+
+  // Analyse IA (Mistral La Plateforme) : pré-diagnostic de litiges, modération
+  // des annonces suspectes... Clé absente = ces fonctionnalités sont inactives,
+  // le reste de l'API fonctionne normalement. Ce n'est pas une erreur de démarrage.
+  MISTRAL_API_KEY: z.string().optional(),
+  MISTRAL_MODEL: z.string().default('mistral-small-latest'),
+  // Solution de secours si Mistral est indisponible (ex. tier gratuit sans
+  // capacité réservée, cf. docs internes). Optionnelle : sans clé, seul
+  // Mistral est utilisé, comme avant.
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
 
   // SMS
   SMS_ENABLED: z.string().transform(val => val === 'true').default('false'),
@@ -121,5 +134,18 @@ export type Env = z.infer<typeof envSchema>;
 
 // Exporter les variables d'environnement validées
 export const env: Env = envValidation.data;
+
+// Les fixtures de tests (src/tests/helpers/fixtures.ts) créent de vrais utilisateurs
+// et déclenchent les vrais services (dispatchAdminAlert, modération IA, envoi
+// d'email...), y compris avec les identifiants du .env local. Si ce dernier
+// contient un vrai webhook Discord ou de vraies clés Mistral/Gemini, chaque
+// exécution des tests (ou du hook pre-push) spamme le canal Discord réel et/ou
+// appelle les vraies API IA avec des données bidon. Les tests ne doivent
+// jamais pouvoir atteindre un service externe réel, quoi que contienne le .env.
+if (env.NODE_ENV === 'test') {
+  env.ADMIN_DISCORD_WEBHOOK_URL = '';
+  env.MISTRAL_API_KEY = undefined;
+  env.GEMINI_API_KEY = undefined;
+}
 
 export default env;

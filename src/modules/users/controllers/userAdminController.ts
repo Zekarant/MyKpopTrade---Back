@@ -295,8 +295,15 @@ const QUEUE_REASON_LABELS: Record<string, string> = {
   other: 'Autre'
 };
 
+const MODERATION_CATEGORY_LABELS: Record<string, string> = {
+  counterfeit: 'Contrefaçon',
+  off_platform_payment: 'Paiement hors plateforme',
+  prohibited_item: 'Objet interdit',
+  other: 'Autre'
+};
+
 interface QueueItem {
-  kind: 'report' | 'dispute' | 'verification' | 'deletion';
+  kind: 'report' | 'dispute' | 'verification' | 'deletion' | 'product_flagged';
   id: string;
   label: string;
   detail: string;
@@ -306,7 +313,7 @@ interface QueueItem {
 }
 
 export const getAdminQueue = asyncHandler(async (_req: Request, res: Response) => {
-  const [reports, disputes, verifications, deletions] = await Promise.all([
+  const [reports, disputes, verifications, deletions, flaggedProducts] = await Promise.all([
     Report.find({ status: 'pending' })
       .populate('reporter', 'username')
       .select('reason targetType createdAt reporter')
@@ -326,6 +333,15 @@ export const getAdminQueue = asyncHandler(async (_req: Request, res: Response) =
     User.find({ scheduledForDeletion: true })
       .select('username scheduledDeletionDate updatedAt')
       .sort({ scheduledDeletionDate: 1 })
+      .limit(QUEUE_ITEMS_PER_SOURCE),
+    Product.find({
+      isAvailable: false,
+      'moderationFlag.suspect': true,
+      'moderationFlag.reviewDecision': { $exists: false }
+    })
+      .populate('seller', 'username')
+      .select('title moderationFlag seller')
+      .sort({ 'moderationFlag.analyzedAt': 1 })
       .limit(QUEUE_ITEMS_PER_SOURCE)
   ]);
 
@@ -367,14 +383,30 @@ export const getAdminQueue = asyncHandler(async (_req: Request, res: Response) =
       subject: user.username,
       waitingSince: user.updatedAt,
       tab: 'rgpd'
+    })),
+    ...flaggedProducts.map((product: any) => ({
+      kind: 'product_flagged' as const,
+      id: String(product._id),
+      label: 'Annonce suspendue',
+      detail: (product.moderationFlag?.categories || [])
+        .map((category: string) => MODERATION_CATEGORY_LABELS[category] || category)
+        .join(', ') || 'Modération IA',
+      subject: `${product.title} — ${product.seller?.username || 'inconnu'}`,
+      waitingSince: product.moderationFlag?.analyzedAt,
+      tab: 'suspended'
     }))
   ].sort((a, b) => new Date(a.waitingSince).getTime() - new Date(b.waitingSince).getTime());
 
-  const [reportsTotal, disputesTotal, verificationsTotal, deletionsTotal] = await Promise.all([
+  const [reportsTotal, disputesTotal, verificationsTotal, deletionsTotal, suspendedTotal] = await Promise.all([
     Report.countDocuments({ status: 'pending' }),
     Dispute.countDocuments({ status: { $in: DISPUTE_PENDING_STATUSES } }),
     IdentityVerification.countDocuments({ status: 'pending' }),
-    User.countDocuments({ scheduledForDeletion: true })
+    User.countDocuments({ scheduledForDeletion: true }),
+    Product.countDocuments({
+      isAvailable: false,
+      'moderationFlag.suspect': true,
+      'moderationFlag.reviewDecision': { $exists: false }
+    })
   ]);
 
   const oldest = items[0]?.waitingSince;
@@ -385,9 +417,10 @@ export const getAdminQueue = asyncHandler(async (_req: Request, res: Response) =
       report: reportsTotal,
       dispute: disputesTotal,
       verification: verificationsTotal,
-      deletion: deletionsTotal
+      deletion: deletionsTotal,
+      suspended: suspendedTotal
     },
-    total: reportsTotal + disputesTotal + verificationsTotal + deletionsTotal,
+    total: reportsTotal + disputesTotal + verificationsTotal + deletionsTotal + suspendedTotal,
     oldestWaitingSince: oldest ?? null
   });
 });

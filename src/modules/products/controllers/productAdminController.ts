@@ -4,10 +4,13 @@ import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { CSV_EXPORT_ROW_LIMIT, sendCsvDownload, wantsCsv } from '../../../commons/utils/csv';
+import { NotificationService } from '../../notifications/services/notificationService';
+import logger from '../../../commons/utils/logger';
 
 const productStatusLabel = (product: any): string => {
   if (product.isSold) return 'vendu';
   if (product.isReserved) return 'réservé';
+  if (!product.isAvailable && product.moderationFlag?.suspect) return 'suspendu';
   return product.isAvailable ? 'disponible' : 'indisponible';
 };
 
@@ -33,6 +36,10 @@ export const getAllProducts = asyncHandler(async (req: Request, res: Response) =
   if (status === 'available') filter.isAvailable = true;
   if (status === 'sold') filter.isSold = true;
   if (status === 'reserved') filter.isReserved = true;
+  if (status === 'suspended') {
+    filter.isAvailable = false;
+    filter['moderationFlag.suspect'] = true;
+  }
 
   if (type && ['photocard', 'album', 'merch', 'other'].includes(type)) {
     filter.type = type;
@@ -82,11 +89,12 @@ export const getAllProducts = asyncHandler(async (req: Request, res: Response) =
  * Statistiques produits pour l'admin
  */
 export const getProductAdminStats = asyncHandler(async (req: Request, res: Response) => {
-  const [total, available, sold, reserved] = await Promise.all([
+  const [total, available, sold, reserved, suspended] = await Promise.all([
     Product.countDocuments({}),
     Product.countDocuments({ isAvailable: true }),
     Product.countDocuments({ isSold: true }),
-    Product.countDocuments({ isReserved: true })
+    Product.countDocuments({ isReserved: true }),
+    Product.countDocuments({ isAvailable: false, 'moderationFlag.suspect': true })
   ]);
 
   // Produits créés dans les 7 derniers jours
@@ -116,6 +124,7 @@ export const getProductAdminStats = asyncHandler(async (req: Request, res: Respo
     available,
     sold,
     reserved,
+    suspended,
     newProducts,
     recentSales,
     totalRevenue,
@@ -162,4 +171,66 @@ export const adminDeleteProduct = asyncHandler(async (req: Request, res: Respons
   });
 
   return res.status(200).json({ message: 'Produit supprimé par l\'administrateur' });
+});
+
+/**
+ * Revue admin d'une annonce mise en pause par la modération IA.
+ *  - approve: true  -> réannonce (isAvailable = true), l'annonce redevient visible.
+ *  - approve: false -> confirme le signalement, l'annonce reste en pause
+ *    (à supprimer via DELETE /admin/:productId si besoin).
+ */
+export const reviewFlaggedProduct = asyncHandler(async (req: Request, res: Response) => {
+  const productId = req.params.productId as string;
+  const adminId = (req as any).user.id;
+  const { approve } = req.body ?? {};
+
+  if (typeof approve !== 'boolean') {
+    return res.status(400).json({ message: 'approve (booléen) est requis' });
+  }
+
+  const product = await Product.findById(productId);
+  if (!product) {
+    return res.status(404).json({ message: 'Produit non trouvé' });
+  }
+  if (!product.moderationFlag) {
+    return res.status(400).json({ message: 'Ce produit n\'a pas d\'analyse de modération à revoir' });
+  }
+
+  product.moderationFlag.reviewedBy = adminId;
+  product.moderationFlag.reviewedAt = new Date();
+  product.moderationFlag.reviewDecision = approve ? 'approved' : 'rejected';
+  if (approve) {
+    product.isAvailable = true;
+  }
+  await product.save();
+
+  await recordAuditLog({
+    adminId,
+    action: approve ? 'product_moderation_approved' : 'product_moderation_rejected',
+    targetType: 'product',
+    targetId: productId,
+    details: `Annonce « ${product.title} » ${approve ? 'validée et republiée' : 'confirmée suspecte, reste en pause'}`,
+    metadata: { categories: product.moderationFlag.categories }
+  });
+
+  if (approve) {
+    NotificationService.createNotification({
+      recipientId: product.seller,
+      type: 'product_flagged',
+      title: 'Votre annonce a été validée',
+      content: `« ${product.title} » est de nouveau visible sur la marketplace.`,
+      link: `/products/${product._id}`,
+      data: { productId: product._id }
+    }).catch((error) => {
+      logger.warn('Erreur notification vendeur (annonce republiée)', {
+        productId: product._id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
+  }
+
+  return res.status(200).json({
+    message: approve ? 'Annonce republiée' : 'Signalement confirmé, annonce toujours en pause',
+    product
+  });
 });

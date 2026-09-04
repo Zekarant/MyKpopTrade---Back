@@ -8,6 +8,7 @@ import KpopAlbum from '../../../models/albumModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import { validateProductData } from './productValidationService';
 import { notifyWishlistPriceDrop, notifyWishlistUnavailable } from './wishlistAlertService';
+import { dispatchProductModeration } from './productModerationService';
 
 const DEFAULT_LIST_LIMIT = 20;
 const DEFAULT_LIST_PAGE = 1;
@@ -178,6 +179,10 @@ export async function createProductForSeller({
     $inc: { 'statistics.totalListings': 1 }
   });
 
+  // Modération IA (mots-clés suspects -> analyse Mistral). Fire-and-forget :
+  // ne retarde jamais la publication, l'annonce est déjà visible.
+  dispatchProductModeration(product._id.toString());
+
   return product;
 }
 
@@ -299,6 +304,17 @@ export async function updateProductForOwner({
     }
   } else if (updates.isReserved === false) {
     updates.reservedFor = null;
+  }
+
+  // Une annonce mise en pause par la modération IA et pas encore validée par
+  // un admin ne peut pas être republiée par le vendeur lui-même : seul
+  // `reviewFlaggedProduct` (revue admin) peut lever la pause.
+  if (
+    updates.isAvailable === true &&
+    product.moderationFlag?.suspect &&
+    product.moderationFlag.reviewDecision !== 'approved'
+  ) {
+    throw new HttpError(403, 'Cette annonce est en attente de revue par un administrateur et ne peut pas être republiée');
   }
 
   const previousPrice = product.price;

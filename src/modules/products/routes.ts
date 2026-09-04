@@ -51,6 +51,12 @@ router.get('/', productController.getProducts);
 router.get('/admin/list', authenticateJWT, requireAdmin, productAdminController.getAllProducts);
 router.get('/admin/stats', authenticateJWT, requireAdmin, productAdminController.getProductAdminStats);
 router.delete('/admin/:productId', authenticateJWT, requireAdmin, productAdminController.adminDeleteProduct);
+router.post(
+  '/admin/:productId/moderation-review',
+  authenticateJWT,
+  requireAdmin,
+  productAdminController.reviewFlaggedProduct
+);
 
 router.get('/:productId', authenticateJWT, productController.getProductById);
 
