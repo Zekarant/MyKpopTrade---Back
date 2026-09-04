@@ -16,7 +16,7 @@ describe('generateUniqueUsername', () => {
   async function occupy(username: string): Promise<void> {
     await User.create({
       username,
-      email: `${username}@example.test`,
+      email: `${username}@example.com`,
       password: 'motdepasse-long-assez'
     });
   }

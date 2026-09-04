@@ -78,14 +78,15 @@ async function isUsernameTaken(username: string): Promise<boolean> {
  * de course : l'appelant doit traiter une erreur de clé dupliquée au `save()`.
  */
 export async function generateUniqueUsername(input: SocialIdentityInput): Promise<string> {
-  const bases = [...candidateBases(input).map(padToMinLength), FALLBACK_BASE];
+  const readableBases = candidateBases(input).map(padToMinLength);
+  const bases = readableBases.length > 0 ? readableBases : [FALLBACK_BASE];
+  const preferred = bases[0];
 
   for (const base of bases) {
     if (!(await isUsernameTaken(base))) return base;
   }
 
-  // Variantes numérotées du meilleur candidat : reste lisible.
-  const preferred = bases[0];
+  // Variantes numérotées du meilleur candidat : reste lisible, prime sur le repli générique.
   for (let attempt = 2; attempt <= MAX_NUMBERED_ATTEMPTS; attempt++) {
     const candidate = withSuffix(preferred, String(attempt));
     if (!(await isUsernameTaken(candidate))) return candidate;

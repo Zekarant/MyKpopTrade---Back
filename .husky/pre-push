@@ -1,1 +1,3 @@
-npm test
+# Suite d'intégration lourde : exécution série pour éviter les faux négatifs
+# (timeouts, collisions sur uploads/) dus au parallélisme.
+npm test -- --runInBand
