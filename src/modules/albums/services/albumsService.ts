@@ -110,7 +110,7 @@ export async function fetchAlbumById(albumId: string) {
     ],
     isAvailable: true
   })
-    .populate('seller', 'username profilePicture statistics.averageRating')
+    .populate('seller', 'username profilePicture isIdentityVerified statistics.averageRating')
     .sort({ price: 1 })
     .limit(10);
 

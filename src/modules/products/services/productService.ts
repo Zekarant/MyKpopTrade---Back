@@ -185,7 +185,7 @@ export async function fetchProductById(productId: string, userId?: string) {
   assertValidObjectId(productId);
 
   const product = await Product.findById(productId)
-    .populate('seller', 'username profilePicture statistics.averageRating statistics.totalRatings');
+    .populate('seller', 'username profilePicture isIdentityVerified statistics.averageRating statistics.totalRatings');
 
   if (!product) {
     throw new HttpError(404, 'Produit non trouvé');
@@ -245,7 +245,7 @@ export async function listProducts(query: any) {
 
   const [products, total] = await Promise.all([
     Product.find(filter)
-      .populate('seller', 'username profilePicture')
+      .populate('seller', 'username profilePicture isIdentityVerified')
       .sort(sort as string)
       .skip((page - 1) * limit)
       .limit(limit),

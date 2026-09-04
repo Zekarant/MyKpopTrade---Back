@@ -104,7 +104,7 @@ export async function runAdvancedSearch({
 
   const [products, total] = await Promise.all([
     Product.find(searchFilters)
-      .populate('seller', 'username profilePicture statistics.averageRating')
+      .populate('seller', 'username profilePicture isIdentityVerified statistics.averageRating')
       .sort(getSortOption(sortBy))
       .skip((page - 1) * limit)
       .limit(limit),
