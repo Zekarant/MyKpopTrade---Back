@@ -26,6 +26,7 @@ import postRoutes from './modules/posts/routes';
 import seoRoutes from './modules/seo/routes';
 import disputeRoutes from './modules/disputes/routes';
 import cartRoutes from './modules/cart/routes';
+import faqRoutes from './modules/faqs/routes';
 
 /**
  * Crée l'application Express configurée (middlewares + routes + handlers).
@@ -109,6 +110,7 @@ export function createApp(): express.Express {
   app.use('/api/posts', postRoutes);
   app.use('/api/disputes', disputeRoutes);
   app.use('/api/cart', cartRoutes);
+  app.use('/api/faqs', faqRoutes);
 
   // Routes SEO publiques (sitemap, robots) servies à la racine pour les crawlers
   app.use('/', seoRoutes);
