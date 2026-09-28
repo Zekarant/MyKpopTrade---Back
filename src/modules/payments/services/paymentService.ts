@@ -322,17 +322,60 @@ export async function captureDirectPayment(userId: string, orderId: string) {
     );
   }
 
-  const captureResult = await PayPalService.captureConnectedPayment(
-    orderId,
-    payment.seller.toString()
+  // Marquer le produit vendu AVANT d'encaisser, de façon atomique : si la
+  // réservation de cet acheteur a expiré et qu'un autre acheteur a payé entre
+  // temps, on refuse ici plutôt que de débiter deux personnes.
+  const claimedProduct = await Product.findOneAndUpdate(
+    {
+      _id: payment.product,
+      isSold: false,
+      $or: [{ isReserved: { $ne: true } }, { reservedFor: payment.buyer }]
+    },
+    { $set: { isAvailable: false, isSold: true, soldAt: new Date(), soldTo: payment.buyer } },
+    { new: false }
   );
+  if (!claimedProduct) {
+    // Seule exception : une capture concurrente de CE paiement (double clic,
+    // retry) a déjà posé le verrou ; la capture PayPal est idempotente. Si un
+    // autre paiement du même acheteur est déjà encaissé, on refuse : sinon deux
+    // commandes ouvertes dans deux onglets débiteraient deux fois.
+    const [alreadyClaimedByBuyer, otherCompletedPayment] = await Promise.all([
+      Product.exists({ _id: payment.product, soldTo: payment.buyer }),
+      Payment.exists({
+        _id: { $ne: payment._id },
+        product: payment.product,
+        buyer: payment.buyer,
+        status: PAYMENT_STATUS.COMPLETED
+      })
+    ]);
+    if (!alreadyClaimedByBuyer || otherCompletedPayment) {
+      throw new HttpError(
+        409,
+        'Ce produit a déjà été vendu ou réservé pour un autre acheteur : le paiement n\'a pas été encaissé.'
+      );
+    }
+  }
+
+  let captureResult;
+  try {
+    captureResult = await PayPalService.captureConnectedPayment(
+      orderId,
+      payment.seller.toString()
+    );
+  } catch (error) {
+    if (claimedProduct) {
+      await Product.updateOne(
+        { _id: payment.product, soldTo: payment.buyer },
+        { $set: { isAvailable: claimedProduct.isAvailable, isSold: false }, $unset: { soldAt: 1, soldTo: 1 } }
+      );
+    }
+    throw error;
+  }
 
   payment.status = PAYMENT_STATUS.COMPLETED;
   payment.completedAt = new Date();
   payment.captureId = captureResult.captureId;
   await payment.save();
-
-  await markProductAsSold(payment.product, payment.buyer);
 
   await NotificationService.createNotification({
     recipientId: payment.seller,
@@ -662,8 +705,10 @@ export async function processRefund({
 export async function fetchPaymentDetails(userId: string, paymentId: string) {
   const payment = await Payment.findById(paymentId)
     .populate('product', 'title description price images')
-    .populate('buyer', 'username email profileImage')
-    .populate('seller', 'username email profileImage');
+    // Jamais l'email de l'autre partie : acheteur et vendeur échangent via la
+    // messagerie. `profilePicture` est le vrai champ avatar (`profileImage` n'existait pas).
+    .populate('buyer', 'username profilePicture')
+    .populate('seller', 'username profilePicture');
 
   if (!payment) {
     throw new HttpError(404, 'Paiement non trouvé');

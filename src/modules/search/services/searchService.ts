@@ -4,6 +4,7 @@ import KpopGroup from '../../../models/kpopGroupModel';
 import Album from '../../../models/albumModel';
 import SearchHistory from '../../../models/historicSearchModel';
 import { HttpError } from '../../../commons/utils/httpError';
+import { escapeRegex } from '../../../commons/utils/escapeRegex';
 
 export interface SearchFilters {
   query?: string;
@@ -39,19 +40,21 @@ function buildProductFilters({
 
   const { query, groups, members, albums, priceRange, condition, type, currency } = filters;
 
-  if (query && query.trim()) {
+  if (typeof query === 'string' && query.trim()) {
+    const pattern = escapeRegex(query.trim());
     searchFilters.$or = [
-      { title: { $regex: query.trim(), $options: 'i' } },
-      { description: { $regex: query.trim(), $options: 'i' } },
-      { kpopGroup: { $regex: query.trim(), $options: 'i' } },
-      { kpopMember: { $regex: query.trim(), $options: 'i' } },
-      { albumName: { $regex: query.trim(), $options: 'i' } }
+      { title: { $regex: pattern, $options: 'i' } },
+      { description: { $regex: pattern, $options: 'i' } },
+      { kpopGroup: { $regex: pattern, $options: 'i' } },
+      { kpopMember: { $regex: pattern, $options: 'i' } },
+      { albumName: { $regex: pattern, $options: 'i' } }
     ];
   }
 
-  if (groups?.length) searchFilters.kpopGroup = { $in: groups.map(g => new RegExp(`^${g}$`, 'i')) };
-  if (members?.length) searchFilters.kpopMember = { $in: members.map(m => new RegExp(`^${m}$`, 'i')) };
-  if (albums?.length) searchFilters.albumName = { $in: albums.map(a => new RegExp(`^${a}$`, 'i')) };
+  const exactMatch = (value: unknown) => new RegExp(`^${escapeRegex(String(value))}$`, 'i');
+  if (Array.isArray(groups) && groups.length) searchFilters.kpopGroup = { $in: groups.map(exactMatch) };
+  if (Array.isArray(members) && members.length) searchFilters.kpopMember = { $in: members.map(exactMatch) };
+  if (Array.isArray(albums) && albums.length) searchFilters.albumName = { $in: albums.map(exactMatch) };
   if (type) searchFilters.type = type;
   if (condition?.length) searchFilters.condition = { $in: condition };
   if (currency) searchFilters.currency = currency;
@@ -170,12 +173,13 @@ export async function fetchSearchSuggestions(query: unknown) {
   if (!query || typeof query !== 'string' || query.length < 2) {
     throw new HttpError(400, 'Requête trop courte pour les suggestions');
   }
+  const pattern = escapeRegex(query);
 
   const [groupSuggestions, albumSuggestions, memberSuggestions] = await Promise.all([
     KpopGroup.find({
       $or: [
-        { name: { $regex: query, $options: 'i' } },
-        { koreanName: { $regex: query, $options: 'i' } }
+        { name: { $regex: pattern, $options: 'i' } },
+        { koreanName: { $regex: pattern, $options: 'i' } }
       ],
       isActive: true
     })
@@ -185,8 +189,8 @@ export async function fetchSearchSuggestions(query: unknown) {
 
     Album.find({
       $or: [
-        { title: { $regex: query, $options: 'i' } },
-        { koreanTitle: { $regex: query, $options: 'i' } }
+        { title: { $regex: pattern, $options: 'i' } },
+        { koreanTitle: { $regex: pattern, $options: 'i' } }
       ]
     })
       .populate('group', 'name')
@@ -199,8 +203,8 @@ export async function fetchSearchSuggestions(query: unknown) {
       {
         $match: {
           $or: [
-            { 'members.name': { $regex: query, $options: 'i' } },
-            { 'members.stageName': { $regex: query, $options: 'i' } }
+            { 'members.name': { $regex: pattern, $options: 'i' } },
+            { 'members.stageName': { $regex: pattern, $options: 'i' } }
           ],
           'members.isActive': true
         }

@@ -4,6 +4,10 @@ import Album from '../../../models/albumModel';
 import Product from '../../../models/productModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import { escapeRegex } from '../../../commons/utils/escapeRegex';
+import { clampLimit } from '../../../commons/utils/pagination';
+
+const CATALOG_MAX_LIMIT = 2000;
 
 function assertValidGroupId(groupId: string) {
   if (!mongoose.Types.ObjectId.isValid(groupId)) {
@@ -13,7 +17,7 @@ function assertValidGroupId(groupId: string) {
 
 export async function createGroup(groupData: any) {
   const existingGroup = await KpopGroup.findOne({
-    name: { $regex: new RegExp(`^${groupData.name}$`, 'i') }
+    name: { $regex: new RegExp(`^${escapeRegex(String(groupData.name))}$`, 'i') }
   });
 
   if (existingGroup) {
@@ -36,7 +40,8 @@ export async function createGroup(groupData: any) {
 
 export async function listGroups(query: any) {
   const page = parseInt(query.page || '1');
-  const limit = parseInt(query.limit || '20');
+  // Le panneau admin K-pop charge jusqu'à 2000 groupes d'un coup.
+  const limit = clampLimit(query.limit, 20, CATALOG_MAX_LIMIT);
   const sortBy = query.sortBy || 'name';
   const sortOrder = query.sortOrder === 'desc' ? -1 : 1;
 
@@ -51,9 +56,10 @@ export async function listGroups(query: any) {
   }
 
   if (query.search) {
+    const pattern = escapeRegex(String(query.search));
     filters.$or = [
-      { name: { $regex: query.search, $options: 'i' } },
-      { description: { $regex: query.search, $options: 'i' } }
+      { name: { $regex: pattern, $options: 'i' } },
+      { description: { $regex: pattern, $options: 'i' } }
     ];
   }
 
@@ -90,7 +96,7 @@ export async function searchGroupsByQuery({
     throw new HttpError(400, 'Paramètre de recherche requis');
   }
 
-  const searchRegex = new RegExp(query.trim(), 'i');
+  const searchRegex = new RegExp(escapeRegex(query.trim()), 'i');
 
   const filters: any = {
     $or: [

@@ -7,7 +7,6 @@ import { MessagingUtilsService } from './messagingUtilsService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 
-const VALID_CONTENT_TYPES = ['text', 'system_notification', 'offer', 'counter_offer', 'shipping_update'];
 const ATTACHMENTS_DIR = () => path.join(process.cwd(), 'uploads', 'chat_attachments');
 
 export async function sendMessageToConversation({
@@ -15,14 +14,12 @@ export async function sendMessageToConversation({
   username,
   conversationId,
   content,
-  contentType,
   files
 }: {
   userId: string;
   username?: string;
   conversationId: string;
   content: unknown;
-  contentType: string;
   files?: Express.Multer.File[];
 }) {
   if (typeof content !== 'string' || content.trim() === '') {
@@ -43,13 +40,13 @@ export async function sendMessageToConversation({
     logger.debug(`Fichiers traités: ${attachments.join(', ')}`);
   }
 
-  const resolvedContentType = VALID_CONTENT_TYPES.includes(contentType) ? contentType : 'text';
-
+  // Toujours 'text' : les types offre / système sont réservés aux messages créés
+  // par le serveur ; un utilisateur ne doit pas pouvoir imiter leurs bulles.
   const newMessage = await Message.create({
     conversation: conversationId,
     sender: userId,
     content,
-    contentType: resolvedContentType,
+    contentType: 'text',
     attachments: attachments.length > 0 ? attachments : undefined,
     readBy: [userId]
   });

@@ -81,7 +81,7 @@ async function createOfferMessages(
 
 function populateOfferConversation(query: any) {
   return query
-    .populate('participants', 'username profilePicture email')
+    .populate('participants', 'username profilePicture')
     .populate('productId', 'title price images')
     .populate('lastMessage')
     .populate('offerHistory.offeredBy', 'username profilePicture');

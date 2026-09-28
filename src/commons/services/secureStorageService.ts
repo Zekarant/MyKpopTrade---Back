@@ -26,11 +26,10 @@ const ensureStorageDirectory = (): void => {
     // Créer avec des permissions restreintes
     fs.mkdirSync(SECURE_STORAGE_PATH, { recursive: true, mode: 0o700 });
     
-    // Sous Linux, on pourrait ajouter
+    // Restreindre l'accès au dossier (mkdirSync applique l'umask au mode).
+    // fs.chmodSync plutôt qu'un `execSync('chmod ...')` construit par interpolation.
     if (process.platform !== 'win32') {
-      const { execSync } = require('child_process');
-      // Restreindre l'accès au dossier
-      execSync(`chmod 700 ${SECURE_STORAGE_PATH}`);
+      fs.chmodSync(SECURE_STORAGE_PATH, 0o700);
     }
   }
 };
@@ -155,7 +154,9 @@ export const secureStoreDocument = async (
   fileType: string,
   documentType: string
 ): Promise<string> => {
-  if (!ENCRYPTION_KEY) {
+  // Tester la clé brute : ENCRYPTION_KEY est un condensat SHA-256, toujours
+  // défini, même calculé sur une chaîne vide (clé connue de tous).
+  if (!rawKey) {
     throw new Error('Clé de chiffrement non configurée');
   }
 
@@ -197,8 +198,9 @@ export const secureStoreDocument = async (
   const encryptedFilePath = path.join(SECURE_STORAGE_PATH, `${fileId}.enc`);
   const metadataPath = path.join(SECURE_STORAGE_PATH, `${fileId}.meta`);
   
-  fs.writeFileSync(encryptedFilePath, encrypted);
-  fs.writeFileSync(metadataPath, JSON.stringify(metadata));
+  // 0600 : lisibles par le seul compte qui fait tourner l'API.
+  fs.writeFileSync(encryptedFilePath, encrypted, { mode: 0o600 });
+  fs.writeFileSync(metadataPath, JSON.stringify(metadata), { mode: 0o600 });
   
   logger.info('Document stocké de façon sécurisée avec zones sensibles floutées', {
     documentType,
@@ -214,7 +216,7 @@ export const secureStoreDocument = async (
  * @returns Le document déchiffré et ses métadonnées
  */
 export const retrieveSecureDocument = (fileId: string): { buffer: Buffer, metadata: any } => {
-  if (!ENCRYPTION_KEY) {
+  if (!rawKey) {
     throw new Error('Clé de chiffrement non configurée');
   }
   

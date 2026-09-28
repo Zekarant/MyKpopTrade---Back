@@ -78,6 +78,8 @@ export interface SellerStatus {
    */
   legalName: string | null;
   primaryEmail: string | null;
+  /** `tracking_id` de la partner referral à laquelle PayPal rattache ce marchand. */
+  trackingId: string | null;
 }
 
 /**
@@ -307,7 +309,8 @@ export class PayPalPartnerService {
         consentGranted: (data.oauth_integrations || []).length > 0,
         scopes,
         legalName: data.legal_name || null,
-        primaryEmail: data.primary_email || null
+        primaryEmail: data.primary_email || null,
+        trackingId: data.tracking_id || null
       };
     } catch (error: any) {
       if (error.response?.status === 404) {
@@ -368,15 +371,20 @@ export class PayPalPartnerService {
    *
    * Les query params du retour ne sont pas dignes de confiance (l'URL transite
    * par le navigateur du vendeur) : seul l'appel « show seller status » fait foi.
+   * `expectedTrackingId` est passé par ce retour navigateur : si PayPal rattache
+   * le marchand à une autre referral, c'est le compte d'un tiers et on annule.
    */
   static async completeOnboarding(
     sellerId: string,
-    merchantIdInPayPal: string
+    merchantIdInPayPal: string,
+    expectedTrackingId?: string
   ): Promise<SellerStatus | null> {
     const seller = await User.findById(sellerId);
     if (!seller) {
       throw new Error('Vendeur non trouvé');
     }
+    const previousMerchantId = seller.paypalMerchantId;
+    const previousConnected = seller.paypalConnected;
 
     // Le merchant ID est persisté AVANT d'interroger PayPal, et l'échec de
     // l'interrogation n'est pas propagé. PayPal ne communique cet identifiant
@@ -403,6 +411,21 @@ export class PayPalPartnerService {
         sellerId: sellerId.substring(0, 5) + '...'
       });
       return null;
+    }
+
+    // Un tracking_id vaut `${sellerId}-<aléa>` : on accepte toute referral de
+    // CE vendeur (reconnexion du même compte PayPal via un nouveau lien), pas
+    // celle d'un autre vendeur.
+    const belongsToThisSeller = (id: string) =>
+      id === expectedTrackingId || id.startsWith(`${sellerId}-`);
+    if (expectedTrackingId && status.trackingId && !belongsToThisSeller(status.trackingId)) {
+      seller.paypalMerchantId = previousMerchantId;
+      seller.paypalConnected = previousConnected;
+      await seller.save();
+      logger.warn('Retour d\'onboarding : merchant ID rattaché à une autre referral, ignoré', {
+        sellerId: sellerId.substring(0, 5) + '...'
+      });
+      throw new Error('Le compte PayPal ne correspond pas à cette inscription');
     }
 
     seller.paypalMerchantId = status.merchantId;

@@ -343,4 +343,11 @@ paymentSchema.methods.toJSON = function() {
   return obj;
 };
 
+// Index des requêtes chaudes : historique acheteur / vendeur, recherche par
+// ordre PayPal (capture, annulation, webhooks) et paiements d'un produit.
+paymentSchema.index({ buyer: 1, createdAt: -1 });
+paymentSchema.index({ seller: 1, createdAt: -1 });
+paymentSchema.index({ paymentIntentId: 1 });
+paymentSchema.index({ product: 1, status: 1 });
+
 export default mongoose.models.Payment || mongoose.model<IPayment>('Payment', paymentSchema);

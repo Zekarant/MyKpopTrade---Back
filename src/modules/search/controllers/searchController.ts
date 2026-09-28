@@ -10,6 +10,11 @@ import {
   clearUserSearchHistory,
   fetchSearchSuggestions
 } from '../services/searchService';
+import { clampLimit } from '../../../commons/utils/pagination';
+
+const DEFAULT_SEARCH_LIMIT = 20;
+// La page de résultats du front demande jusqu'à 500 annonces d'un coup.
+const MAX_SEARCH_LIMIT = 500;
 
 /**
  * Recherche avancée de produits
@@ -28,7 +33,7 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
     company,
     currency,
     page = 1,
-    limit = 20,
+    limit = DEFAULT_SEARCH_LIMIT,
     sortBy = 'relevance',
     includeOwnProducts = false
   }: SearchFilters & {
@@ -48,8 +53,8 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
       },
       userId,
       includeOwnProducts,
-      page,
-      limit,
+      page: Math.max(1, parseInt(String(page), 10) || 1),
+      limit: clampLimit(limit, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT),
       sortBy
     });
 

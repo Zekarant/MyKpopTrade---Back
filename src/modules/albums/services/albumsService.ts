@@ -4,6 +4,10 @@ import KpopGroup from '../../../models/kpopGroupModel';
 import Product from '../../../models/productModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import { escapeRegex } from '../../../commons/utils/escapeRegex';
+import { clampLimit } from '../../../commons/utils/pagination';
+
+const CATALOG_MAX_LIMIT = 2000;
 
 function assertValidId(id: string, message: string) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -38,7 +42,8 @@ export async function createAlbumForGroup(albumData: any) {
 
 export async function listAlbums(query: any) {
   const page = parseInt(query.page as string) || 1;
-  const limit = parseInt(query.limit as string) || 20;
+  // Le panneau admin K-pop charge jusqu'à 2000 albums d'un coup.
+  const limit = clampLimit(query.limit, 20, CATALOG_MAX_LIMIT);
   const sortBy = query.sortBy as string || 'releaseDate';
   const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
 
@@ -49,13 +54,14 @@ export async function listAlbums(query: any) {
   }
 
   if (query.artistName) {
-    filters.artistName = { $regex: query.artistName, $options: 'i' };
+    filters.artistName = { $regex: escapeRegex(String(query.artistName)), $options: 'i' };
   }
 
   if (query.search) {
+    const pattern = escapeRegex(String(query.search));
     filters.$or = [
-      { name: { $regex: query.search, $options: 'i' } },
-      { artistName: { $regex: query.search, $options: 'i' } }
+      { name: { $regex: pattern, $options: 'i' } },
+      { artistName: { $regex: pattern, $options: 'i' } }
     ];
   }
 
@@ -179,10 +185,11 @@ export async function searchAlbumsByQuery({
     throw new HttpError(400, 'Paramètre de recherche requis');
   }
 
+  const pattern = escapeRegex(query);
   const albums = await Album.find({
     $or: [
-      { name: { $regex: query, $options: 'i' } },
-      { artistName: { $regex: query, $options: 'i' } }
+      { name: { $regex: pattern, $options: 'i' } },
+      { artistName: { $regex: pattern, $options: 'i' } }
     ]
   })
     .sort({ releaseDate: -1 })

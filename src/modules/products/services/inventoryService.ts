@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import User from '../../../models/userModel';
 import Product from '../../../models/productModel';
 
@@ -49,8 +50,11 @@ export async function fetchUserInventory({
 
   let inventoryStats = null;
   if (viewerId === sellerId) {
+    // aggregate() ne caste pas les types comme find() : sans ObjectId, le
+    // $match ne trouvait jamais rien et les stats restaient vides.
+    // sellerId === viewerId, l'identifiant du JWT, donc un ObjectId valide.
     const stats = await Product.aggregate([
-      { $match: { seller: sellerId } },
+      { $match: { seller: new mongoose.Types.ObjectId(sellerId) } },
       {
         $group: {
           _id: null,

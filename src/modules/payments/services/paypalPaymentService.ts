@@ -8,6 +8,10 @@ import { paymentConfig } from '../../../config/paymentConfig';
 import logger from '../../../commons/utils/logger';
 import { formatForPayPal } from '../../../commons/utils/moneyMath';
 import { resolveCheckout, ShippingAddress } from './checkoutService';
+import { HttpError } from '../../../commons/utils/httpError';
+
+/** Durée pendant laquelle un produit reste réservé à l'acheteur qui paie. */
+const RESERVATION_DURATION_MS = 60 * 60 * 1000;
 
 export interface CheckoutInput {
   shippingMethod: unknown;
@@ -67,6 +71,7 @@ export class PayPalPaymentService {
     buyerId: string,
     checkout: CheckoutInput
   ): Promise<any> {
+    let reservedHere = false;
     try {
       const existingPayment = await Payment.findOne({
         product: productId,
@@ -102,10 +107,34 @@ export class PayPalPaymentService {
         }
       }
 
-      const product = await Product.findById(productId);
+      // Réservation atomique : vérifier puis réserver en deux requêtes laissait
+      // deux acheteurs (parcours direct + panier, ou deux requêtes simultanées)
+      // payer le même produit. On récupère l'état d'avant la mise à jour pour
+      // ne libérer, en cas d'échec, qu'une réservation posée ici.
+      const product = await Product.findOneAndUpdate(
+        {
+          _id: productId,
+          isSold: false,
+          seller: { $ne: buyerId },
+          $or: [
+            // $ne: true plutôt que false : les anciens produits sans le champ restent achetables.
+            { isAvailable: true, isReserved: { $ne: true } },
+            { isReserved: true, reservedFor: buyerId }
+          ]
+        },
+        {
+          $set: {
+            isReserved: true,
+            reservedFor: buyerId,
+            reservedUntil: new Date(Date.now() + RESERVATION_DURATION_MS)
+          }
+        },
+        { new: false }
+      );
       if (!product) {
-        throw new Error('Produit non trouvé');
+        throw new HttpError(409, 'Produit non disponible : il est déjà réservé ou vendu.');
       }
+      reservedHere = !(product.isReserved && product.reservedFor?.toString() === buyerId);
 
       const seller = await User.findById(product.seller);
       if (!seller) {
@@ -235,12 +264,6 @@ export class PayPalPaymentService {
 
       await payment.save();
 
-      await Product.findByIdAndUpdate(productId, {
-        isReserved: true,
-        reservedFor: buyerId,
-        reservedUntil: new Date(Date.now() + 60 * 60 * 1000)
-      });
-
       return {
         orderId: response.data.id,
         approvalUrl,
@@ -252,6 +275,12 @@ export class PayPalPaymentService {
         currency
       };
     } catch (error) {
+      if (reservedHere) {
+        await Product.updateOne(
+          { _id: productId, isSold: false, reservedFor: buyerId },
+          { $set: { isReserved: false, reservedFor: null, reservedUntil: null } }
+        );
+      }
       logger.error('Erreur lors de la création du paiement PayPal', {
         error: error instanceof Error ? error.message : String(error),
         productId,

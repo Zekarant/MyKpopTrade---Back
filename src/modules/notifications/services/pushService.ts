@@ -49,6 +49,33 @@ export interface PushNotificationPayload {
 }
 
 /**
+ * Services de push des navigateurs (Chrome/Edge/Opera via FCM, Firefox,
+ * Windows, Safari). Le serveur POST vers l'endpoint à chaque notification :
+ * accepter n'importe quelle URL en ferait un relais SSRF vers le réseau interne.
+ */
+const PUSH_SERVICE_HOST_SUFFIXES = [
+  'fcm.googleapis.com',
+  'android.googleapis.com',
+  'push.services.mozilla.com',
+  'notify.windows.com',
+  'push.apple.com'
+];
+
+export function isAllowedPushEndpoint(endpoint: unknown): boolean {
+  if (typeof endpoint !== 'string') return false;
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:') return false;
+  return PUSH_SERVICE_HOST_SUFFIXES.some(
+    suffix => url.hostname === suffix || url.hostname.endsWith(`.${suffix}`)
+  );
+}
+
+/**
  * Enregistre ou met à jour un abonnement push pour un utilisateur.
  * Idempotent : un même endpoint est mis à jour plutôt que dupliqué.
  */
@@ -59,6 +86,9 @@ export async function registerSubscription(
 ): Promise<void> {
   if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
     throw new Error('Subscription invalide');
+  }
+  if (!isAllowedPushEndpoint(subscription.endpoint)) {
+    throw new Error('Subscription invalide : service de push inconnu');
   }
   await PushSubscription.findOneAndUpdate(
     { endpoint: subscription.endpoint },

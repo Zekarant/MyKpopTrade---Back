@@ -2,8 +2,11 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import Payment from '../../../models/paymentModel';
 import User from '../../../models/userModel';
-import { EncryptionService } from '../../../commons/utils/encryptionService';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
+import {
+  anonymizeBuyerPayments,
+  anonymizeExpiredPayments
+} from '../services/paymentAnonymizationService';
 
 /**
  * Exporte les données de paiement d'un utilisateur (droit à la portabilité)
@@ -126,35 +129,8 @@ export const anonymizeUserPaymentData = asyncHandler(async (req: Request, res: R
       });
     }
     
-    // Trouver tous les paiements où l'utilisateur est acheteur
-    const buyerPayments = await Payment.find({ buyer: userId });
-    
-    // Anonymiser les données personnelles dans ces paiements
-    let count = 0;
-    for (const payment of buyerPayments) {
-      // Pour les paiements où l'utilisateur est acheteur
-      payment.paypalEmail = 'anonymized@example.com';
-      payment.buyerDetails = undefined;
-      payment.ipAddress = '0.0.0.0';
-      payment.userAgent = 'anonymized';
-      payment.anonymized = true;
-      
-      // Stocker uniquement les données nécessaires pour l'obligation légale (comptabilité)
-      // en minimisant les données personnelles
-      const retainedData = {
-        transactionDate: payment.completedAt || payment.createdAt,
-        amount: payment.amount,
-        currency: payment.currency,
-        status: payment.status,
-        transactionReference: payment.captureId || payment.paymentIntentId
-      };
-      
-      payment.paymentMetadata = EncryptionService.encrypt(JSON.stringify(retainedData));
-      
-      await payment.save();
-      count++;
-    }
-    
+    const count = await anonymizeBuyerPayments(userId);
+
     // Journal d'audit pour la conformité
     GdprLogger.logPaymentAction('anonymize_payment_data', { count }, userId);
     
@@ -188,45 +164,8 @@ export const anonymizeOldPayments = asyncHandler(async (req: Request, res: Respo
       });
     }
     
-    // Trouver tous les paiements complétés datant de plus de 3 ans
-    const cutoffDate = new Date();
-    cutoffDate.setFullYear(cutoffDate.getFullYear() - 3);
-    
-    const paymentsToAnonymize = await Payment.find({
-      status: { $in: ['completed', 'refunded', 'partially_refunded'] },
-      updatedAt: { $lt: cutoffDate },
-      anonymized: { $ne: true }
-    });
-    
-    let count = 0;
-    
-    for (const payment of paymentsToAnonymize) {
-      // Conserver uniquement les données nécessaires pour l'historique comptable
-      // tout en anonymisant les données personnelles
-      const retainedData = {
-        transactionDate: payment.completedAt || payment.createdAt,
-        amount: payment.amount,
-        currency: payment.currency,
-        status: payment.status,
-        refundAmount: payment.refundAmount || null,
-        refundedAt: payment.refundedAt || null,
-        // Conservation du lien avec le produit pour l'historique comptable
-        productId: payment.product.toString(),
-        transactionReference: payment.captureId || payment.paymentIntentId
-      };
-      
-      // Anonymiser le paiement
-      payment.paypalEmail = 'anonymized@example.com';
-      payment.buyerDetails = undefined;
-      payment.ipAddress = '0.0.0.0';
-      payment.userAgent = 'anonymized';
-      payment.anonymized = true;
-      payment.paymentMetadata = EncryptionService.encrypt(JSON.stringify(retainedData));
-      
-      await payment.save();
-      count++;
-    }
-    
+    const count = await anonymizeExpiredPayments();
+
     // Log d'audit pour démontrer la conformité
     GdprLogger.logPaymentAction('anonymize_old_payments', { 
       count,

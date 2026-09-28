@@ -118,6 +118,45 @@ describe('logger — sanitisation des données sensibles', () => {
     expect(line).toContain('Jungkook');
   });
 
+  it('masque un objet adresse entier, dont les sous-champs n\'ont pas de nom sensible', () => {
+    const line = serialize('paiement créé', {
+      shippingAddress: { streetLine1: '12 rue des Lilas', city: 'Lyon', postalCode: '69001' }
+    });
+
+    expect(line).not.toContain('12 rue des Lilas');
+    expect(line).not.toContain('Lyon');
+    expect(line).not.toContain('69001');
+  });
+
+  it('masque noms, prénom et contenu de message', () => {
+    const line = serialize('message envoyé', {
+      firstName: 'Camille',
+      lastName: 'Durand',
+      content: 'Mon numéro perso est 06 12 34 56 78'
+    });
+
+    expect(line).not.toContain('Camille');
+    expect(line).not.toContain('Durand');
+    expect(line).not.toContain('06 12 34 56 78');
+  });
+
+  it('masque les jetons présents dans une URL, y compris dans le message', () => {
+    const line = serialize('API Request: GET /api/auth/verify-email/abc123secret', {
+      url: '/api/messaging/messages/1/attachments/x.png?token=eyJhbGciOi.jwt&dl=1'
+    });
+
+    expect(line).not.toContain('abc123secret');
+    expect(line).not.toContain('eyJhbGciOi.jwt');
+    expect(line).toContain('dl=1');
+  });
+
+  it('tronque l\'IP sans la supprimer', () => {
+    const line = serialize('API Request', { ip: '203.0.113.42' });
+
+    expect(line).not.toContain('203.0.113.42');
+    expect(line).toContain('203.0.113.0');
+  });
+
   it('laisse intactes les données non sensibles', () => {
     const line = serialize('produit créé', { productId: 'abc123', amount: 20 });
 

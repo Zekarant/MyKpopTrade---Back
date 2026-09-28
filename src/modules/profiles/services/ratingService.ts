@@ -5,6 +5,33 @@ import Rating from '../../../models/ratingModel';
 import User from '../../../models/userModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import { NotificationService } from '../../notifications/services/notificationService';
+import Payment from '../../../models/paymentModel';
+
+/**
+ * « Achat vérifié » seulement si un paiement terminé lie les deux utilisateurs
+ * pour ce produit (le front envoie l'ID du produit comme `transactionId`).
+ * Avant, fournir n'importe quel identifiant suffisait à obtenir le badge.
+ */
+async function isCompletedPurchaseBetween(
+  transactionId: string | undefined,
+  reviewerId: string,
+  recipientId: string
+): Promise<boolean> {
+  if (!transactionId || !mongoose.isValidObjectId(transactionId)) return false;
+  const payment = await Payment.exists({
+    $and: [
+      { $or: [{ product: transactionId }, { _id: transactionId }] },
+      {
+        $or: [
+          { buyer: reviewerId, seller: recipientId },
+          { buyer: recipientId, seller: reviewerId }
+        ]
+      }
+    ],
+    status: 'completed'
+  });
+  return Boolean(payment);
+}
 
 const EMPTY_DISTRIBUTION = { '5': 0, '4': 0, '3': 0, '2': 0, '1': 0 };
 
@@ -188,7 +215,7 @@ export async function createUserRating({
     review,
     type,
     transaction: transactionId,
-    isVerifiedPurchase: Boolean(transactionId),
+    isVerifiedPurchase: await isCompletedPurchaseBetween(transactionId, reviewerId, recipientId),
     images
   });
 

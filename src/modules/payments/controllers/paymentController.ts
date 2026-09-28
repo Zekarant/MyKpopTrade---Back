@@ -94,10 +94,12 @@ export const generateOnboardingLink = asyncHandler(async (req: Request, res: Res
  */
 export const handleOnboardingReturn = asyncHandler(async (req: Request, res: Response) => {
   const frontendSettings = `${process.env.FRONTEND_URL}/settings`;
-  const merchantIdInPayPal = req.query.merchantIdInPayPal as string | undefined;
-  const trackingId = req.query.merchantId as string | undefined;
+  const { merchantIdInPayPal, merchantId: trackingId } = req.query;
 
-  if (!merchantIdInPayPal || !trackingId) {
+  // Chaînes uniquement : un paramètre répété devient un tableau, que Mongoose
+  // traduit en `$in` (des centaines d'essais de tracking_id en une requête).
+  if (typeof merchantIdInPayPal !== 'string' || typeof trackingId !== 'string' ||
+      !merchantIdInPayPal || !trackingId) {
     return res.redirect(`${frontendSettings}?paypal_error=missing_parameters`);
   }
 
@@ -112,7 +114,8 @@ export const handleOnboardingReturn = asyncHandler(async (req: Request, res: Res
     // la page de paramètres affichera l'état réel et proposera de rafraîchir.
     await PayPalService.completeOnboarding(
       (seller._id as any).toString(),
-      merchantIdInPayPal
+      merchantIdInPayPal,
+      trackingId
     );
 
     return res.redirect(`${frontendSettings}?paypal_onboarding=complete`);

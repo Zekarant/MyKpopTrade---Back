@@ -32,7 +32,6 @@ const cartSchema = new Schema<ICart>({
   items: { type: [cartItemSchema], default: [] }
 }, { timestamps: true });
 
-cartSchema.index({ user: 1 });
 // TTL : supprime automatiquement les paniers inactifs depuis 7 jours
 cartSchema.index({ updatedAt: 1 }, { expireAfterSeconds: CART_TTL_SECONDS });
 

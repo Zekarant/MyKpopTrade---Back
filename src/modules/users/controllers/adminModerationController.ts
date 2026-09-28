@@ -3,6 +3,7 @@ import Post from '../../posts/model';
 import AuditLog from '../../../models/auditLogModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
+import { escapeRegex } from '../../../commons/utils/escapeRegex';
 
 /**
  * Lister tous les posts (admin) avec filtres
@@ -19,7 +20,7 @@ export const getAdminPosts = asyncHandler(async (req: Request, res: Response) =>
   else if (type === 'reply') filter.isReply = true;
 
   if (search) {
-    filter.content = { $regex: search, $options: 'i' };
+    filter.content = { $regex: escapeRegex(String(search)), $options: 'i' };
   }
 
   const [posts, count] = await Promise.all([

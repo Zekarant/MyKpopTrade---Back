@@ -22,6 +22,9 @@ import env from '../../config/env';
 
 const router = Router();
 
+/** `purpose` du jeton court qui transporte l'utilisateur à lier dans le `state` OAuth. */
+const SOCIAL_LINK_TOKEN_PURPOSE = 'social_link';
+
 // Routes d'enregistrement et de connexion
 router.post('/register', rateLimitRegister, registerController.register);
 router.post('/login', rateLimitLogin, loginController.login);
@@ -69,7 +72,11 @@ router.get('/google/callback', (req: Request, res: Response, next: NextFunction)
       const state = JSON.parse(stateParam);
       if (state.linkToken) {
         const decoded = jwt.verify(state.linkToken, env.JWT_SECRET) as any;
-        (req as any).linkUserId = decoded.userId;
+        // Même secret que le défi 2FA (qui porte aussi `userId`) : sans ce
+        // contrôle, un défi 2FA servait de jeton de liaison.
+        if (decoded.purpose === SOCIAL_LINK_TOKEN_PURPOSE) {
+          (req as any).linkUserId = decoded.userId;
+        }
       }
     } catch {
       // State invalide ou pas un JSON de liaison - on continue en mode login normal
@@ -113,8 +120,10 @@ router.get('/discord/callback', (req: Request, res: Response, next: NextFunction
       const state = JSON.parse(decodeURIComponent(stateParam));
       if (state.linkToken) {
         const decoded = jwt.verify(state.linkToken, env.JWT_SECRET) as any;
-        (req as any).linkUserId = decoded.userId;
-        isLinkFlow = true;
+        if (decoded.purpose === SOCIAL_LINK_TOKEN_PURPOSE) {
+          (req as any).linkUserId = decoded.userId;
+          isLinkFlow = true;
+        }
       }
     } catch (e) {
       console.error('Discord callback state parse error:', e);
@@ -127,7 +136,8 @@ router.get('/discord/callback', (req: Request, res: Response, next: NextFunction
       if (isLinkFlow) {
         return res.redirect(`${process.env.FRONTEND_URL}/settings?error=discord_link_failed&reason=${encodeURIComponent(err?.message || 'auth_failed')}`);
       }
-      return res.redirect(`${process.env.FRONTEND_URL}/login?error=discord`);
+      const code = encodeURIComponent(info?.message || 'discord_auth_failed');
+      return res.redirect(`${process.env.FRONTEND_URL}/login?error=${code}`);
     }
     req.user = user;
 
@@ -152,7 +162,7 @@ router.get('/google/link', (req: Request, res: Response, next: NextFunction) => 
     const decoded = jwt.verify(token, env.JWT_SECRET) as any;
     const userId = decoded.id;
     const linkToken = jwt.sign(
-      { userId, purpose: 'social_link' },
+      { userId, purpose: SOCIAL_LINK_TOKEN_PURPOSE },
       env.JWT_SECRET,
       { expiresIn: '5m' }
     );
@@ -175,7 +185,7 @@ router.get('/discord/link', (req: Request, res: Response, next: NextFunction) =>
     const decoded = jwt.verify(token, env.JWT_SECRET) as any;
     const userId = decoded.id;
     const linkToken = jwt.sign(
-      { userId, purpose: 'social_link' },
+      { userId, purpose: SOCIAL_LINK_TOKEN_PURPOSE },
       env.JWT_SECRET,
       { expiresIn: '5m' }
     );

@@ -1,6 +1,11 @@
 import IdentityVerification from '../../../models/identityVerificationModel';
 import User from '../../../models/userModel';
-import { secureStoreDocument, deleteSecureDocument } from '../../../commons/services/secureStorageService';
+import {
+  secureStoreDocument,
+  deleteSecureDocument,
+  retrieveSecureDocument,
+  cleanExpiredDocuments
+} from '../../../commons/services/secureStorageService';
 import { sendVerificationResultEmail } from '../../../commons/services/emailService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
@@ -15,11 +20,54 @@ const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   driver_license: 'Permis de conduire'
 };
 
+/**
+ * Type réel d'une image d'après ses premiers octets (« magic bytes »). Le
+ * `mimetype` de multer vient du client et ne prouve rien : un PDF ou un HTML
+ * déclaré `image/png` passait, et le floutage échouait silencieusement.
+ */
+export function detectIdentityImageType(buffer: Buffer): 'image/jpeg' | 'image/png' | 'image/webp' | null {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'image/png';
+  }
+  if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
+    return 'image/webp';
+  }
+  return null;
+}
+
+/** Libellé donné à une demande restée sans examen au-delà de son échéance. */
+const EXPIRED_REJECTION_REASON =
+  'Demande expirée sans examen : votre document a été supprimé, vous pouvez en soumettre un nouveau.';
+
 function safelyDeleteDocument(referenceId: string) {
   try {
     deleteSecureDocument(referenceId);
   } catch (error) {
     logger.error('Erreur lors de la suppression du document d\'identité', { error });
+  }
+}
+
+/**
+ * Prévient l'utilisateur du résultat. Un échec d'envoi (SMTP indisponible) ne
+ * doit pas faire échouer la décision, déjà enregistrée.
+ */
+async function notifyVerificationResult(userId: string, approved: boolean, reason?: string) {
+  const user = await User.findById(userId).select('email');
+  if (!user?.email) return;
+  try {
+    if (approved) {
+      await sendVerificationResultEmail(user.email, true);
+    } else {
+      await sendVerificationResultEmail(user.email, false, reason);
+    }
+  } catch (error) {
+    logger.error('Email de résultat de vérification non envoyé', {
+      userId,
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
 }
 
@@ -72,6 +120,11 @@ export async function submitIdentityVerification({
     throw new HttpError(400, 'Type de document invalide');
   }
 
+  const detectedType = detectIdentityImageType(fileBuffer);
+  if (!detectedType) {
+    throw new HttpError(400, 'Format non supporté : envoyez une photo JPEG, PNG ou WebP de votre document');
+  }
+
   const existingVerification = await IdentityVerification.findOne({
     user: userId,
     status: 'pending'
@@ -81,7 +134,7 @@ export async function submitIdentityVerification({
     throw new HttpError(409, 'Une demande de vérification est déjà en cours de traitement');
   }
 
-  const documentReferenceId = await secureStoreDocument(fileBuffer, mimetype, documentType);
+  const documentReferenceId = await secureStoreDocument(fileBuffer, detectedType, documentType);
 
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + 30);
@@ -90,6 +143,7 @@ export async function submitIdentityVerification({
     user: userId,
     documentType,
     documentReferenceId,
+    consentGivenAt: new Date(),
     expiresAt
   });
 
@@ -181,6 +235,9 @@ export async function approveIdentityVerification({
   verification.processedAt = new Date();
   verification.processedBy = adminId;
   await verification.save();
+  // Supprimé tout de suite : si l'email échouait avant, le document restait
+  // sur le disque pour toujours (la demande n'étant plus « pending »).
+  safelyDeleteDocument(verification.documentReferenceId);
 
   await User.findByIdAndUpdate(verification.user, {
     isIdentityVerified: true,
@@ -188,12 +245,7 @@ export async function approveIdentityVerification({
     verificationLevel: 'complete'
   });
 
-  const user = await User.findById(verification.user);
-  if (user?.email) {
-    await sendVerificationResultEmail(user.email, true);
-  }
-
-  safelyDeleteDocument(verification.documentReferenceId);
+  await notifyVerificationResult(String(verification.user), true);
 
   await recordAuditLog({
     adminId,
@@ -229,13 +281,9 @@ export async function rejectIdentityVerification({
   verification.processedBy = adminId;
   verification.rejectionReason = reason;
   await verification.save();
-
-  const user = await User.findById(verification.user);
-  if (user?.email) {
-    await sendVerificationResultEmail(user.email, false, reason);
-  }
-
   safelyDeleteDocument(verification.documentReferenceId);
+
+  await notifyVerificationResult(String(verification.user), false, reason);
 
   await recordAuditLog({
     adminId,
@@ -277,6 +325,60 @@ export async function listPendingVerifications(adminId: string, page: number, li
       pages: Math.ceil(total / limit)
     }
   };
+}
+
+/**
+ * Document d'une demande en attente, déchiffré pour l'examen par un admin.
+ * Sans cette route, l'approbation se faisait à l'aveugle. Chaque consultation
+ * est tracée dans l'audit log (accès à une donnée d'identité).
+ */
+export async function getVerificationDocumentForAdmin(verificationId: string, adminId: string) {
+  const verification = await loadPendingVerification(verificationId);
+
+  let document;
+  try {
+    document = retrieveSecureDocument(verification.documentReferenceId);
+  } catch (error) {
+    logger.error('Document d\'identité illisible', {
+      verificationId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    throw new HttpError(404, 'Document introuvable ou expiré');
+  }
+
+  await recordAuditLog({
+    adminId,
+    action: 'verification_document_viewed',
+    targetType: 'verification',
+    targetId: verification._id as any,
+    metadata: { userId: String(verification.user) }
+  });
+
+  return { buffer: document.buffer, contentType: String(document.metadata.type || 'image/jpeg') };
+}
+
+/**
+ * Clôt les demandes restées sans examen au-delà de `expiresAt` et supprime
+ * leur document, puis purge les fichiers orphelins expirés. Sans cette tâche,
+ * les pièces d'identité restaient stockées indéfiniment.
+ */
+export async function expireStaleVerifications(now = new Date()) {
+  const stale = await IdentityVerification.find({ status: 'pending', expiresAt: { $lt: now } });
+
+  for (const verification of stale) {
+    safelyDeleteDocument(verification.documentReferenceId);
+    verification.status = 'rejected';
+    verification.processedAt = now;
+    verification.rejectionReason = EXPIRED_REJECTION_REASON;
+    await verification.save();
+  }
+
+  cleanExpiredDocuments();
+
+  if (stale.length > 0) {
+    logger.info('Demandes de vérification expirées clôturées', { count: stale.length });
+  }
+  return stale.length;
 }
 
 export async function cancelUserVerification(userId: string) {

@@ -1,8 +1,9 @@
 import User from '../../../models/userModel';
-import { validateEmail, validatePhoneNumber, validateUsername } from '../../../commons/utils/validators';
+import { validateEmail, normalizePhoneNumber, validateUsername } from '../../../commons/utils/validators';
 import { sendVerificationEmail } from '../../../commons/services/emailService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import { eraseUserAccount } from '../../users/services/accountErasureService';
 
 async function loadUserOr404(userId: string) {
   const user = await User.findById(userId);
@@ -116,16 +117,25 @@ export async function updateProfileData(userId: string, body: any) {
       user.isPhoneVerified = false;
       phoneNumberUpdated = true;
     } else {
-      if (!validatePhoneNumber(phoneNumber)) {
+      const normalizedPhone = normalizePhoneNumber(phoneNumber);
+      if (!normalizedPhone) {
         throw new HttpError(400, 'Format de numéro de téléphone invalide');
       }
 
-      if (user.phoneNumber !== phoneNumber) {
-        user.phoneNumber = phoneNumber;
+      if (user.phoneNumber !== normalizedPhone) {
+        user.phoneNumber = normalizedPhone;
         user.isPhoneVerified = false;
         phoneNumberUpdated = true;
       }
     }
+  }
+
+  // Un code SMS en cours a été envoyé à l'ANCIEN numéro : le garder
+  // permettait de faire valider un numéro arbitraire avec son propre code.
+  if (phoneNumberUpdated) {
+    user.phoneVerificationCode = undefined;
+    user.phoneVerificationExpires = undefined;
+    user.phoneVerificationAttempts = undefined;
   }
 
   if (paypalEmail !== undefined && paypalEmail !== user.paypalEmail) {
@@ -273,18 +283,9 @@ export async function softDeleteAccount(userId: string, password?: string) {
     }
   }
 
-  const user = userWithPassword;
-
-  user.accountStatus = 'deleted';
-  user.email = `deleted_${user._id}_${user.email}`;
-  user.username = `deleted_${user._id}_${user.username}`;
-  await user.save();
-
-  // Envoyer un email de confirmation
-  // await sendAccountDeletionEmail(user);
-
-  // Invalider tous les refresh tokens de l'utilisateur
-  // await invalidateAllUserRefreshTokens(userId);
+  // Effacement RGPD complet : l'ancienne version gardait l'email en clair
+  // (`deleted_<id>_<email>`) et laissait les sessions ouvertes.
+  await eraseUserAccount(userId);
 }
 
 export async function setPayPalEmail(userId: string, paypalEmail: string, confirmPassword?: string) {

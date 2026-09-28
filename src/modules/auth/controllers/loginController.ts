@@ -7,13 +7,10 @@ import {
   verifyRefreshToken,
   tokenBlacklist 
 } from '../../../commons/services/tokenService';
-import jwt from 'jsonwebtoken';
 import logger from '../../../commons/utils/logger';
-import env from '../../../config/env';
 import {
   isTwoFactorEnabled,
-  TWO_FACTOR_TOKEN_PURPOSE,
-  TWO_FACTOR_TOKEN_EXPIRES_IN
+  issueTwoFactorChallengeToken
 } from '../services/twoFactorService';
 
 /**
@@ -65,11 +62,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     // Aucun jeton d'accès n'est délivré ici ; on rend un jeton de défi
     // à courte durée de vie, utilisable uniquement sur /auth/2fa/verify.
     if (isTwoFactorEnabled(user)) {
-      const twoFactorToken = jwt.sign(
-        { userId: user._id.toString(), purpose: TWO_FACTOR_TOKEN_PURPOSE },
-        env.JWT_SECRET,
-        { expiresIn: TWO_FACTOR_TOKEN_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
-      );
+      const twoFactorToken = issueTwoFactorChallengeToken(user._id.toString());
 
       logger.info('Défi de double authentification émis', {
         userId: user._id.toString().substring(0, 5) + '...'
@@ -139,8 +132,8 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Invalider le refresh token
-    if (refreshToken) {
+    // Invalider le refresh token (chaîne uniquement : un objet deviendrait un filtre Mongo)
+    if (typeof refreshToken === 'string' && refreshToken) {
       await invalidateRefreshToken(refreshToken);
     }
 
@@ -158,7 +151,7 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
   try {
     const { refreshToken } = req.body;
     
-    if (!refreshToken) {
+    if (typeof refreshToken !== 'string' || !refreshToken) {
       res.status(400).json({ message: 'Refresh token requis' });
       return;
     }

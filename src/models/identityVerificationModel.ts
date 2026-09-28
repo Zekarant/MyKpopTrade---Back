@@ -3,9 +3,10 @@ import mongoose, { Schema, Document } from "mongoose";
 export interface IIdentityVerification extends Document {
     user: mongoose.Types.ObjectId;
     status: 'pending' | 'approved' | 'rejected';
-    document_type: 'id_card' | 'passport' | 'driver_license';
+    documentType: 'id_card' | 'passport' | 'driver_license';
     documentReferenceId: string;
     submittedAt: Date;
+    consentGivenAt?: Date;
     processedAt?: Date;
     processedBy?: mongoose.Types.ObjectId;
     rejectionReason?: string;
@@ -36,6 +37,8 @@ const IIdentityVerificationSchema: Schema = new Schema({
         type: Date,
         default: Date.now
     },
+    // Preuve du consentement explicite (RGPD art. 7.1) donné au dépôt.
+    consentGivenAt: Date,
     processedAt: Date,
     processedBy: {
         type: mongoose.Schema.Types.ObjectId,

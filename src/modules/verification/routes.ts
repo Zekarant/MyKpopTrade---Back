@@ -1,8 +1,9 @@
 import express from 'express';
 import multer from 'multer';
 import * as identityVerificationController from './controllers/identityVerificationController';
-import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
-import { requireAdmin } from '../../commons/middlewares/roleMiddleware';
+// requireAdmin vérifie le rôle en base : un admin rétrogradé perd l'accès tout
+// de suite, pas à l'expiration de son JWT (roleMiddleware lisait le JWT).
+import { authenticateJWT, requireAdmin } from '../../commons/middlewares/authMiddleware';
 
 const router = express.Router();
 
@@ -39,6 +40,13 @@ router.get(
   authenticateJWT,
   requireAdmin,
   identityVerificationController.getPendingVerifications
+);
+
+router.get(
+  '/admin/document/:id',
+  authenticateJWT,
+  requireAdmin,
+  identityVerificationController.getVerificationDocument
 );
 
 // Vérifiez que le paramètre est cohérent

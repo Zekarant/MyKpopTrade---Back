@@ -131,6 +131,11 @@ export const initializePassport = (): void => {
             if (user) {
               // Ce Google est déjà lié → connexion au compte propriétaire
             } else {
+              // Sans email vérifié, rattacher par email offrirait le compte
+              // existant à quiconque déclare cette adresse chez le fournisseur.
+              if (profile._json?.email_verified === false) {
+                return done(null, false, { message: 'google_email_unverified' });
+              }
               user = await User.findOne({ email });
 
               if (user) {
@@ -322,6 +327,12 @@ export const initializePassport = (): void => {
             if (user) {
               // Ce Discord est déjà lié → connexion au compte propriétaire
             } else {
+              // Discord renvoie aussi des emails jamais vérifiés : sans ce
+              // contrôle, créer un Discord avec l'email d'une victime suffisait
+              // à se connecter sur son compte (admin compris).
+              if (profile.verified !== true) {
+                return done(null, false, { message: 'discord_email_unverified' });
+              }
               // Pas de liaison existante → chercher par email
               user = await User.findOne({ email });
 

@@ -1,6 +1,7 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import { IUser } from '../../models/userModel';
 import env from '../../config/env';
+import logger from '../utils/logger';
 
 const BASE_URL = env.FRONTEND_URL;
 const FROM_EMAIL = env.FROM_EMAIL;
@@ -327,7 +328,9 @@ export const sendShipmentAutoConfirmedEmail = async (
  * Envoie un email en utilisant le transporteur configuré
  * @param options Options de l'email (destinataire, sujet, contenu HTML)
  */
-async function sendEmail(options: { to: string; subject: string; html: any; }): Promise<void> {
+// Exportée : GdprLogger.sendSecurityAlert l'appelle pour l'alerte DPO (art. 33).
+// Non exportée, l'appel levait un TypeError avalé et l'alerte ne partait jamais.
+export async function sendEmail(options: { to: string; subject: string; html: any; }): Promise<void> {
   try {
     const transporter = await createTransporter();
     
@@ -340,7 +343,10 @@ async function sendEmail(options: { to: string; subject: string; html: any; }): 
 
     await transporter.sendMail(mailOptions);
   } catch (error) {
-    console.error('Erreur lors de l\'envoi de l\'email:', error);
+    // Via le logger (masquage des données personnelles), pas console.error.
+    logger.error('Erreur lors de l\'envoi de l\'email', {
+      error: error instanceof Error ? error.message : String(error)
+    });
     // En développement, on peut choisir de ne pas propager l'erreur
     // En production, il peut être préférable de la propager pour une gestion centralisée
     if (process.env.NODE_ENV === 'production') {

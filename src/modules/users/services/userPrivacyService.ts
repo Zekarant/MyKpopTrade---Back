@@ -3,10 +3,18 @@ import User from '../../../models/userModel';
 import Payment from '../../../models/paymentModel';
 import Product from '../../../models/productModel';
 import Conversation from '../../../models/conversationModel';
+import Message from '../../../models/messageModel';
+import Rating from '../../../models/ratingModel';
+import Report from '../../../models/reportModel';
+import Dispute from '../../../models/disputeModel';
+import SearchHistory from '../../../models/historicSearchModel';
+import IdentityVerification from '../../../models/identityVerificationModel';
+import Post from '../../posts/model';
 import { NotificationService } from '../../notifications/services/notificationService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
+import { erasePersonalFields } from './accountErasureService';
 
 async function loadUserOr404(userId: string) {
   const user = await User.findById(userId);
@@ -75,7 +83,11 @@ export async function buildUserDataExport(userId: string) {
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
 
-  const [buyerPayments, sellerPayments, products, conversations] = await Promise.all([
+  const [
+    buyerPayments, sellerPayments, products, conversations,
+    messagesSent, ratingsGiven, ratingsReceived, posts, reports, disputes,
+    searchHistory, identityVerifications
+  ] = await Promise.all([
     Payment.find({ buyer: userId })
       .select('-__v')
       .populate('product', 'title price currency'),
@@ -86,7 +98,19 @@ export async function buildUserDataExport(userId: string) {
 
     Product.find({ seller: userId }).select('-__v'),
 
-    Conversation.find({ participants: userId }).select('title createdAt updatedAt')
+    Conversation.find({ participants: userId }).select('title createdAt updatedAt'),
+
+    // Art. 15 : l'export omettait tout contenu produit par l'utilisateur.
+    Message.find({ sender: userId }).select('conversation content contentType attachments createdAt').lean(),
+    Rating.find({ reviewer: userId }).select('recipient rating review type createdAt').lean(),
+    Rating.find({ recipient: userId }).select('reviewer rating review type createdAt').lean(),
+    Post.find({ author: userId }).select('-__v -likes').lean(),
+    Report.find({ reporter: userId }).select('-__v -adminNotes').lean(),
+    Dispute.find({ $or: [{ buyer: userId }, { seller: userId }] }).select('-__v').lean(),
+    SearchHistory.find({ userId }).select('query filters lastSearched searchCount').lean(),
+    IdentityVerification.find({ user: userId })
+      .select('documentType status submittedAt processedAt rejectionReason consentGivenAt')
+      .lean()
   ]);
 
   const userData = {
@@ -94,6 +118,22 @@ export async function buildUserDataExport(userId: string) {
       id: user._id,
       username: user.username,
       email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      legalName: user.legalName,
+      address: user.address,
+      phoneNumber: user.phoneNumber,
+      isPhoneVerified: user.isPhoneVerified,
+      bio: user.bio,
+      location: user.location,
+      socialLinks: user.socialLinks,
+      linkedSocialAccounts: {
+        google: Boolean(user.socialAuth?.google?.id),
+        discord: Boolean(user.socialAuth?.discord?.id),
+        facebook: Boolean(user.socialAuth?.facebook?.id)
+      },
+      twoFactorEnabled: user.twoFactor?.enabled === true,
+      isIdentityVerified: user.isIdentityVerified,
       paypalEmail: user.paypalEmail,
       profilePicture: user.profilePicture,
       createdAt: user.createdAt,
@@ -112,7 +152,16 @@ export async function buildUserDataExport(userId: string) {
       asSeller: sellerPayments
     },
     products,
-    conversations
+    conversations,
+    messagesSent,
+    ratings: { given: ratingsGiven, received: ratingsReceived },
+    posts,
+    reports,
+    disputes,
+    searchHistory,
+    identityVerifications,
+    favorites: user.favorites,
+    followedGroups: user.followedGroups
   };
 
   const fileName = `user-data-${createHash('sha256').update(userId).digest('hex').substring(0, 8)}-${Date.now()}.json`;
@@ -214,29 +263,25 @@ export async function anonymizeAccount(userId: string, confirmation: unknown) {
   }
 
   const user = await loadUserOr404(userId);
-  const previousUsername = user.username;
 
   const anonymousId = `anon_${createHash('sha256').update(userId + Date.now().toString()).digest('hex').substring(0, 10)}`;
 
-  user.username = anonymousId;
-  user.email = `${anonymousId}@anonymized.com`;
-  user.paypalEmail = undefined;
-  user.profilePicture = 'https://mykpoptrade.com/images/avatar-default.png';
-  user.anonymized = true;
-
-  user.marketingConsent = false;
-
-  await user.save();
+  // Même effacement des données personnelles que la suppression, mais le
+  // compte reste actif (connexion par le nouvel identifiant + mot de passe).
+  erasePersonalFields(user, anonymousId);
+  await user.save({ validateBeforeSave: false });
 
   logger.info('Données utilisateur anonymisées', {
     userId: userId.substring(0, 5) + '...'
   });
 
+  // Jamais l'ancien pseudo dans l'alerte : associé au nouvel identifiant (et
+  // stocké dans Discord + les notifications admin), il rendait l'anonymisation réversible.
   dispatchAdminAlert({
     event: 'gdpr.self_anonymized',
     severity: 'warning',
     title: 'Anonymisation demandée par un utilisateur',
-    summary: `${previousUsername} a anonymisé ses données (RGPD Art. 17).`,
+    summary: 'Un utilisateur a anonymisé ses données (RGPD Art. 17).',
     adminTab: 'rgpd',
     fields: [{ name: 'Nouvel identifiant', value: anonymousId, inline: true }],
     data: { userId, anonymousId }

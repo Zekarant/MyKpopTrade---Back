@@ -19,7 +19,7 @@ export const sendNewMessage = asyncHandler(async (req: Request, res: Response) =
   const userId = (req.user as any).id;
   const username = (req.user as any)?.username;
   const conversationId = req.params.id as string;
-  const { content, contentType = 'text' } = req.body;
+  const { content } = req.body;
   const files = Array.isArray(req.files) ? (req.files as Express.Multer.File[]) : undefined;
 
   try {
@@ -28,7 +28,6 @@ export const sendNewMessage = asyncHandler(async (req: Request, res: Response) =
       username,
       conversationId,
       content,
-      contentType,
       files
     });
 

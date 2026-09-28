@@ -6,6 +6,7 @@ import { dispatchAdminAlert } from '../../../commons/services/adminAlertService'
 import { CSV_EXPORT_ROW_LIMIT, sendCsvDownload, wantsCsv } from '../../../commons/utils/csv';
 import { NotificationService } from '../../notifications/services/notificationService';
 import logger from '../../../commons/utils/logger';
+import { escapeRegex } from '../../../commons/utils/escapeRegex';
 
 const productStatusLabel = (product: any): string => {
   if (product.isSold) return 'vendu';
@@ -27,9 +28,10 @@ export const getAllProducts = asyncHandler(async (req: Request, res: Response) =
   const filter: any = {};
 
   if (search) {
+    const pattern = escapeRegex(String(search));
     filter.$or = [
-      { title: { $regex: search, $options: 'i' } },
-      { description: { $regex: search, $options: 'i' } }
+      { title: { $regex: pattern, $options: 'i' } },
+      { description: { $regex: pattern, $options: 'i' } }
     ];
   }
 

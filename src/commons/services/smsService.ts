@@ -14,15 +14,28 @@ const client = smsEnabled && accountSid && authToken ?
   twilio(accountSid, authToken) :
   null;
 
+/** L'envoi de SMS n'est pas possible dans cet environnement (config absente). */
+export class SmsUnavailableError extends Error {
+  constructor() {
+    super('L\'envoi de SMS est momentanément indisponible. Veuillez réessayer plus tard.');
+    this.name = 'SmsUnavailableError';
+  }
+}
+
 /**
  * Envoie un SMS de vérification via Twilio
- * @param phoneNumber Numéro de téléphone destinataire
+ * @param phoneNumber Numéro de téléphone destinataire (E.164)
  * @param code Code de vérification à 6 chiffres
  */
 export const sendVerificationSMS = async (phoneNumber: string, code: string): Promise<void> => {
   const message = `Votre code de vérification MyKpopTrade est : ${code}`;
-  
-  if (smsEnabled && client && fromPhoneNumber) {
+
+  if (smsEnabled) {
+    // env.ts refuse déjà de démarrer si SMS_ENABLED=true sans config Twilio ;
+    // ce garde-fou évite qu'un « succès » soit renvoyé sans SMS réellement parti.
+    if (!client || !fromPhoneNumber) {
+      throw new SmsUnavailableError();
+    }
     try {
       await client.messages.create({
         body: message,
@@ -39,10 +52,14 @@ export const sendVerificationSMS = async (phoneNumber: string, code: string): Pr
     return;
   }
 
-  // Hors configuration Twilio : on trace le code pour rendre le parcours
-  // testable en développement. `code` n'est pas dans la liste des champs
-  // masqués du logger, c'est volontaire ici et sans risque : ce chemin est
-  // inatteignable dès que SMS_ENABLED est vrai.
+  // En production, ne jamais simuler : l'utilisateur croirait avoir reçu un
+  // code, et celui-ci finirait lisible dans les logs.
+  if (env.NODE_ENV === 'production') {
+    throw new SmsUnavailableError();
+  }
+
+  // Développement / tests uniquement : on trace le code pour rendre le
+  // parcours testable sans compte Twilio.
   logger.warn('SMS désactivé — code de vérification non envoyé', {
     phoneNumber,
     simulatedCode: code
@@ -60,3 +77,7 @@ export const sendVerificationSMS = async (phoneNumber: string, code: string): Pr
 export const generateVerificationCode = (): string => {
   return crypto.randomInt(100000, 1000000).toString();
 };
+
+/** Condensat stocké en base à la place du code, comme les codes de secours 2FA. */
+export const hashVerificationCode = (code: string): string =>
+  crypto.createHash('sha256').update(code).digest('hex');

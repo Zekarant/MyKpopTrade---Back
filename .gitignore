@@ -37,3 +37,5 @@ coverage/
 Thumbs.db
 
 uploads/
+# Pièces d'identité chiffrées (secureStorageService) : ne jamais les versionner
+secure_storage/

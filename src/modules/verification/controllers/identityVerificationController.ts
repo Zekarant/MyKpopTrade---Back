@@ -7,7 +7,8 @@ import {
   approveIdentityVerification,
   rejectIdentityVerification,
   listPendingVerifications,
-  cancelUserVerification
+  cancelUserVerification,
+  getVerificationDocumentForAdmin
 } from '../services/identityVerificationService';
 
 /**
@@ -103,6 +104,30 @@ export const getPendingVerifications = asyncHandler(async (req: Request, res: Re
   try {
     const result = await listPendingVerifications(adminId, page, limit);
     return res.status(200).json(result);
+  } catch (error) {
+    const mapped = mapHttpError(res, error);
+    if (mapped) return mapped;
+    throw error;
+  }
+});
+
+/**
+ * Affiche le document d'une demande en attente (accès administrateur).
+ * no-store : une pièce d'identité ne doit rester dans aucun cache.
+ */
+export const getVerificationDocument = asyncHandler(async (req: Request, res: Response) => {
+  const verificationId = String(req.params.id || '');
+  const adminId = (req.user as any).id;
+
+  try {
+    const { buffer, contentType } = await getVerificationDocumentForAdmin(verificationId, adminId);
+    res.set({
+      'Content-Type': contentType,
+      'Content-Disposition': 'inline',
+      'Cache-Control': 'no-store, private',
+      'X-Content-Type-Options': 'nosniff'
+    });
+    return res.status(200).send(buffer);
   } catch (error) {
     const mapped = mapHttpError(res, error);
     if (mapped) return mapped;

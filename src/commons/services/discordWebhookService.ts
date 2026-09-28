@@ -30,8 +30,10 @@ const truncate = (value: string, maxLength: number): string =>
 export const isDiscordWebhookConfigured = (): boolean =>
   Boolean(env.ADMIN_DISCORD_WEBHOOK_URL);
 
-export const postDiscordEmbed = async (embed: DiscordEmbed): Promise<boolean> => {
-  const webhookUrl = env.ADMIN_DISCORD_WEBHOOK_URL;
+export const postDiscordEmbed = async (
+  embed: DiscordEmbed,
+  webhookUrl: string | undefined = env.ADMIN_DISCORD_WEBHOOK_URL
+): Promise<boolean> => {
   if (!webhookUrl) return false;
 
   const payload = {

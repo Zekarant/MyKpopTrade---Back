@@ -43,6 +43,9 @@ const envSchema = z.object({
   // Chaîne vide acceptée (webhook non configuré en local) : `isDiscordWebhookConfigured`
   // fait déjà `Boolean(...)` dessus, donc '' est traité comme "absent" en aval.
   ADMIN_DISCORD_WEBHOOK_URL: z.union([z.string().url(), z.literal('')]).optional(),
+  // Canal des messages du formulaire de contact. Absent : repli sur le webhook admin.
+  // Auparavant exposé dans le bundle du front (VITE_DISCORD_WEBHOOK_URL).
+  SUPPORT_DISCORD_WEBHOOK_URL: z.union([z.string().url(), z.literal('')]).optional(),
 
   // Analyse IA (Mistral La Plateforme) : pré-diagnostic de litiges, modération
   // des annonces suspectes... Clé absente = ces fonctionnalités sont inactives,
@@ -105,6 +108,11 @@ const envSchema = z.object({
     message:
       'En production, PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, MESSAGE_ENCRYPTION_KEY, ENCRYPTION_KEY et un JWT_SECRET custom sont requis.'
   }
+).refine(
+  // SMS activé sans Twilio complet : l'API promettrait des SMS jamais envoyés.
+  (data) => !data.SMS_ENABLED ||
+    Boolean(data.TWILIO_ACCOUNT_SID && data.TWILIO_AUTH_TOKEN && data.TWILIO_PHONE_NUMBER),
+  { message: 'SMS_ENABLED=true exige TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN et TWILIO_PHONE_NUMBER.' }
 );
 
 // Vérifier qu'un fichier .env existe et alerter en mode développement s'il manque
@@ -144,6 +152,7 @@ export const env: Env = envValidation.data;
 // jamais pouvoir atteindre un service externe réel, quoi que contienne le .env.
 if (env.NODE_ENV === 'test') {
   env.ADMIN_DISCORD_WEBHOOK_URL = '';
+  env.SUPPORT_DISCORD_WEBHOOK_URL = '';
   env.MISTRAL_API_KEY = undefined;
   env.GEMINI_API_KEY = undefined;
 }

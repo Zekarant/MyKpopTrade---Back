@@ -4,6 +4,10 @@ import { sendPasswordResetEmail } from '../../../commons/services/emailService';
 import { validatePassword } from '../../../commons/utils/validators';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import logger from '../../../commons/utils/logger';
+import { invalidateAllUserRefreshTokens } from '../../../commons/services/tokenService';
+
+const FORGOT_PASSWORD_RESPONSE =
+  'Si cet email est associé à un compte, un lien de réinitialisation a été envoyé.';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -18,19 +22,17 @@ interface AuthenticatedRequest extends Request {
  */
 export const forgotPassword = asyncHandler(async (req: Request, res: Response): Promise<void> => {
   const { email } = req.body;
-  
-  if (!email) {
+
+  if (typeof email !== 'string' || !email) {
     res.status(400).json({ message: 'Email requis' });
     return;
   }
 
   const user = await User.findOne({ email });
-  
+
   if (!user) {
     // Pour des raisons de sécurité, ne pas révéler si l'email existe
-    res.status(200).json({ 
-      message: 'Si cet email est associé à un compte, un lien de réinitialisation a été envoyé.' 
-    });
+    res.status(200).json({ message: FORGOT_PASSWORD_RESPONSE });
     return;
   }
 
@@ -46,9 +48,9 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response): 
     userId: user._id 
   });
 
-  res.status(200).json({
-    message: 'Un lien de réinitialisation de mot de passe a été envoyé à votre adresse email.'
-  });
+  // Même réponse que pour un email inconnu : sinon la route révèle quels
+  // emails ont un compte.
+  res.status(200).json({ message: FORGOT_PASSWORD_RESPONSE });
 });
 
 /**
@@ -98,7 +100,11 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response): P
   user.passwordResetExpires = undefined;
   await user.save();
 
-  logger.info('Mot de passe réinitialisé avec succès', { 
+  // Une réinitialisation sert souvent après une compromission : les sessions
+  // ouvertes avec l'ancien mot de passe ne doivent plus pouvoir se rafraîchir.
+  await invalidateAllUserRefreshTokens(user._id.toString());
+
+  logger.info('Mot de passe réinitialisé avec succès', {
     userId: user._id,
     email: user.email 
   });

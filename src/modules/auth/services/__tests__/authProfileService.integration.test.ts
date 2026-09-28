@@ -182,7 +182,7 @@ describe('authProfileService (integration)', () => {
   });
 
   describe('softDeleteAccount', () => {
-    it('marque le compte deleted + préfixe email/username', async () => {
+    it('marque le compte deleted et efface email et pseudo d\'origine (RGPD art. 17)', async () => {
       const user = await createTestUser();
       const originalEmail = user.email;
       const originalUsername = user.username;
@@ -191,9 +191,9 @@ describe('authProfileService (integration)', () => {
 
       const refreshed = await User.findById(user._id);
       expect(refreshed?.accountStatus).toBe('deleted');
-      expect(refreshed?.email).toContain(originalEmail);
       expect(refreshed?.email).toContain('deleted_');
-      expect(refreshed?.username).toContain(originalUsername);
+      expect(refreshed?.email).not.toContain(originalEmail);
+      expect(refreshed?.username).not.toContain(originalUsername);
     });
 
     it('401 si mot de passe incorrect', async () => {

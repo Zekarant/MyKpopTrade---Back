@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { generateAccessToken, generateRefreshToken } from '../../../commons/services/tokenService';
 import { IUser } from '../../../models/userModel';
+import { isTwoFactorEnabled, issueTwoFactorChallengeToken } from '../services/twoFactorService';
 
 /**
  * Gère la redirection après authentification sociale réussie.
@@ -19,6 +20,19 @@ export const oauthCallback = async (req: Request, res: Response): Promise<void> 
         res.status(401).json({ message: 'Authentification échouée' });
       } else {
         res.redirect(`${process.env.FRONTEND_URL}/login?error=auth_failed`);
+      }
+      return;
+    }
+
+    // 2FA active : l'OAuth remplace le mot de passe, pas le second facteur.
+    // Même défi que /auth/login ; le front ouvre l'étape 2FA de /login.
+    if (isTwoFactorEnabled(user)) {
+      const twoFactorToken = issueTwoFactorChallengeToken(String(user._id));
+      if (responseMode === 'json') {
+        res.status(200).json({ requiresTwoFactor: true, twoFactorToken });
+      } else {
+        const params = new URLSearchParams({ twoFactorToken });
+        res.redirect(`${process.env.FRONTEND_URL}/login?${params.toString()}`);
       }
       return;
     }

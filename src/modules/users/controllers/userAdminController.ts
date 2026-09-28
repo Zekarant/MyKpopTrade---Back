@@ -11,6 +11,8 @@ import Post from '../../posts/model';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { recordAuditLog } from '../../../commons/utils/auditService';
 import { mapHttpError } from '../../../commons/utils/httpErrorMapper';
+import { escapeRegex } from '../../../commons/utils/escapeRegex';
+import { eraseUserAccount } from '../services/accountErasureService';
 import { CSV_EXPORT_ROW_LIMIT, sendCsvDownload, wantsCsv } from '../../../commons/utils/csv';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { reactivateUser, suspendUser } from '../services/userSanctionService';
@@ -28,9 +30,10 @@ export const getUsers = asyncHandler(async (req: Request, res: Response) => {
   const filter: any = {};
 
   if (search) {
+    const pattern = escapeRegex(String(search));
     filter.$or = [
-      { username: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } }
+      { username: { $regex: pattern, $options: 'i' } },
+      { email: { $regex: pattern, $options: 'i' } }
     ];
   }
 
@@ -218,7 +221,7 @@ export const adminGlobalSearch = asyncHandler(async (req: Request, res: Response
     return res.status(200).json({ results: [] });
   }
 
-  const pattern = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  const pattern = new RegExp(escapeRegex(term), 'i');
 
   const [users, products, posts] = await Promise.all([
     User.find({ $or: [{ username: pattern }, { email: pattern }] })
@@ -595,15 +598,16 @@ export const getRgpdStats = asyncHandler(async (req: Request, res: Response) => 
  * RGPD: Export des données d'un utilisateur (Art. 15 - Droit d'accès)
  */
 export const adminExportUserData = asyncHandler(async (req: Request, res: Response) => {
-  const search = req.query.search as string;
-  if (!search) {
+  const search = req.query.search;
+  if (!search || typeof search !== 'string') {
     return res.status(400).json({ message: 'Paramètre de recherche requis' });
   }
 
+  const exactPattern = `^${escapeRegex(search)}$`;
   const user = await User.findOne({
     $or: [
-      { username: { $regex: `^${search}$`, $options: 'i' } },
-      { email: { $regex: `^${search}$`, $options: 'i' } }
+      { username: { $regex: exactPattern, $options: 'i' } },
+      { email: { $regex: exactPattern, $options: 'i' } }
     ]
   }).select('-password -emailVerificationToken -passwordResetToken -phoneVerificationCode -adminNotes');
 
@@ -625,14 +629,17 @@ export const adminExportUserData = asyncHandler(async (req: Request, res: Respon
  */
 export const adminAnonymizeUser = asyncHandler(async (req: Request, res: Response) => {
   const { search } = req.body;
-  if (!search) {
+  if (!search || typeof search !== 'string') {
     return res.status(400).json({ message: 'Paramètre de recherche requis' });
   }
 
+  // Correspondance exacte : un motif comme `.*` ne doit jamais désigner
+  // un utilisateur arbitraire pour une anonymisation irréversible.
+  const exactPattern = `^${escapeRegex(search)}$`;
   const user = await User.findOne({
     $or: [
-      { username: { $regex: `^${search}$`, $options: 'i' } },
-      { email: { $regex: `^${search}$`, $options: 'i' } }
+      { username: { $regex: exactPattern, $options: 'i' } },
+      { email: { $regex: exactPattern, $options: 'i' } }
     ]
   });
 
@@ -644,19 +651,7 @@ export const adminAnonymizeUser = asyncHandler(async (req: Request, res: Respons
     return res.status(403).json({ message: 'Impossible d\'anonymiser un administrateur' });
   }
 
-  const anonymizedId = `anon_${user._id.toString().slice(-8)}`;
-  user.username = anonymizedId;
-  user.email = `${anonymizedId}@anonymized.local`;
-  user.profilePicture = '';
-  user.profileBanner = '';
-  user.bio = '';
-  user.location = '';
-  user.socialLinks = { instagram: '', twitter: '', discord: '' };
-  user.anonymized = true;
-  user.accountStatus = 'deleted';
-  user.isActive = false;
-
-  await user.save({ validateBeforeSave: false });
+  const { pseudonym: anonymizedId } = await eraseUserAccount(user._id.toString());
 
   await AuditLog.create({
     admin: (req as any).user.id,
@@ -691,20 +686,7 @@ export const confirmDeletion = asyncHandler(async (req: Request, res: Response) 
     return res.status(404).json({ message: 'Utilisateur non trouvé' });
   }
 
-  const anonymizedId = `deleted_${user._id.toString().slice(-8)}`;
-  user.username = anonymizedId;
-  user.email = `${anonymizedId}@deleted.local`;
-  user.profilePicture = '';
-  user.profileBanner = '';
-  user.bio = '';
-  user.location = '';
-  user.socialLinks = { instagram: '', twitter: '', discord: '' };
-  user.anonymized = true;
-  user.accountStatus = 'deleted';
-  user.isActive = false;
-  user.scheduledForDeletion = false;
-
-  await user.save({ validateBeforeSave: false });
+  const { pseudonym: anonymizedId } = await eraseUserAccount(user._id.toString());
 
   await AuditLog.create({
     admin: (req as any).user.id,

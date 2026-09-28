@@ -86,7 +86,7 @@ export async function fetchConversation(
   await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
 
   const conversationRaw = await Conversation.findById(conversationId)
-    .populate('participants', 'username profilePicture email location bio preferences socialLinks statistics')
+    .populate('participants', 'username profilePicture location bio preferences socialLinks statistics')
     .populate({
       path: 'productId',
       select: 'title description price images seller category condition kpopGroup kpopMember albumName currency isAvailable allowOffers minOfferPercentage shippingOptions createdAt'
@@ -344,7 +344,7 @@ export async function createConversationForUser({
   }
 
   return await Conversation.findById(conversation._id)
-    .populate('participants', 'username profilePicture email')
+    .populate('participants', 'username profilePicture')
     .populate('productId', 'title price images')
     .populate('lastMessage');
 }

@@ -17,6 +17,7 @@ import albumRoutes from './modules/albums/routes';
 import searchRoutes from './modules/search/routes';
 import addressRoutes from './modules/addresses/routes';
 import { errorHandler, notFoundHandler } from './commons/middlewares/errorMiddleware';
+import { stripMongoOperatorsFromBody } from './commons/middlewares/mongoOperatorMiddleware';
 import { initializePassport } from './config/passport';
 import logger, { logAPIRequest } from './commons/utils/logger';
 import { verificationRoutes } from './modules/verification';
@@ -27,6 +28,7 @@ import seoRoutes from './modules/seo/routes';
 import disputeRoutes from './modules/disputes/routes';
 import cartRoutes from './modules/cart/routes';
 import faqRoutes from './modules/faqs/routes';
+import contactRoutes from './modules/contact/routes';
 
 /**
  * Crée l'application Express configurée (middlewares + routes + handlers).
@@ -68,6 +70,7 @@ export function createApp(): express.Express {
   // qui a ses propres limites et n'est pas concerné.
   app.use(express.json({ limit: env.BODY_LIMIT }));
   app.use(express.urlencoded({ extended: true, limit: env.BODY_LIMIT }));
+  app.use(stripMongoOperatorsFromBody);
 
   app.use((req, res, next) => {
     const startTime = Date.now();
@@ -95,8 +98,11 @@ export function createApp(): express.Express {
   //
   // Seuls les dossiers dont le contenu est public par nature sont servis ici.
   const PUBLIC_UPLOAD_DIRS = ['products', 'profiles', 'banners', 'ratings'];
+  // nosniff : le navigateur respecte le Content-Type déduit de l'extension et
+  // n'interprète jamais un fichier uploadé comme du HTML ou du script.
+  const setUploadHeaders = (res: express.Response) => res.setHeader('X-Content-Type-Options', 'nosniff');
   for (const dir of PUBLIC_UPLOAD_DIRS) {
-    app.use(`/uploads/${dir}`, express.static(path.join(__dirname, '../uploads', dir)));
+    app.use(`/uploads/${dir}`, express.static(path.join(__dirname, '../uploads', dir), { setHeaders: setUploadHeaders }));
   }
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/payments', paymentRoutes);
@@ -111,6 +117,7 @@ export function createApp(): express.Express {
   app.use('/api/disputes', disputeRoutes);
   app.use('/api/cart', cartRoutes);
   app.use('/api/faqs', faqRoutes);
+  app.use('/api/contact', contactRoutes);
 
   // Routes SEO publiques (sitemap, robots) servies à la racine pour les crawlers
   app.use('/', seoRoutes);

@@ -6,19 +6,24 @@ import User from '../../../models/userModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import KpopAlbum from '../../../models/albumModel';
 import { HttpError } from '../../../commons/utils/httpError';
+import { clampLimit } from '../../../commons/utils/pagination';
 import { validateProductData } from './productValidationService';
 import { notifyWishlistPriceDrop, notifyWishlistUnavailable } from './wishlistAlertService';
 import { dispatchProductModeration } from './productModerationService';
 
 const DEFAULT_LIST_LIMIT = 20;
+const MAX_LIST_LIMIT = 500;
 const DEFAULT_LIST_PAGE = 1;
 const DEFAULT_LIST_SORT = '-createdAt';
 
 const ALLOWED_PRODUCT_UPDATES = [
   'title', 'description', 'price', 'currency', 'condition',
   'category', 'kpopGroup', 'kpopMember', 'albumName',
-  'images', 'isAvailable', 'isReserved', 'reservedFor', 'shippingOptions'
+  'isAvailable', 'isReserved', 'reservedFor', 'shippingOptions'
 ];
+// `images` est volontairement absent : les chemins d'images ne doivent venir
+// que des fichiers reçus par multer. Accepter des chemins du client permettait
+// de faire supprimer n'importe quel fichier du serveur via DELETE /:id/images.
 
 function assertValidObjectId(productId: string) {
   if (!mongoose.Types.ObjectId.isValid(productId)) {
@@ -76,35 +81,15 @@ function assertOwnership(product: any, userId: string, message: string) {
   }
 }
 
-export function resolveProductImages(req: {
-  files?: any;
-  body: any;
-}): string[] {
-  let imageUrls: string[] = [];
-
-  if (req.files && Array.isArray(req.files) && req.files.length > 0) {
-    imageUrls = (req.files as Express.Multer.File[]).map(file =>
-      `/uploads/products/${path.basename(file.path)}`
-    );
-  }
-
-  const productData = req.body;
-  if (productData.images && Array.isArray(productData.images) && productData.images.length > 0) {
-    if (typeof productData.images === 'string') {
-      try {
-        const parsedImages = JSON.parse(productData.images);
-        if (Array.isArray(parsedImages)) {
-          imageUrls = [...imageUrls, ...parsedImages];
-        }
-      } catch (e) {
-        imageUrls.push(productData.images);
-      }
-    } else {
-      imageUrls = [...imageUrls, ...productData.images];
-    }
-  }
-
-  return imageUrls;
+/**
+ * Chemins publics des images reçues par multer. `req.body.images` est ignoré :
+ * un chemin fourni par le client finirait dans fs.unlinkSync à la suppression.
+ */
+export function resolveProductImages(req: { files?: any }): string[] {
+  if (!req.files || !Array.isArray(req.files)) return [];
+  return (req.files as Express.Multer.File[]).map(file =>
+    `/uploads/products/${path.basename(file.path)}`
+  );
 }
 
 export async function createProductForSeller({
@@ -204,8 +189,9 @@ export async function fetchProductById(productId: string, userId?: string) {
   enrichedProduct.shippingPrice = opts.nationalCost ?? opts.shippingCost ?? null;
 
   if (userId && userId !== product.seller._id.toString()) {
-    product.views += 1;
-    await product.save();
+    // $inc atomique : lire / +1 / save() perdait des vues concurrentes et
+    // relançait toute la validation du document à chaque consultation.
+    await Product.updateOne({ _id: product._id }, { $inc: { views: 1 } });
   }
 
   let isFavorite = false;
@@ -221,7 +207,7 @@ export async function fetchProductById(productId: string, userId?: string) {
 
 export async function listProducts(query: any) {
   const page = parseInt(query.page as string) || DEFAULT_LIST_PAGE;
-  const limit = parseInt(query.limit as string) || DEFAULT_LIST_LIMIT;
+  const limit = clampLimit(query.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
   const sort = query.sort || DEFAULT_LIST_SORT;
 
   const filter: any = { isAvailable: true };

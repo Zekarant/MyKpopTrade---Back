@@ -41,7 +41,9 @@ const LIMITS = {
    * tentatives de mot de passe, et se retrouverait bloqué sur les deux étapes.
    * Ce sont deux surfaces d'attaque différentes, chacune plafonnée.
    */
-  twoFactorVerify: { points: 10, duration: 15 * 60 }
+  twoFactorVerify: { points: 10, duration: 15 * 60 },
+  /** Anti spam du formulaire de contact (route publique). */
+  contact: { points: 5, duration: 60 * 60 }
 } as const;
 
 type LimitName = keyof typeof LIMITS;
@@ -154,6 +156,11 @@ export const rateLimitSmsDispatch = createUserRateLimiter(
 export const rateLimitSmsVerify = createUserRateLimiter(
   'smsVerify',
   'Trop de tentatives de vérification. Veuillez demander un nouveau code.'
+);
+
+export const rateLimitContact = createIpRateLimiter(
+  'contact',
+  'Trop de messages envoyés. Veuillez réessayer dans une heure.'
 );
 
 export const rateLimitTwoFactorVerify = createIpRateLimiter(

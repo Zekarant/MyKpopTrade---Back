@@ -3,6 +3,19 @@ import path from 'path';
 import fs from 'fs';
 import { Request } from 'express';
 
+// L'extension enregistrée dépend du type MIME validé par fileFilter, jamais du
+// nom envoyé par le client : sinon un `x.html` déclaré `image/png` serait servi
+// en HTML depuis /uploads (XSS / phishing sur le domaine de l'API).
+const EXTENSION_BY_MIME_TYPE: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif'
+};
+
+const extensionFor = (file: Express.Multer.File): string =>
+  EXTENSION_BY_MIME_TYPE[file.mimetype] ?? '';
+
 // Configuration du stockage des photos de profil
 const profilePictureStorage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -19,8 +32,8 @@ const profilePictureStorage = multer.diskStorage({
     // Utiliser l'ID de l'utilisateur + timestamp pour éviter les collisions
     const userId = (req.user as any).id;
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
-    const extension = path.extname(file.originalname);
-    
+    const extension = extensionFor(file);
+
     cb(null, `${userId}-${uniqueSuffix}${extension}`);
   }
 });
@@ -39,7 +52,7 @@ const profileBannerStorage = multer.diskStorage({
   filename: function(req, file, cb) {
     const userId = (req.user as any).id;
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
-    const extension = path.extname(file.originalname);
+    const extension = extensionFor(file);
 
     cb(null, `banner-${userId}-${uniqueSuffix}${extension}`);
   }
@@ -60,8 +73,8 @@ const productImageStorage = multer.diskStorage({
   filename: function (req, file, cb) {
     const userId = (req.user as any).id;
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
-    const extension = path.extname(file.originalname);
-    
+    const extension = extensionFor(file);
+
     cb(null, `product-${userId}-${uniqueSuffix}${extension}`);
   }
 });
@@ -81,8 +94,8 @@ const ratingImageStorage = multer.diskStorage({
   filename: function (req, file, cb) {
     const userId = (req.user as any).id;
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
-    const extension = path.extname(file.originalname);
-    
+    const extension = extensionFor(file);
+
     cb(null, `rating-${userId}-${uniqueSuffix}${extension}`);
   }
 });

@@ -120,14 +120,12 @@ export const deleteProductImage = asyncHandler(async (req: Request, res: Respons
     // Récupérer le chemin de l'image à supprimer
     const imagePath = product.images[imageIndex];
     
-    // Supprimer le fichier
-    const fullPath = path.join(
-      __dirname, 
-      '../../../../', 
-      imagePath.replace(/^\//, '')
-    );
-    
-    if (fs.existsSync(fullPath)) {
+    // Supprimer le fichier, uniquement s'il est bien dans uploads/products :
+    // un chemin stocké hors de ce dossier n'est jamais effacé du disque.
+    const productUploadsDir = path.resolve(__dirname, '../../../../uploads/products');
+    const fullPath = path.resolve(productUploadsDir, path.basename(imagePath));
+
+    if (fullPath.startsWith(productUploadsDir + path.sep) && fs.existsSync(fullPath)) {
       fs.unlinkSync(fullPath);
     }
     

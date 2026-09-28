@@ -43,12 +43,12 @@ if (process.env.NODE_ENV !== 'production') {
     })
   );
 } else {
-  // En production, rotation des logs
-  // Nécessite winston-daily-rotate-file
-  const { DailyRotateFile } = require('winston-daily-rotate-file');
-  
+  // En production, rotation des logs. L'import de 'winston-daily-rotate-file'
+  // (en tête de fichier) enregistre le transport sur winston.transports ; le
+  // module exporte la classe elle-même, un `{ DailyRotateFile }` destructuré
+  // valait undefined et faisait planter le démarrage en production.
   transports.push(
-    new DailyRotateFile({
+    new winston.transports.DailyRotateFile({
       filename: path.join(logDir, '%DATE%-app.log'),
       datePattern: 'YYYY-MM-DD',
       zippedArchive: true,
@@ -84,6 +84,14 @@ const SENSITIVE_EXACT_FIELDS = new Set([
   'fullName',
   'legalName',
   'recipientName',
+  'firstName',
+  'lastName',
+  'streetLine1',
+  'streetLine2',
+  'postalCode',
+  'city',
+  // Contenu des messages privés entre membres.
+  'content',
   'iban',
   'bic',
   'cvv'
@@ -91,6 +99,26 @@ const SENSITIVE_EXACT_FIELDS = new Set([
 
 const isSensitiveKey = (key: string): boolean =>
   SENSITIVE_EXACT_FIELDS.has(key) || SENSITIVE_PATTERNS.some(pattern => pattern.test(key));
+
+/**
+ * Jetons transportés dans une URL (lien de réinitialisation ou de vérification,
+ * `?token=` des pièces jointes) : ils apparaissent dans `url` et dans le texte
+ * des messages de log, pas seulement sous une clé nommée « token ».
+ */
+const maskUrlSecrets = (value: string): string =>
+  value
+    .replace(/(\/(?:reset-password|verify-email)\/)[^/?\s"]+/g, '$1******')
+    .replace(/([?&](?:token|accessToken|refreshToken|twoFactorToken)=)[^&\s"]+/g, '$1******');
+
+/**
+ * IP tronquée (dernier octet / fin d'IPv6) : assez pour repérer un abus depuis
+ * un même réseau, sans conserver l'adresse exacte d'une personne.
+ */
+const truncateIp = (value: string): string => {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return value.replace(/\.\d{1,3}$/, '.0');
+  if (value.includes(':')) return `${value.split(':').slice(0, 3).join(':')}::`;
+  return '******';
+};
 
 /** Pseudonymise un email en conservant de quoi diagnostiquer sans l'exposer. */
 const maskEmail = (value: string): string => {
@@ -117,14 +145,22 @@ const logsSanitizer = winston.format((info) => {
     Object.keys(newObj).forEach(key => {
       const value = newObj[key];
 
-      if (typeof value === 'string' && isSensitiveKey(key)) {
+      if (key === 'ip' && typeof value === 'string') {
+        newObj[key] = truncateIp(value);
+      } else if (typeof value === 'string' && isSensitiveKey(key)) {
         // Un email garde ses 3 premiers caractères et son TLD : assez pour
         // rapprocher deux événements, pas assez pour identifier la personne.
         newObj[key] = /e-?mail/i.test(key) && value.includes('@')
           ? maskEmail(value)
           : '******';
+      } else if (typeof value === 'object' && value !== null && !Array.isArray(value) && isSensitiveKey(key)) {
+        // Objet sensible entier (`shippingAddress: { streetLine1, city… }`) :
+        // ses sous-champs n'ont pas des noms reconnaissables, on masque le bloc.
+        newObj[key] = '******';
       } else if (typeof value === 'object' && value !== null) {
         newObj[key] = sanitizeObject(value);
+      } else if (typeof value === 'string') {
+        newObj[key] = maskUrlSecrets(value);
       }
     });
     

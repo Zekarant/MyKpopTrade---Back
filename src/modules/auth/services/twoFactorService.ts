@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import QRCode from 'qrcode';
 import {
   generateTotpSecret,
@@ -9,6 +10,7 @@ import User, { IUser } from '../../../models/userModel';
 import { EncryptionService } from '../../../commons/utils/encryptionService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import env from '../../../config/env';
 
 /**
  * Double authentification par TOTP (RFC 6238).
@@ -319,3 +321,12 @@ export const TWO_FACTOR_TOKEN_PURPOSE = 'two_factor_challenge';
 
 /** Durée de vie du défi 2FA. Assez pour ouvrir son téléphone, pas plus. */
 export const TWO_FACTOR_TOKEN_EXPIRES_IN = '5m';
+
+/** Émet le jeton de défi 2FA (connexion par mot de passe ou OAuth). */
+export function issueTwoFactorChallengeToken(userId: string): string {
+  return jwt.sign(
+    { userId, purpose: TWO_FACTOR_TOKEN_PURPOSE },
+    env.JWT_SECRET,
+    { expiresIn: TWO_FACTOR_TOKEN_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
+  );
+}

@@ -92,6 +92,7 @@ export interface IUser extends Document {
   passwordResetExpires?: Date;
   phoneVerificationCode?: string;
   phoneVerificationExpires?: Date;
+  phoneVerificationAttempts?: number;
   /**
    * Double authentification par TOTP (RFC 6238), optionnelle.
    *
@@ -443,8 +444,11 @@ const UserSchema: Schema = new Schema({
   emailVerificationExpires: Date,
   passwordResetToken: String,
   passwordResetExpires: Date,
-  phoneVerificationCode: String,
+  // Condensat SHA-256 du code SMS (jamais le code en clair), non renvoyé par défaut.
+  phoneVerificationCode: { type: String, select: false },
   phoneVerificationExpires: Date,
+  // Essais ratés sur le code en cours : au-delà du plafond, le code est invalidé.
+  phoneVerificationAttempts: { type: Number, select: false },
   twoFactor: {
     enabled: { type: Boolean, default: false },
     // `select: false` : ces champs ne partent jamais dans une réponse API par
