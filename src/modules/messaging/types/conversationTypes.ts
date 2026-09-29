@@ -39,7 +39,7 @@ export type LeanConversation = {
   lastMessage?: Types.ObjectId;
   lastMessageAt: Date;
   isActive: boolean;
-  type: 'general' | 'product_inquiry' | 'negotiation' | 'pay_what_you_want';
+  type: 'general' | 'product_inquiry' | 'negotiation';
   status: 'open' | 'closed' | 'archived';
   createdBy: Types.ObjectId;
   title?: string;
@@ -52,12 +52,6 @@ export type LeanConversation = {
     counterOffer?: number;
     status: 'pending' | 'accepted' | 'rejected' | 'expired' | 'completed';
     expiresAt?: Date;
-  };
-  payWhatYouWant?: {
-    minimumPrice: number;
-    maximumPrice?: number;
-    proposedPrice?: number;
-    status: 'pending' | 'accepted' | 'rejected';
   };
   offerHistory: IOfferHistory[];
   createdAt: Date;

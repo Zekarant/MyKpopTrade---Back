@@ -20,8 +20,7 @@ const OFFER_TYPE = {
 } as const;
 
 const CONVERSATION_TYPE = {
-  NEGOTIATION: 'negotiation',
-  PAY_WHAT_YOU_WANT: 'pay_what_you_want'
+  NEGOTIATION: 'negotiation'
 } as const;
 
 const MESSAGE_CONTENT_TYPE = {
@@ -682,7 +681,6 @@ export async function fetchConversationOffers(userId: string, conversationId: st
     type: LeanConversation['type'];
     offerHistory: IOfferHistory[];
     currentNegotiation?: LeanConversation['negotiation'];
-    payWhatYouWant?: LeanConversation['payWhatYouWant'];
     product?: LeanConversation['productId'];
     isOwner?: boolean;
   } = {
@@ -698,15 +696,6 @@ export async function fetchConversationOffers(userId: string, conversationId: st
       counterOffer: conversation.negotiation.counterOffer,
       status: conversation.negotiation.status,
       expiresAt: conversation.negotiation.expiresAt
-    };
-  }
-
-  if (conversation.type === CONVERSATION_TYPE.PAY_WHAT_YOU_WANT && conversation.payWhatYouWant) {
-    response.payWhatYouWant = {
-      minimumPrice: conversation.payWhatYouWant.minimumPrice,
-      maximumPrice: conversation.payWhatYouWant.maximumPrice,
-      proposedPrice: conversation.payWhatYouWant.proposedPrice,
-      status: conversation.payWhatYouWant.status
     };
   }
 
@@ -727,10 +716,7 @@ export async function cancelOfferFlow(userId: string, conversationId: string) {
   if (!conversation) {
     throw new HttpError(404, 'Conversation non trouvée');
   }
-  if (
-    conversation.type !== CONVERSATION_TYPE.NEGOTIATION &&
-    conversation.type !== CONVERSATION_TYPE.PAY_WHAT_YOU_WANT
-  ) {
+  if (conversation.type !== CONVERSATION_TYPE.NEGOTIATION) {
     throw new HttpError(400, 'Cette conversation ne contient pas d\'offre');
   }
 
@@ -754,13 +740,6 @@ export async function cancelOfferFlow(userId: string, conversationId: string) {
     await Conversation.updateOne(
       { _id: conversationId },
       { $set: { 'negotiation.status': OFFER_STATUS.EXPIRED } }
-    );
-  }
-
-  if (conversation.type === CONVERSATION_TYPE.PAY_WHAT_YOU_WANT && conversation.payWhatYouWant) {
-    await Conversation.updateOne(
-      { _id: conversationId },
-      { $set: { 'payWhatYouWant.status': OFFER_STATUS.REJECTED } }
     );
   }
 

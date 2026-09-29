@@ -20,8 +20,7 @@ const OFFER_STATUS = {
 } as const;
 
 const CONVERSATION_TYPE = {
-  NEGOTIATION: 'negotiation',
-  PAY_WHAT_YOU_WANT: 'pay_what_you_want'
+  NEGOTIATION: 'negotiation'
 } as const;
 
 const CONVERSATION_FILTER = {
@@ -189,14 +188,9 @@ export async function fetchConversation(
     messages,
     media,
     markedAsRead: markedCount,
-    offersSummary: (
-      conversation.type === CONVERSATION_TYPE.NEGOTIATION ||
-      conversation.type === CONVERSATION_TYPE.PAY_WHAT_YOU_WANT
-    ) ? {
+    offersSummary: conversation.type === CONVERSATION_TYPE.NEGOTIATION ? {
       totalOffers: conversation.offerHistory.length,
-      currentStatus: conversation.type === CONVERSATION_TYPE.NEGOTIATION
-        ? conversation.negotiation?.status
-        : conversation.payWhatYouWant?.status,
+      currentStatus: conversation.negotiation?.status,
       latestOffer: resolveLatestOffer(conversation.offerHistory)
     } : null,
     pagination: {

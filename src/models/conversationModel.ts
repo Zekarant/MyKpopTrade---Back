@@ -18,7 +18,7 @@ export interface IConversation extends Document {
   lastMessage?: mongoose.Types.ObjectId;
   lastMessageAt: Date;
   isActive: boolean;
-  type: 'general' | 'product_inquiry' | 'negotiation' | 'pay_what_you_want';
+  type: 'general' | 'product_inquiry' | 'negotiation';
   status: 'open' | 'closed' | 'archived';
   createdBy: mongoose.Types.ObjectId;
   title?: string;
@@ -31,12 +31,6 @@ export interface IConversation extends Document {
     counterOffer?: number;
     status: 'pending' | 'accepted' | 'rejected' | 'expired' | 'completed';
     expiresAt?: Date;
-  };
-  payWhatYouWant?: {
-    minimumPrice: number;
-    maximumPrice?: number;
-    proposedPrice?: number;
-    status: 'pending' | 'accepted' | 'rejected';
   };
   offerHistory: IOfferHistory[];
   createdAt: Date;
@@ -68,7 +62,7 @@ const ConversationSchema: Schema = new Schema({
   },
   type: {
     type: String,
-    enum: ['general', 'product_inquiry', 'negotiation', 'pay_what_you_want'],
+    enum: ['general', 'product_inquiry', 'negotiation'],
     default: 'general'
   },
   status: {
@@ -117,22 +111,6 @@ const ConversationSchema: Schema = new Schema({
     },
     expiresAt: {
       type: Date
-    }
-  },
-  payWhatYouWant: {
-    minimumPrice: {
-      type: Number
-    },
-    maximumPrice: {
-      type: Number
-    },
-    proposedPrice: {
-      type: Number
-    },
-    status: {
-      type: String,
-      enum: ['pending', 'accepted', 'rejected'],
-      default: 'pending'
     }
   },
   offerHistory: [{
