@@ -7,7 +7,7 @@ import { GdprLogger } from '../utils/gdprLogger';
 export const dataBreachDetection = (resourceType: string) => {
   return (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = (req.user as any).id;
+      const userId = req.user!.id;
       
       // Ne rien faire si pas d'utilisateur authentifié
       if (!userId) {

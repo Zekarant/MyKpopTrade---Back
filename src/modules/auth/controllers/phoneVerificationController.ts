@@ -53,7 +53,7 @@ const PHONE_ALREADY_USED_MESSAGE = 'Ce numéro est déjà vérifié sur un autre
  */
 export const sendVerificationCode = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
 
     if (!userId) {
       res.status(400).json({ message: 'ID utilisateur non trouvé' });
@@ -129,7 +129,7 @@ export const sendVerificationCode = async (req: Request, res: Response): Promise
  */
 export const verifyPhoneNumber = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     const { code } = req.body;
 
     if (!code) {

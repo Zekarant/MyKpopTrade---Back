@@ -13,8 +13,8 @@ import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
  * Récupérer l'inventaire d'un utilisateur (produits en vente)
  */
 export const getUserInventory = asyncHandler(async (req: Request, res: Response) => {
-  const sellerId = (req.params.userId || (req.user as any).id) as string;
-  const viewerId = (req.user as any)?.id;
+  const sellerId = (req.params.userId || req.user!.id) as string;
+  const viewerId = req.user?.id;
   const page = parseInt(req.query.page as string) || 1;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
   const status = (req.query.status as string) || 'available';
@@ -27,7 +27,7 @@ export const getUserInventory = asyncHandler(async (req: Request, res: Response)
  * Récupérer les produits favoris d'un utilisateur
  */
 export const getUserFavorites = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const page = parseInt(req.query.page as string) || 1;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
@@ -39,7 +39,7 @@ export const getUserFavorites = asyncHandler(async (req: Request, res: Response)
  * Récupérer les produits recommandés
  */
 export const getRecommendedProducts = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any)?.id;
+  const userId = req.user?.id;
   const limit = clampLimit(req.query.limit, 8, MAX_PAGE_SIZE);
 
   const result = await fetchRecommendedProducts(userId, limit);
@@ -50,7 +50,7 @@ export const getRecommendedProducts = asyncHandler(async (req: Request, res: Res
  * Récupérer des recommandations rapides
  */
 export const getQuickRecommendations = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any)?.id;
+  const userId = req.user?.id;
   const limit = clampLimit(req.query.limit, 4, MAX_PAGE_SIZE);
 
   const products = await fetchQuickRecommendations(userId, limit);

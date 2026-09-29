@@ -23,7 +23,7 @@ function handleHttpError(res: Response, error: unknown): boolean {
  */
 export const getProfile = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     const user = await getPublicProfileData(userId);
     res.status(200).json({ user });
   } catch (error) {
@@ -40,7 +40,7 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
  */
 export const completeProfile = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     const result = await completeFirstProfile(userId, req.body);
     res.status(200).json(result);
   } catch (error) {
@@ -55,7 +55,7 @@ export const completeProfile = async (req: Request, res: Response): Promise<void
  */
 export const updateProfile = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     const result = await updateProfileData(userId, req.body);
     res.status(200).json(result);
   } catch (error) {
@@ -72,7 +72,7 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
  */
 export const deleteAccount = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     const { password } = req.body;
 
     await softDeleteAccount(userId, password);
@@ -91,7 +91,7 @@ export const deleteAccount = async (req: Request, res: Response): Promise<void> 
  */
 export const updatePayPalEmail = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     const { paypalEmail, confirmPassword } = req.body;
 
     const newPayPalEmail = await setPayPalEmail(userId, paypalEmail, confirmPassword);
@@ -113,7 +113,7 @@ export const updatePayPalEmail = async (req: Request, res: Response): Promise<vo
  */
 export const removePayPalEmail = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     const { confirmPassword } = req.body;
 
     await clearPayPalEmail(userId, confirmPassword);

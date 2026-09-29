@@ -40,7 +40,7 @@ export const getUserProofs = asyncHandler(async (req: Request, res: Response) =>
  * Ajouter une preuve de transaction
  */
 export const addTransactionProof = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { type, images, description, otherParty } = req.body;
   
   // Validation des données

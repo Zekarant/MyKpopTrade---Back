@@ -18,7 +18,7 @@ export const getVapidPublicKey = asyncHandler(async (_req: Request, res: Respons
 
 /** Enregistre un abonnement push pour l'utilisateur authentifié. */
 export const subscribeToPush = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const subscription = req.body?.subscription;
   if (!subscription) {
     return res.status(400).json({ message: 'subscription requise dans le body' });
@@ -41,7 +41,7 @@ export const subscribeToPush = asyncHandler(async (req: Request, res: Response) 
 
 /** Désinscrit un abonnement push (par endpoint). */
 export const unsubscribeFromPush = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const endpoint = req.body?.endpoint;
   if (!endpoint || typeof endpoint !== 'string') {
     return res.status(400).json({ message: 'endpoint requis' });

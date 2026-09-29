@@ -43,7 +43,7 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
     includeOwnProducts?: boolean;
   } = req.body;
 
-  const userId = (req.user as any)?.id;
+  const userId = req.user?.id;
 
   try {
     const result = await runAdvancedSearch({
@@ -79,7 +79,7 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
  * Récupérer l'historique de recherche d'un utilisateur
  */
 export const getUserSearchHistory = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
   try {
@@ -100,7 +100,7 @@ export const getUserSearchHistory = asyncHandler(async (req: Request, res: Respo
  * Supprimer un élément de l'historique de recherche
  */
 export const deleteSearchHistoryItem = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { historyId } = req.params;
 
   try {
@@ -128,7 +128,7 @@ export const deleteSearchHistoryItem = asyncHandler(async (req: Request, res: Re
  * Vider complètement l'historique de recherche
  */
 export const clearSearchHistory = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     await clearUserSearchHistory(userId);

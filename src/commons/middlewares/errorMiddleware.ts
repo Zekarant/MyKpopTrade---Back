@@ -25,7 +25,7 @@ export const errorHandler = (
     body: req.body,
     params: req.params,
     query: req.query,
-    user: (req.user as any)?.id || 'non authentifié'
+    user: req.user?.id || 'non authentifié'
   });
 
   // Les erreurs 4xx sont volontaires et destinées au client : on renvoie leur

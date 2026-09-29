@@ -149,7 +149,7 @@ export const getUserDetail = asyncHandler(async (req: Request, res: Response) =>
 export const addUserNote = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.params.userId as string;
   const { content } = req.body;
-  const adminId = (req as any).user.id;
+  const adminId = req.user!.id;
 
   if (typeof content !== 'string' || !content.trim()) {
     return res.status(400).json({ message: 'Le contenu de la note est obligatoire' });
@@ -187,7 +187,7 @@ export const addUserNote = asyncHandler(async (req: Request, res: Response) => {
 export const deleteUserNote = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.params.userId as string;
   const noteId = req.params.noteId as string;
-  const adminId = (req as any).user.id;
+  const adminId = req.user!.id;
 
   const user = await User.findByIdAndUpdate(
     userId,
@@ -492,7 +492,7 @@ export const getStatsTimeseries = asyncHandler(async (_req: Request, res: Respon
 export const updateUserStatus = asyncHandler(async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { accountStatus, reason, durationDays } = req.body;
-  const adminId = (req as any).user.id;
+  const adminId = req.user!.id;
 
   if (!accountStatus || !['active', 'suspended'].includes(accountStatus)) {
     return res.status(400).json({ message: 'Statut invalide. Doit être "active" ou "suspended"' });
@@ -541,7 +541,7 @@ export const updateUserRole = asyncHandler(async (req: Request, res: Response) =
   await user.save({ validateBeforeSave: false });
 
   await AuditLog.create({
-    admin: (req as any).user.id,
+    admin: req.user!.id,
     action: 'change_role',
     targetType: 'user',
     targetId: user._id,
@@ -655,7 +655,7 @@ export const adminAnonymizeUser = asyncHandler(async (req: Request, res: Respons
   const { pseudonym: anonymizedId } = await eraseUserAccount(user._id.toString());
 
   await AuditLog.create({
-    admin: (req as any).user.id,
+    admin: req.user!.id,
     action: 'anonymize_user',
     targetType: 'user',
     targetId: user._id,
@@ -690,7 +690,7 @@ export const confirmDeletion = asyncHandler(async (req: Request, res: Response) 
   const { pseudonym: anonymizedId } = await eraseUserAccount(user._id.toString());
 
   await AuditLog.create({
-    admin: (req as any).user.id,
+    admin: req.user!.id,
     action: 'confirm_deletion',
     targetType: 'user',
     targetId: user._id,
@@ -726,7 +726,7 @@ export const adminCancelDeletion = asyncHandler(async (req: Request, res: Respon
   await user.save({ validateBeforeSave: false });
 
   await AuditLog.create({
-    admin: (req as any).user.id,
+    admin: req.user!.id,
     action: 'cancel_deletion',
     targetType: 'user',
     targetId: user._id,

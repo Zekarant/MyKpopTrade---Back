@@ -201,7 +201,7 @@ export const logAPIRequest = (req: any, responseTime?: number) => {
     method: req.method,
     url: req.originalUrl,
     ip: req.ip,
-    userId: (req.user as any)?.id || 'anonymous',
+    userId: req.user?.id || 'anonymous',
     userAgent: req.headers['user-agent'],
     responseTime: responseTime ? `${responseTime}ms` : undefined
   });

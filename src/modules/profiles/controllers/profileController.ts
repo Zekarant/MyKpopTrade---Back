@@ -47,7 +47,7 @@ export const getPublicProfile = asyncHandler(async (req: Request, res: Response)
  * Récupérer les détails complets du profil (pour l'utilisateur connecté)
  */
 export const getMyProfile = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     const result = await fetchMyProfile(userId);
@@ -63,7 +63,7 @@ export const getMyProfile = asyncHandler(async (req: Request, res: Response) => 
  * Mettre à jour mon profil
  */
 export const updateProfile = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     const profile = await updateMyProfile(userId, req.body);
@@ -82,7 +82,7 @@ export const updateProfile = asyncHandler(async (req: Request, res: Response) =>
  * Mettre à jour la photo de profil
  */
 export const updateProfilePicture = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   if (!req.file) {
     return res.status(400).json({ message: 'Aucune image n\'a été téléchargée' });
@@ -121,7 +121,7 @@ export const updateProfilePicture = asyncHandler(async (req: Request, res: Respo
  * Supprimer la photo de profil
  */
 export const deleteProfilePicture = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     await removeProfileImage({
@@ -151,7 +151,7 @@ export const deleteProfilePicture = asyncHandler(async (req: Request, res: Respo
  * Mettre à jour la bannière de profil
  */
 export const updateProfileBanner = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   if (!req.file) {
     return res.status(400).json({
@@ -192,7 +192,7 @@ export const updateProfileBanner = asyncHandler(async (req: Request, res: Respon
  * Supprimer la bannière de profil
  */
 export const deleteProfileBanner = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     await removeProfileImage({

@@ -24,12 +24,12 @@ function getMessageLimiter(): RateLimiterMongo {
  */
 export const rateLimitMessages = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     await getMessageLimiter().consume(userId);
     next();
   } catch (error: any) {
     if (error && error.remainingPoints !== undefined) {
-      logger.warn(`Limite de messages dépassée par l'utilisateur ${(req.user as any).id}`);
+      logger.warn(`Limite de messages dépassée par l'utilisateur ${req.user!.id}`);
       res.status(429).json({ 
         message: 'Vous envoyez trop de messages. Veuillez attendre avant d\'en envoyer d\'autres.' 
       });
@@ -44,7 +44,7 @@ export const rateLimitMessages = async (req: Request, res: Response, next: NextF
  * Vérifier si l'utilisateur a le droit de participer à une conversation
  */
 export const verifyConversationAccess = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const conversationId = req.params.id || req.body.conversationId;
   
   if (!conversationId) {

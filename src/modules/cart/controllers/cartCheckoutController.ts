@@ -5,7 +5,7 @@ const VALID_SHIPPING_METHODS = ['national', 'worldwide', 'localPickup'] as const
 
 export async function checkoutCart(req: Request, res: Response, next: NextFunction) {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     const { shippingMethod, shippingAddress } = req.body;
 
     if (!shippingMethod || !VALID_SHIPPING_METHODS.includes(shippingMethod)) {
@@ -34,7 +34,7 @@ export async function checkoutCart(req: Request, res: Response, next: NextFuncti
 
 export async function finalizeCheckout(req: Request, res: Response, next: NextFunction) {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     await cartCheckoutService.finalizeCartCheckout(userId);
     res.json({ success: true, message: 'Panier vidé après checkout' });
   } catch (error) {

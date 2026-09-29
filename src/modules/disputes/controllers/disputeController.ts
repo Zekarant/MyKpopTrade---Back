@@ -30,7 +30,7 @@ async function isAdmin(userId: string): Promise<boolean> {
 
 /** POST /api/disputes — Ouvre un litige sur un paiement. */
 export const create = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { paymentId, reason, description, evidence } = req.body;
   try {
     const dispute = await openDispute({ userId, paymentId, reason, description, evidence });
@@ -46,7 +46,7 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
 
 /** GET /api/disputes/me — Liste paginée des litiges où l'utilisateur est partie. */
 export const listMine = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const page = parseInt(req.query.page as string) || 1;
   const limit = clampLimit(req.query.limit, 10, MAX_PAGE_SIZE);
   const result = await listMyDisputes(userId, page, limit);
@@ -55,7 +55,7 @@ export const listMine = asyncHandler(async (req: Request, res: Response) => {
 
 /** GET /api/disputes/:id — Détail d'un litige (acheteur, vendeur ou admin). */
 export const getOne = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const admin = await isAdmin(userId);
   try {
     const dispute = await getDispute(userId, req.params.id as string, admin);
@@ -68,7 +68,7 @@ export const getOne = asyncHandler(async (req: Request, res: Response) => {
 
 /** POST /api/disputes/:id/messages — Ajoute un message au litige. */
 export const addMessage = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const admin = await isAdmin(userId);
   try {
     const dispute = await addDisputeMessage({
@@ -87,7 +87,7 @@ export const addMessage = asyncHandler(async (req: Request, res: Response) => {
 
 /** POST /api/disputes/:id/cancel — Le plaignant retire son litige. */
 export const cancel = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   try {
     const dispute = await cancelDispute(userId, req.params.id as string);
     return res.status(200).json({ success: true, dispute });
@@ -110,7 +110,7 @@ export const adminList = asyncHandler(async (req: Request, res: Response) => {
 
 /** POST /api/disputes/:id/take — Admin : passe le litige en under_review. */
 export const adminTake = asyncHandler(async (req: Request, res: Response) => {
-  const adminId = (req.user as any).id;
+  const adminId = req.user!.id;
   try {
     const dispute = await takeDisputeUnderReview(adminId, req.params.id as string);
     return res.status(200).json({ success: true, dispute });
@@ -122,7 +122,7 @@ export const adminTake = asyncHandler(async (req: Request, res: Response) => {
 
 /** POST /api/disputes/:id/resolve — Admin : tranche le litige. */
 export const adminResolve = asyncHandler(async (req: Request, res: Response) => {
-  const adminId = (req.user as any).id;
+  const adminId = req.user!.id;
   try {
     const dispute = await resolveDispute({
       adminId,

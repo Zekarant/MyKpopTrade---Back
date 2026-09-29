@@ -108,7 +108,7 @@ function createIpRateLimiter(name: LimitName, message: string) {
  */
 function createUserRateLimiter(name: LimitName, message: string) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const key = (req.user as any)?.id;
+    const key = req.user?.id;
     if (!key) {
       next();
       return;

@@ -63,7 +63,7 @@ export const getPostStats = asyncHandler(async (req: Request, res: Response) => 
  * Supprimer un post (modération admin)
  */
 export const adminDeletePost = asyncHandler(async (req: Request, res: Response) => {
-  const adminId = (req as any).user.id;
+  const adminId = req.user!.id;
   const { postId } = req.params;
   const { reason } = req.body;
 

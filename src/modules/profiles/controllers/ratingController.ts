@@ -33,7 +33,7 @@ export const getUserRatings = asyncHandler(async (req: Request, res: Response) =
  * Créer une nouvelle évaluation
  */
 export const createRating = asyncHandler(async (req: Request, res: Response) => {
-  const reviewerId = (req.user as any).id;
+  const reviewerId = req.user!.id;
   const { recipientId, review, type, transactionId } = req.body;
 
   const rating = parseInt(req.body.rating, 10);
@@ -72,7 +72,7 @@ export const createRating = asyncHandler(async (req: Request, res: Response) => 
  */
 export const reportRating = asyncHandler(async (req: Request, res: Response) => {
   const ratingId = req.params.ratingId as string;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { reason } = req.body;
 
   try {
@@ -93,7 +93,7 @@ export const reportRating = asyncHandler(async (req: Request, res: Response) => 
 export const deleteRatingImage = asyncHandler(async (req: Request, res: Response) => {
   const ratingId = req.params.ratingId as string;
   const { imageIndex } = req.body;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     const images = await deleteRatingImageAt({ userId, ratingId, imageIndex });
@@ -122,7 +122,7 @@ export const deleteRatingImage = asyncHandler(async (req: Request, res: Response
  */
 export const addRatingImage = asyncHandler(async (req: Request, res: Response) => {
   const ratingId = req.params.ratingId as string;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   if (!req.file) {
     return res.status(400).json({ message: 'Aucune image n\'a été téléchargée' });
@@ -165,7 +165,7 @@ export const addRatingImage = asyncHandler(async (req: Request, res: Response) =
  */
 export const respondToRating = asyncHandler(async (req: Request, res: Response) => {
   const ratingId = req.params.ratingId as string;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { response } = req.body;
 
   try {
@@ -189,7 +189,7 @@ export const respondToRating = asyncHandler(async (req: Request, res: Response) 
  */
 export const updateRatingResponse = asyncHandler(async (req: Request, res: Response) => {
   const ratingId = req.params.ratingId as string;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { response } = req.body;
 
   try {
@@ -213,7 +213,7 @@ export const updateRatingResponse = asyncHandler(async (req: Request, res: Respo
  */
 export const deleteRatingResponse = asyncHandler(async (req: Request, res: Response) => {
   const ratingId = req.params.ratingId as string;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     await deleteUserRatingResponse(userId, ratingId);

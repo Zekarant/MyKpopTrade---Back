@@ -137,7 +137,7 @@ router.delete(
 // Jeton de lecture des pièces jointes, à placer dans leurs URL (<img src>).
 router.post('/attachment-token', authenticateJWT, (req, res) => {
   res.status(200).json({
-    token: issueAttachmentReadToken((req.user as any).id),
+    token: issueAttachmentReadToken(req.user!.id),
     expiresIn: ATTACHMENT_TOKEN_TTL_SECONDS
   });
 });

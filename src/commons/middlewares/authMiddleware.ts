@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { isAccessTokenRevoked } from '../services/tokenService';
 import env from '../../config/env';
-import User from '../../models/userModel';
+import User, { IUser } from '../../models/userModel';
 import logger from '../utils/logger';
 
 // Interface pour le payload JWT
@@ -12,11 +12,18 @@ interface JwtPayload {
   [key: string]: any;
 }
 
-// Extend Express Request interface
 declare global {
   namespace Express {
+    // Payload JWT posé par authenticateJWT, ou document utilisateur des routes OAuth.
+    interface User {
+      id: string;
+      email?: string;
+      username?: string;
+      role?: string;
+    }
     interface Request {
-      userDetails?: any;
+      userDetails?: IUser;
+      linkUserId?: string;
     }
   }
 }
@@ -109,7 +116,7 @@ export const authenticateJWT = async (req: Request, res: Response, next: NextFun
  */
 export const loadUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     
     if (!userId) {
       res.status(400).json({ message: 'ID utilisateur manquant' });
@@ -147,7 +154,7 @@ export const loadUser = async (req: Request, res: Response, next: NextFunction):
 export const requireAdmin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
 
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     // Vérifier que l'utilisateur est authentifié
     if (!userId) {
       res.status(401).json({ message: 'Authentification requise' });
@@ -187,7 +194,7 @@ export const requireAdmin = async (req: Request, res: Response, next: NextFuncti
  */
 export const requireStaff = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     // Vérifier que l'utilisateur est authentifié
     if (!req.user || !userId) {
       res.status(401).json({ message: 'Authentification requise' });

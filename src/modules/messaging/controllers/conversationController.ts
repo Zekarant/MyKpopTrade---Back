@@ -50,7 +50,7 @@ function handleControllerError(
  * Récupère une conversation spécifique avec ses messages
  */
 export const getConversation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const conversationId = req.params.id as string;
   const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
   const limit = clampLimit(req.query.limit, DEFAULT_CONVERSATION_LIMIT, MAX_PAGE_SIZE);
@@ -71,7 +71,7 @@ export const getConversation = asyncHandler(async (req: Request, res: Response) 
  * Récupère la liste des conversations d'un utilisateur
  */
 export const getUserConversations = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
   const limit = clampLimit(req.query.limit, DEFAULT_USER_LIST_LIMIT, MAX_PAGE_SIZE);
   const filter = req.query.filter as string || 'all';
@@ -84,7 +84,7 @@ export const getUserConversations = asyncHandler(async (req: Request, res: Respo
  * Crée une nouvelle conversation
  */
 export const startConversation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { recipientId, productId, initialMessage, type = 'general' } = req.body;
 
   try {
@@ -129,7 +129,7 @@ export const startConversation = asyncHandler(async (req: Request, res: Response
  * Initie une négociation pour un produit
  */
 export const initiateNegotiation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { productId, initialOffer, message } = req.body;
 
   try {
@@ -166,7 +166,7 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
  * Répond à une négociation (accept, reject, counter)
  */
 export const respondToNegotiation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const conversationId = req.params.id as string;
   const { action, counterOffer, message } = req.body;
 
@@ -206,7 +206,7 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
  * Initie une offre Pay What You Want sur un produit
  */
 export const initiatePayWhatYouWant = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { productId, minimumPrice, maximumPrice, message } = req.body;
 
   try {
@@ -235,7 +235,7 @@ export const initiatePayWhatYouWant = asyncHandler(async (req: Request, res: Res
  * Fait une proposition dans une conversation Pay What You Want
  */
 export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const conversationId = req.params.id as string;
   const { proposedPrice, message } = req.body;
 
@@ -264,7 +264,7 @@ export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res:
  * Récupère tous les médias d'une conversation
  */
 export const getConversationMedia = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const conversationId = req.params.id as string;
   const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
   const limit = clampLimit(req.query.limit, DEFAULT_CONVERSATION_LIMIT, MAX_PAGE_SIZE);
@@ -286,7 +286,7 @@ export const getConversationMedia = asyncHandler(async (req: Request, res: Respo
  * Supprime une conversation pour l'utilisateur actuel
  */
 export const deleteConversation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const conversationId = req.params.id as string;
 
   try {
@@ -309,7 +309,7 @@ export const deleteConversation = asyncHandler(async (req: Request, res: Respons
  * Archive une conversation
  */
 export const archiveConversation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const conversationId = req.params.id as string;
 
   try {
@@ -333,7 +333,7 @@ export const archiveConversation = asyncHandler(async (req: Request, res: Respon
  * Désarchive une conversation
  */
 export const unarchiveConversation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const conversationId = req.params.id as string;
 
   try {
@@ -357,7 +357,7 @@ export const unarchiveConversation = asyncHandler(async (req: Request, res: Resp
  * Toggle favoris d'une conversation
  */
 export const toggleFavoriteConversation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const conversationId = req.params.id as string;
 
   try {
@@ -386,7 +386,7 @@ export const toggleFavoriteConversation = asyncHandler(async (req: Request, res:
  * Récupère l'historique des offres d'une conversation
  */
 export const getConversationOffers = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const conversationId = req.params.id as string;
 
   try {
@@ -405,7 +405,7 @@ export const getConversationOffers = asyncHandler(async (req: Request, res: Resp
  * Annule une offre en cours
  */
 export const cancelOffer = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const conversationId = req.params.id as string;
 
   try {

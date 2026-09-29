@@ -26,7 +26,7 @@ function serverError(res: Response, action: string, error: unknown) {
 }
 
 export const toggleFollow = async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const targetUserId = req.params.targetUserId;
   if (!isObjectId(targetUserId)) {
     return res.status(404).json({ message: 'Utilisateur introuvable' });
@@ -50,7 +50,7 @@ export const toggleFollow = async (req: Request, res: Response) => {
 };
 
 export const getFollowStatus = async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const targetUserId = req.params.targetUserId;
   if (!isObjectId(targetUserId)) {
     return res.status(404).json({ message: 'Utilisateur introuvable' });
@@ -96,7 +96,7 @@ export const getFollowing = async (req: Request, res: Response) => {
 };
 
 export const getFriends = async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { page, limit } = pagination(req);
 
   try {
@@ -107,7 +107,7 @@ export const getFriends = async (req: Request, res: Response) => {
 };
 
 export const getMyCounts = async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     return res.status(200).json(await followService.getCounts(userId));
@@ -117,7 +117,7 @@ export const getMyCounts = async (req: Request, res: Response) => {
 };
 
 export const removeFollower = async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const followerId = req.params.followerId;
   if (!isObjectId(followerId)) {
     return res.status(404).json({ message: 'Cet utilisateur ne vous suit pas' });

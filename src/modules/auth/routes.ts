@@ -98,11 +98,11 @@ router.get('/google/callback', (req: Request, res: Response, next: NextFunction)
   // L'authenticité du state (nonce ↔ cookie) est vérifiée par passport, avant
   // tout usage du code.
   const linkUserId = linkUserIdFromState(req.query.state);
-  if (linkUserId) (req as any).linkUserId = linkUserId;
+  if (linkUserId) req.linkUserId = linkUserId;
 
   passport.authenticate('google', { session: false }, (err: any, user: any, info: any) => {
     if (err || !user) {
-      if ((req as any).linkUserId) {
+      if (req.linkUserId) {
         const code = info?.message || 'google_link_failed';
         return res.redirect(`${process.env.FRONTEND_URL}/settings?error=${code}`);
       }
@@ -131,7 +131,7 @@ router.get('/discord', passport.authenticate('discord', { scope: ['identify', 'e
 router.get('/discord/callback', (req: Request, res: Response, next: NextFunction) => {
   const linkUserId = linkUserIdFromState(req.query.state);
   const isLinkFlow = Boolean(linkUserId);
-  if (linkUserId) (req as any).linkUserId = linkUserId;
+  if (linkUserId) req.linkUserId = linkUserId;
 
   passport.authenticate('discord', { session: false, failWithError: true } as any, (err: any, user: any, info: any) => {
     if (err || !user) {
@@ -165,7 +165,7 @@ router.post('/link/:provider', authenticateJWT, async (req: Request, res: Respon
   if (!isLinkProvider(req.params.provider)) {
     return res.status(404).json({ message: 'Fournisseur inconnu.' });
   }
-  const ticket = await issueOneTimeCode((req.user as any).id, 'social_link');
+  const ticket = await issueOneTimeCode(req.user!.id, 'social_link');
   return res.status(200).json({ ticket });
 });
 

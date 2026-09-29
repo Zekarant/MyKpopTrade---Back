@@ -41,8 +41,8 @@ function setAttachmentHeaders(res: Response, fileName: string): void {
  * Envoie un nouveau message dans une conversation
  */
 export const sendNewMessage = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
-  const username = (req.user as any)?.username;
+  const userId = req.user!.id;
+  const username = req.user?.username;
   const conversationId = req.params.id as string;
   const { content } = req.body;
   const files = Array.isArray(req.files) ? (req.files as Express.Multer.File[]) : undefined;
@@ -75,7 +75,7 @@ export const sendNewMessage = asyncHandler(async (req: Request, res: Response) =
  * Marque tous les messages d'une conversation comme lus
  */
 export const markConversationAsRead = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const conversationId = req.params.id as string;
 
   try {
@@ -100,7 +100,7 @@ export const markConversationAsRead = asyncHandler(async (req: Request, res: Res
  * Marque un message spécifique comme lu
  */
 export const markMessageAsRead = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const messageId = req.params.messageId as string;
 
   try {
@@ -122,7 +122,7 @@ export const markMessageAsRead = asyncHandler(async (req: Request, res: Response
  * Supprime un message pour l'utilisateur actuel uniquement
  */
 export const deleteMessage = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const messageId = req.params.id as string;
 
   try {
@@ -144,7 +144,7 @@ export const deleteMessage = asyncHandler(async (req: Request, res: Response) =>
  * Récupère les fichiers joints à un message
  */
 export const getMessageAttachment = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const messageId = req.params.messageId as string;
   const attachmentName = req.params.attachment as string;
 

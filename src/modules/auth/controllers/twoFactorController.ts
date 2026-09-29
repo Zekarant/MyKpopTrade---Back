@@ -21,7 +21,7 @@ import {
 
 /** Identifiant de l'utilisateur authentifié. */
 function currentUserId(req: Request): string {
-  return (req.user as any).id;
+  return req.user!.id;
 }
 
 /**

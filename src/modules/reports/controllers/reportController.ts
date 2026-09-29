@@ -74,7 +74,7 @@ const describeTarget = (targetType: string, target: any): string => {
  * Créer un nouveau signalement
  */
 export const createReport = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { targetType, targetId, reason, details } = req.body;
   
   // Validation des données
@@ -193,7 +193,7 @@ export const createReport = asyncHandler(async (req: Request, res: Response) => 
  * Récupérer ses propres signalements
  */
 export const getUserReports = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { page, limit } = pagination(req, 10, 50);
   const status = req.query.status as string;
   
@@ -227,7 +227,7 @@ export const getUserReports = asyncHandler(async (req: Request, res: Response) =
  * Vérifier si l'utilisateur a déjà signalé un élément
  */
 export const checkUserReport = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const targetType = req.params.targetType as string;
   const targetId = req.params.targetId as string;
   
@@ -455,7 +455,7 @@ const RESOLVABLE_STATUSES = ['reviewed', 'resolved', 'rejected'];
 
 export const bulkUpdateReportStatus = asyncHandler(async (req: Request, res: Response) => {
   const { reportIds, status, adminNotes } = req.body;
-  const adminId = (req.user as any).id;
+  const adminId = req.user!.id;
 
   if (!Array.isArray(reportIds) || reportIds.length === 0) {
     return res.status(400).json({ message: 'Aucun signalement sélectionné' });
@@ -510,7 +510,7 @@ export const bulkUpdateReportStatus = asyncHandler(async (req: Request, res: Res
 export const updateReportStatus = asyncHandler(async (req: Request, res: Response) => {
   const reportId = req.params.reportId as string;
   const { status, adminNotes } = req.body;
-  const adminId = (req.user as any).id;
+  const adminId = req.user!.id;
   
   if (!status || !RESOLVABLE_STATUSES.includes(status)) {
     return res.status(400).json({

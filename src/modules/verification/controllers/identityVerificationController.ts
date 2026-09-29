@@ -16,7 +16,7 @@ import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
  * Soumettre une demande de vérification d'identité
  */
 export const submitVerification = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { documentType, consentGiven } = req.body;
 
   try {
@@ -43,7 +43,7 @@ export const submitVerification = asyncHandler(async (req: Request, res: Respons
  * Vérifier le statut d'une demande de vérification
  */
 export const checkVerificationStatus = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     const result = await fetchVerificationStatus(userId);
@@ -60,7 +60,7 @@ export const checkVerificationStatus = asyncHandler(async (req: Request, res: Re
  */
 export const approveVerification = asyncHandler(async (req: Request, res: Response) => {
   const verificationId = String(req.params.id || req.params.verificationId || '');
-  const adminId = (req.user as any).id;
+  const adminId = req.user!.id;
 
   try {
     await approveIdentityVerification({ verificationId, adminId });
@@ -79,7 +79,7 @@ export const approveVerification = asyncHandler(async (req: Request, res: Respon
  */
 export const rejectVerification = asyncHandler(async (req: Request, res: Response) => {
   const verificationId = String(req.params.id || req.params.verificationId || '');
-  const adminId = (req.user as any).id;
+  const adminId = req.user!.id;
   const { reason } = req.body;
 
   try {
@@ -98,7 +98,7 @@ export const rejectVerification = asyncHandler(async (req: Request, res: Respons
  * Liste des demandes de vérification en attente (accès administrateur)
  */
 export const getPendingVerifications = asyncHandler(async (req: Request, res: Response) => {
-  const adminId = (req.user as any).id;
+  const adminId = req.user!.id;
   const page = parseInt(req.query.page as string) || 1;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
@@ -118,7 +118,7 @@ export const getPendingVerifications = asyncHandler(async (req: Request, res: Re
  */
 export const getVerificationDocument = asyncHandler(async (req: Request, res: Response) => {
   const verificationId = String(req.params.id || '');
-  const adminId = (req.user as any).id;
+  const adminId = req.user!.id;
 
   try {
     const { buffer, contentType } = await getVerificationDocumentForAdmin(verificationId, adminId);
@@ -140,7 +140,7 @@ export const getVerificationDocument = asyncHandler(async (req: Request, res: Re
  * Annuler une demande de vérification
  */
 export const cancelVerification = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     await cancelUserVerification(userId);

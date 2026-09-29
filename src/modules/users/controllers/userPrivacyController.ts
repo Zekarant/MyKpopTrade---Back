@@ -20,7 +20,7 @@ function mapHttpError(res: Response, error: unknown, successFalse = true): Respo
 }
 
 function requireUserId(req: Request, res: Response, message: string): string | null {
-  const userId = (req.user as any)?.id;
+  const userId = req.user?.id;
   if (!userId) {
     res.status(401).json({
       success: false,

@@ -31,7 +31,7 @@ const profilePictureStorage = multer.diskStorage({
   },
   filename: function (req, file, cb) {
     // Utiliser l'ID de l'utilisateur + timestamp pour éviter les collisions
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
     const extension = extensionFor(file);
 
@@ -51,7 +51,7 @@ const profileBannerStorage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: function(req, file, cb) {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
     const extension = extensionFor(file);
 
@@ -72,7 +72,7 @@ const productImageStorage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
     const extension = extensionFor(file);
 
@@ -93,7 +93,7 @@ const ratingImageStorage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
-    const userId = (req.user as any).id;
+    const userId = req.user!.id;
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
     const extension = extensionFor(file);
 

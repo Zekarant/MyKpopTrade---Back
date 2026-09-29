@@ -11,7 +11,7 @@ const MAX_PAGE_SIZE = 50;
  * Récupère les notifications de l'utilisateur connecté
  */
 export const getMyNotifications = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { page = '1', limit, unread } = req.query;
 
   try {
@@ -32,7 +32,7 @@ export const getMyNotifications = asyncHandler(async (req: Request, res: Respons
  * Marque une notification comme lue
  */
 export const markNotificationAsRead = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const id = req.params.id as string;
   
   try {
@@ -48,7 +48,7 @@ export const markNotificationAsRead = asyncHandler(async (req: Request, res: Res
  * Marque toutes les notifications comme lues
  */
 export const markAllNotificationsAsRead = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   
   try {
     const count = await NotificationService.markAllAsRead(userId);
@@ -66,7 +66,7 @@ export const markAllNotificationsAsRead = asyncHandler(async (req: Request, res:
  * Supprime une notification
  */
 export const deleteNotification = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const id = req.params.id as string;
   
   try {

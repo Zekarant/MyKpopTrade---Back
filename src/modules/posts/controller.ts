@@ -30,7 +30,7 @@ const isObjectId = (value: unknown): value is string =>
  * Créer un post
  */
 export const createPost = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
   const content = readContent(req.body.content);
 
   if (!content) {
@@ -85,7 +85,7 @@ export const getUserPosts = asyncHandler(async (req: Request, res: Response) => 
  * Récupérer le feed (posts des utilisateurs suivis + les siens)
  */
 export const getFeed = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id;
+  const userId = req.user?.id;
   const { page, limit } = pagination(req);
 
   // Import Follow model dynamically to avoid circular deps
@@ -151,7 +151,7 @@ export const getPost = asyncHandler(async (req: Request, res: Response) => {
  * Répondre à un post
  */
 export const replyToPost = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
   const { postId } = req.params;
   const content = readContent(req.body.content);
 
@@ -186,7 +186,7 @@ export const replyToPost = asyncHandler(async (req: Request, res: Response) => {
  * et un double clic ne compte pas deux fois le même utilisateur.
  */
 export const toggleLike = asyncHandler(async (req: Request, res: Response) => {
-  const userId = String((req as any).user.id);
+  const userId = String(req.user!.id);
   const { postId } = req.params;
   if (!isObjectId(postId)) {
     return res.status(404).json({ message: 'Post introuvable' });
@@ -217,7 +217,7 @@ export const toggleLike = asyncHandler(async (req: Request, res: Response) => {
  * Supprimer un post (auteur uniquement)
  */
 export const deletePost = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const userId = req.user!.id;
   const { postId } = req.params;
 
   const post = isObjectId(postId) ? await Post.findById(postId) : null;

@@ -143,7 +143,7 @@ export const getProductAdminStats = asyncHandler(async (req: Request, res: Respo
  */
 export const adminDeleteProduct = asyncHandler(async (req: Request, res: Response) => {
   const productId = req.params.productId as string;
-  const adminId = (req as any).user.id;
+  const adminId = req.user!.id;
   const { reason } = req.body ?? {};
 
   const product = await Product.findByIdAndDelete(productId).populate('seller', 'username');
@@ -184,7 +184,7 @@ export const adminDeleteProduct = asyncHandler(async (req: Request, res: Respons
  */
 export const reviewFlaggedProduct = asyncHandler(async (req: Request, res: Response) => {
   const productId = req.params.productId as string;
-  const adminId = (req as any).user.id;
+  const adminId = req.user!.id;
   const { approve } = req.body ?? {};
 
   if (typeof approve !== 'boolean') {

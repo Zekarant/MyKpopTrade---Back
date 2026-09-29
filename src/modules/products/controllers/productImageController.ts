@@ -11,7 +11,7 @@ import logger from '../../../commons/utils/logger';
  */
 export const uploadProductImage = asyncHandler(async (req: Request, res: Response) => {
   const productId = req.params.productId as string;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   
   if (!mongoose.Types.ObjectId.isValid(productId)) {
     return res.status(400).json({ message: 'ID de produit invalide' });
@@ -84,7 +84,7 @@ export const uploadProductImage = asyncHandler(async (req: Request, res: Respons
 export const deleteProductImage = asyncHandler(async (req: Request, res: Response) => {
   const productId = req.params.productId as string;
   const { imageIndex } = req.body;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   
   if (!mongoose.Types.ObjectId.isValid(productId)) {
     return res.status(400).json({ message: 'ID de produit invalide' });
@@ -156,7 +156,7 @@ export const deleteProductImage = asyncHandler(async (req: Request, res: Respons
 export const reorderProductImages = asyncHandler(async (req: Request, res: Response) => {
   const productId = req.params.productId as string;
   const { imageOrder } = req.body;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   
   if (!mongoose.Types.ObjectId.isValid(productId)) {
     return res.status(400).json({ message: 'ID de produit invalide' });

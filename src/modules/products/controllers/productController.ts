@@ -28,7 +28,7 @@ function cleanupFiles(files?: any) {
  * Créer un nouveau produit
  */
 export const createProduct = asyncHandler(async (req: Request, res: Response) => {
-  const sellerId = (req.user as any).id;
+  const sellerId = req.user!.id;
   const productData = req.body;
 
   const imageUrls = resolveProductImages(req);
@@ -68,7 +68,7 @@ export const createProduct = asyncHandler(async (req: Request, res: Response) =>
  */
 export const getProductById = asyncHandler(async (req: Request, res: Response) => {
   const productId = req.params.productId as string;
-  const userId = (req.user as any)?.id;
+  const userId = req.user?.id;
 
   try {
     const result = await fetchProductById(productId, userId);
@@ -93,7 +93,7 @@ export const getProducts = asyncHandler(async (req: Request, res: Response) => {
  */
 export const updateProduct = asyncHandler(async (req: Request, res: Response) => {
   const productId = req.params.productId as string;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     const product = await updateProductForOwner({
@@ -118,7 +118,7 @@ export const updateProduct = asyncHandler(async (req: Request, res: Response) =>
  */
 export const deleteProduct = asyncHandler(async (req: Request, res: Response) => {
   const productId = req.params.productId as string;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const soft = req.query.soft === 'true';
 
   try {
@@ -138,7 +138,7 @@ export const deleteProduct = asyncHandler(async (req: Request, res: Response) =>
  */
 export const markProductAsSold = asyncHandler(async (req: Request, res: Response) => {
   const productId = req.params.productId as string;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { buyerId } = req.body;
 
   try {
@@ -159,7 +159,7 @@ export const markProductAsSold = asyncHandler(async (req: Request, res: Response
  */
 export const toggleFavorite = asyncHandler(async (req: Request, res: Response) => {
   const productId = req.params.productId as string;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     const isFavorite = await toggleFavoriteForUser(userId, productId);

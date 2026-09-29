@@ -34,14 +34,14 @@ function getCheckoutLimiter(): RateLimiterMongo {
 
 export const rateLimitCartAdd = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const userId = (req.user as any)?.id;
+    const userId = req.user?.id;
     if (!userId) { next(); return; }
     await getCartAddLimiter().consume(userId);
     next();
   } catch (error: any) {
     // Si c'est une erreur de connexion/init, on laisse passer
     if (error && error.remainingPoints !== undefined) {
-      logger.warn('Rate limit panier dépassé', { userId: (req.user as any)?.id });
+      logger.warn('Rate limit panier dépassé', { userId: req.user?.id });
       res.status(429).json({
         success: false,
         message: 'Trop de modifications du panier. Veuillez patienter.'
@@ -55,13 +55,13 @@ export const rateLimitCartAdd = async (req: Request, res: Response, next: NextFu
 
 export const rateLimitCheckout = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const userId = (req.user as any)?.id;
+    const userId = req.user?.id;
     if (!userId) { next(); return; }
     await getCheckoutLimiter().consume(userId);
     next();
   } catch (error: any) {
     if (error && error.remainingPoints !== undefined) {
-      logger.warn('Rate limit checkout dépassé', { userId: (req.user as any)?.id });
+      logger.warn('Rate limit checkout dépassé', { userId: req.user?.id });
       res.status(429).json({
         success: false,
         message: 'Trop de tentatives de commande. Veuillez patienter quelques minutes.'

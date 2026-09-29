@@ -13,7 +13,7 @@ import logger from '../../../commons/utils/logger';
  */
 export const oauthCallback = async (req: Request, res: Response): Promise<void> => {
   try {
-    const user = req.user as IUser;
+    const user = req.user as IUser | undefined;
 
     const responseMode = req.query.responseMode === 'json' ? 'json' : 'redirect';
     

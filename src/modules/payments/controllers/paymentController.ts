@@ -56,7 +56,7 @@ function replyHttpError(
  * Génère le lien d'inscription PayPal (Partner Referrals) d'un vendeur.
  */
 export const generateOnboardingLink = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     const actionUrl = await buildOnboardingLink(userId);
@@ -133,7 +133,7 @@ export const handleOnboardingReturn = asyncHandler(async (req: Request, res: Res
  * `?refresh=true` force un appel « show seller status » auprès de PayPal.
  */
 export const checkPayPalConnection = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     const status = await getPayPalAccountStatus(userId, {
@@ -160,7 +160,7 @@ export const checkPayPalConnection = asyncHandler(async (req: Request, res: Resp
  * Déconnecte le compte PayPal du vendeur
  */
 export const disconnectPayPal = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     await disconnectPayPalForUser(userId);
@@ -190,7 +190,7 @@ export const disconnectPayPal = asyncHandler(async (req: Request, res: Response)
  * Initie un paiement PayPal pour un produit
  */
 export const initiatePayPalPayment = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { productId, shippingMethod, shippingAddress } = req.body;
 
   try {
@@ -233,7 +233,7 @@ export const initiatePayPalPayment = asyncHandler(async (req: Request, res: Resp
  * Capture un paiement après approbation par l'acheteur
  */
 export const capturePayPalPayment = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { orderId } = req.body;
 
   try {
@@ -277,7 +277,7 @@ export const capturePayPalPayment = asyncHandler(async (req: Request, res: Respo
  * Annule un paiement PayPal et libère la réservation
  */
 export const cancelPayPalPayment = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { orderId } = req.body;
 
   try {
@@ -405,7 +405,7 @@ export const handleWebhook = asyncHandler(async (req: Request, res: Response) =>
  */
 export const checkPaymentStatus = asyncHandler(async (req: Request, res: Response) => {
   const { paymentId } = req.params;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   if (!userId) {
     return res.status(401).json({
@@ -445,7 +445,7 @@ export const checkPaymentStatus = asyncHandler(async (req: Request, res: Respons
 export const refundPayment = asyncHandler(async (req: Request, res: Response) => {
   const { paymentId } = req.params;
   const { amount, reason, password } = req.body;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   if (!userId) {
     return res.status(401).json({
@@ -486,7 +486,7 @@ export const refundPayment = asyncHandler(async (req: Request, res: Response) =>
  * Récupère la liste des paiements de l'utilisateur
  */
 export const getMyPayments = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { role = 'all', status, page = 1, limit = 10 } = req.query;
 
   try {
@@ -525,7 +525,7 @@ export const getMyPayments = asyncHandler(async (req: Request, res: Response) =>
  */
 export const createShipment = asyncHandler(async (req: Request, res: Response) => {
   const { paymentId } = req.params;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
   const { carrier, trackingNumber, trackingUrl } = req.body;
 
   try {
@@ -561,7 +561,7 @@ export const createShipment = asyncHandler(async (req: Request, res: Response) =
  */
 export const markShipmentDelivered = asyncHandler(async (req: Request, res: Response) => {
   const { paymentId } = req.params;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     const shipment = await confirmDelivery(userId, String(paymentId));
@@ -589,7 +589,7 @@ export const markShipmentDelivered = asyncHandler(async (req: Request, res: Resp
  */
 export const fetchShipment = asyncHandler(async (req: Request, res: Response) => {
   const { paymentId } = req.params;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   try {
     const shipment = await getShipment(userId, String(paymentId));
@@ -617,7 +617,7 @@ export const fetchShipment = asyncHandler(async (req: Request, res: Response) =>
  */
 export const getPayment = asyncHandler(async (req: Request, res: Response) => {
   const { paymentId } = req.params;
-  const userId = (req.user as any).id;
+  const userId = req.user!.id;
 
   if (!userId) {
     return res.status(401).json({
