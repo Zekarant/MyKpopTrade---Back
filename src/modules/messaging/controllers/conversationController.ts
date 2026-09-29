@@ -21,6 +21,7 @@ import {
   cancelOfferFlow
 } from '../services/conversationOfferService';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { queryInt, queryString } from '../../../commons/utils/query';
 
 const DEFAULT_CONVERSATION_PAGE = 1;
 const DEFAULT_CONVERSATION_LIMIT = 20;
@@ -57,7 +58,7 @@ function errorPath(error: unknown): unknown {
 export const getConversation = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const conversationId = req.params.id as string;
-  const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
+  const page = queryInt(req.query.page) || DEFAULT_CONVERSATION_PAGE;
   const limit = clampLimit(req.query.limit, DEFAULT_CONVERSATION_LIMIT, MAX_PAGE_SIZE);
 
   try {
@@ -77,9 +78,9 @@ export const getConversation = asyncHandler(async (req: Request, res: Response) 
  */
 export const getUserConversations = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
+  const page = queryInt(req.query.page) || DEFAULT_CONVERSATION_PAGE;
   const limit = clampLimit(req.query.limit, DEFAULT_USER_LIST_LIMIT, MAX_PAGE_SIZE);
-  const filter = req.query.filter as string || 'all';
+  const filter = queryString(req.query.filter) || 'all';
 
   const result = await listUserConversations(userId, page, limit, filter);
   return res.status(200).json(result);
@@ -212,15 +213,14 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
  */
 export const initiatePayWhatYouWant = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const { productId, minimumPrice, maximumPrice, message } = req.body;
+  const { productId, minimumPrice, maximumPrice } = req.body;
 
   try {
     const payWhatYouWant = await initiatePayWhatYouWantFlow({
       userId,
       productId,
       minimumPrice,
-      maximumPrice,
-      message
+      maximumPrice
     });
 
     return res.status(201).json({
@@ -231,8 +231,12 @@ export const initiatePayWhatYouWant = asyncHandler(async (req: Request, res: Res
     if (error instanceof HttpError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
-    logger.error('Erreur lors de l\'activation de Pay What You Want', { error });
-    return res.status(400).json({ message: error instanceof Error ? error.message : undefined });
+    logger.error('Erreur lors de l\'activation de Pay What You Want', {
+      error: error instanceof Error ? error.message : String(error),
+      productId,
+      userId
+    });
+    return res.status(500).json({ message: 'Une erreur est survenue lors de l\'activation du prix libre' });
   }
 });
 
@@ -260,8 +264,12 @@ export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res:
     if (error instanceof HttpError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
-    logger.error('Erreur lors de la proposition d\'un prix PWYW', { error });
-    return res.status(400).json({ message: error instanceof Error ? error.message : undefined });
+    logger.error('Erreur lors de la proposition d\'un prix PWYW', {
+      error: error instanceof Error ? error.message : String(error),
+      conversationId,
+      userId
+    });
+    return res.status(500).json({ message: 'Une erreur est survenue lors de la proposition de prix' });
   }
 });
 
@@ -271,9 +279,9 @@ export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res:
 export const getConversationMedia = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const conversationId = req.params.id as string;
-  const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
+  const page = queryInt(req.query.page) || DEFAULT_CONVERSATION_PAGE;
   const limit = clampLimit(req.query.limit, DEFAULT_CONVERSATION_LIMIT, MAX_PAGE_SIZE);
-  const type = req.query.type as string;
+  const type = queryString(req.query.type);
 
   try {
     const result = await fetchConversationMedia({ userId, conversationId, page, limit, type });

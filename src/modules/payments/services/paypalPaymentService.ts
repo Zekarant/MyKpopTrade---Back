@@ -212,7 +212,8 @@ export class PayPalPaymentService {
         );
 
         if (acceptedNegotiation) {
-          priceToPay = acceptedNegotiation.counterOffer || acceptedNegotiation.currentOffer;
+          // Montant accepté ; counterOffer n'est qu'une étape de la négociation.
+          priceToPay = acceptedNegotiation.currentOffer;
         }
       }
 

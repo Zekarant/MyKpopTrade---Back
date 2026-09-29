@@ -8,7 +8,9 @@ import {
   initiateNegotiationFlow,
   respondToNegotiationFlow,
   cancelOfferFlow,
-  fetchConversationOffers
+  fetchConversationOffers,
+  initiatePayWhatYouWantFlow,
+  makePayWhatYouWantProposalFlow
 } from '../conversationOfferService';
 import Conversation from '../../../../models/conversationModel';
 import Message from '../../../../models/messageModel';
@@ -220,6 +222,66 @@ describe('conversationOfferService (integration)', () => {
       expect(conv?.negotiation?.counterOffer).toBe(85);
     });
 
+    it('l\'acheteur accepte la contre-offre du vendeur, et c\'est ce montant qui sera facturé', async () => {
+      const { seller, buyer, product, conversationId } = await setupPendingOffer();
+      await respondToNegotiationFlow({
+        userId: seller._id.toString(),
+        conversationId,
+        action: 'counter',
+        counterOffer: 85
+      });
+
+      await respondToNegotiationFlow({
+        userId: buyer._id.toString(),
+        conversationId,
+        action: 'accept'
+      });
+
+      const negotiation = (await Product.findById(product._id))?.negotiations?.[0];
+      expect(negotiation?.status).toBe('accepted');
+      expect(negotiation?.currentOffer).toBe(85);
+      expect(negotiation?.counterOffer).toBeUndefined();
+    });
+
+    it('une nouvelle offre de l\'acheteur remplace la contre-offre en attente', async () => {
+      const { seller, buyer, product, conversationId } = await setupPendingOffer();
+      await respondToNegotiationFlow({
+        userId: seller._id.toString(),
+        conversationId,
+        action: 'counter',
+        counterOffer: 90
+      });
+      await initiateNegotiationFlow({
+        userId: buyer._id.toString(),
+        productId: product._id.toString(),
+        initialOffer: 80
+      });
+
+      await respondToNegotiationFlow({
+        userId: seller._id.toString(),
+        conversationId,
+        action: 'accept'
+      });
+
+      const conv = await Conversation.findById(conversationId);
+      expect(conv?.offerHistory.map(offer => offer.status)).toEqual(['rejected', 'expired', 'accepted']);
+      const negotiation = (await Product.findById(product._id))?.negotiations?.[0];
+      expect(negotiation?.currentOffer).toBe(80);
+      expect(negotiation?.counterOffer).toBeUndefined();
+    });
+
+    it('403 si l\'auteur de l\'offre tente d\'y répondre', async () => {
+      const { buyer, conversationId } = await setupPendingOffer();
+
+      await expect(
+        respondToNegotiationFlow({
+          userId: buyer._id.toString(),
+          conversationId,
+          action: 'accept'
+        })
+      ).rejects.toMatchObject({ statusCode: 403 });
+    });
+
     it('403 si l\'utilisateur n\'est pas le vendeur', async () => {
       const { conversationId } = await setupPendingOffer();
       const attacker = await createTestUser();
@@ -378,6 +440,126 @@ describe('conversationOfferService (integration)', () => {
       );
 
       expect(offers.isOwner).toBe(true);
+    });
+  });
+
+  describe('prix libre (Pay What You Want)', () => {
+    async function createPwywProduct() {
+      const seller = await createTestUser();
+      const buyer = await createTestUser();
+      const product = await createTestProduct(seller._id, { price: 100, allowOffers: false });
+      await initiatePayWhatYouWantFlow({
+        userId: seller._id.toString(),
+        productId: product._id.toString(),
+        minimumPrice: 10,
+        maximumPrice: 60
+      });
+      return { seller, buyer, product };
+    }
+
+    it('active le prix libre sur le produit du vendeur', async () => {
+      const { product } = await createPwywProduct();
+
+      const refreshed = await Product.findById(product._id);
+      expect(refreshed?.isPayWhatYouWant).toBe(true);
+      expect(refreshed?.pwywMinPrice).toBe(10);
+      expect(refreshed?.pwywMaxPrice).toBe(60);
+    });
+
+    it('refuse d\'activer le prix libre sur le produit d\'un autre vendeur', async () => {
+      const seller = await createTestUser();
+      const other = await createTestUser();
+      const product = await createTestProduct(seller._id);
+
+      await expect(initiatePayWhatYouWantFlow({
+        userId: other._id.toString(),
+        productId: product._id.toString(),
+        minimumPrice: 10
+      })).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('refuse un maximum inférieur ou égal au minimum', async () => {
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id);
+
+      await expect(initiatePayWhatYouWantFlow({
+        userId: seller._id.toString(),
+        productId: product._id.toString(),
+        minimumPrice: 20,
+        maximumPrice: 20
+      })).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('accepte une offre dans la fourchette, même sans offres classiques ni pourcentage minimal', async () => {
+      const { buyer, product } = await createPwywProduct();
+
+      const result = await initiateNegotiationFlow({
+        userId: buyer._id.toString(),
+        productId: product._id.toString(),
+        initialOffer: 15
+      });
+
+      expect(result.initialOffer).toBe(15);
+      const conv = await Conversation.findOne({ productId: product._id, type: 'negotiation' });
+      expect(conv?.offerHistory[0].amount).toBe(15);
+    });
+
+    it('refuse une offre hors de la fourchette', async () => {
+      const { buyer, product } = await createPwywProduct();
+      const offer = (initialOffer: number) => initiateNegotiationFlow({
+        userId: buyer._id.toString(),
+        productId: product._id.toString(),
+        initialOffer
+      });
+
+      await expect(offer(5)).rejects.toMatchObject({ statusCode: 400 });
+      await expect(offer(80)).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('met à jour la proposition depuis la conversation, et le prix accepté est celui facturé', async () => {
+      const { seller, buyer, product } = await createPwywProduct();
+      const first = await initiateNegotiationFlow({
+        userId: buyer._id.toString(),
+        productId: product._id.toString(),
+        initialOffer: 20
+      });
+      const conversationId = String(first.conversation?._id);
+
+      const proposal = await makePayWhatYouWantProposalFlow({
+        userId: buyer._id.toString(),
+        conversationId,
+        proposedPrice: 35
+      });
+      expect(proposal.isUpdate).toBe(true);
+      expect(proposal.previousOffer).toBe(20);
+
+      await respondToNegotiationFlow({
+        userId: seller._id.toString(),
+        conversationId,
+        action: 'accept'
+      });
+
+      const refreshed = await Product.findById(product._id);
+      const negotiation = refreshed?.negotiations?.find(n => n.buyer.toString() === buyer._id.toString());
+      expect(negotiation?.status).toBe('accepted');
+      expect(negotiation?.currentOffer).toBe(35);
+    });
+
+    it('refuse une proposition de prix libre sur un produit qui n\'est pas à prix libre', async () => {
+      const seller = await createTestUser();
+      const buyer = await createTestUser();
+      const product = await createTestProduct(seller._id, { price: 100, allowOffers: true });
+      const first = await initiateNegotiationFlow({
+        userId: buyer._id.toString(),
+        productId: product._id.toString(),
+        initialOffer: 70
+      });
+
+      await expect(makePayWhatYouWantProposalFlow({
+        userId: buyer._id.toString(),
+        conversationId: String(first.conversation?._id),
+        proposedPrice: 80
+      })).rejects.toMatchObject({ statusCode: 400 });
     });
   });
 });
