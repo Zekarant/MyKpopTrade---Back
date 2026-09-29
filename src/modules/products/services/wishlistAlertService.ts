@@ -79,19 +79,18 @@ export async function notifyWishlistPriceDrop(
 
 /**
  * Notifie les wishlisters qu'un produit favori n'est plus disponible
- * (vendu, retiré, ou réservé). Permet à l'utilisateur de nettoyer sa
+ * (vendu ou retiré). Permet à l'utilisateur de nettoyer sa
  * wishlist et de chercher des alternatives.
  */
 export async function notifyWishlistUnavailable(
   product: WishlistProduct | null | undefined,
-  reason: 'sold' | 'unavailable' | 'reserved'
+  reason: 'sold' | 'unavailable'
 ): Promise<void> {
   if (!product?._id || !product?.seller) return;
 
   const reasonLabel: Record<string, string> = {
     sold: 'a été vendu',
-    unavailable: 'n\'est plus disponible',
-    reserved: 'a été réservé'
+    unavailable: 'n\'est plus disponible'
   };
 
   await broadcastToWishlistOwners(product._id, product.seller, {

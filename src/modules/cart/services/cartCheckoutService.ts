@@ -37,8 +37,8 @@ type CartProduct = { _id: { toString(): string }; title?: string; seller: { toSt
  * Checkout multi-seller : groupe les items du panier par vendeur,
  * crée un paiement PayPal par produit, et renvoie les URLs d'approbation.
  *
- * Tout ou rien : chaque paiement réserve son produit, donc les vendeurs sont
- * tous vérifiés avant le premier paiement et un échec annule ceux déjà créés.
+ * Tout ou rien : les vendeurs sont tous vérifiés avant le premier paiement et
+ * un échec annule ceux déjà créés, pour ne pas laisser d'ordres orphelins.
  */
 export async function checkoutCart(
   userId: string,
@@ -124,7 +124,7 @@ export async function checkoutCart(
   return results;
 }
 
-/** Annule les paiements créés par un checkout interrompu et libère leurs produits. */
+/** Annule les paiements créés par un checkout interrompu. */
 async function cancelCreatedPayments(userId: string, orderIds: string[]): Promise<void> {
   for (const orderId of orderIds) {
     try {

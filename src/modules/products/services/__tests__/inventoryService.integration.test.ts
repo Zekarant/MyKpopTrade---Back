@@ -4,7 +4,7 @@ import {
   clearAllCollections
 } from '../../../../tests/helpers/mongoMemory';
 import { createTestUser, createTestProduct } from '../../../../tests/helpers/fixtures';
-import { fetchRecommendedProducts } from '../inventoryService';
+import { fetchRecommendedProducts, fetchUserInventory } from '../inventoryService';
 import User from '../../../../models/userModel';
 
 describe('inventoryService (integration)', () => {
@@ -35,6 +35,37 @@ describe('inventoryService (integration)', () => {
       expect(isPersonalized).toBe(true);
       expect(ids).toContain(String(otherListing._id));
       expect(ids).not.toContain(String(ownListing._id));
+    });
+  });
+
+  describe('fetchUserInventory', () => {
+    async function sellerWithListings() {
+      const seller = await createTestUser();
+      const onSale = await createTestProduct(seller._id, { title: 'En vente' });
+      const sold = await createTestProduct(seller._id, { title: 'Vendu', isAvailable: false, isSold: true });
+      const withdrawn = await createTestProduct(seller._id, { title: 'Retiré', isAvailable: false });
+      return { sellerId: String(seller._id), onSale, sold, withdrawn };
+    }
+
+    const titles = (result: Awaited<ReturnType<typeof fetchUserInventory>>) =>
+      result.products.map((product) => product.title);
+
+    it('sépare les articles vendus des annonces retirées', async () => {
+      const { sellerId } = await sellerWithListings();
+      const inventory = (status: string) => fetchUserInventory({ sellerId, viewerId: sellerId, status, page: 1, limit: 20 });
+
+      expect(titles(await inventory('sold'))).toEqual(['Vendu']);
+      expect(titles(await inventory('withdrawn'))).toEqual(['Retiré']);
+      expect((await inventory('available')).stats).toMatchObject({ totalProducts: 3, soldProducts: 1 });
+    });
+
+    it('ne montre pas les annonces retirées d\'un vendeur aux autres utilisateurs', async () => {
+      const { sellerId } = await sellerWithListings();
+
+      const result = await fetchUserInventory({ sellerId, status: 'withdrawn', page: 1, limit: 20 });
+
+      expect(titles(result)).toEqual(['En vente']);
+      expect(result.stats).toBeNull();
     });
   });
 });

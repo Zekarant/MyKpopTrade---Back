@@ -226,7 +226,7 @@ export interface InitiateDirectPaymentInput {
 }
 
 /**
- * Annule un paiement PayPal en attente et libère la réservation du produit.
+ * Annule un paiement PayPal en attente.
  */
 export async function cancelDirectPayment(userId: string, orderId: string) {
   if (!orderId) {
@@ -243,25 +243,10 @@ export async function cancelDirectPayment(userId: string, orderId: string) {
     throw new HttpError(404, 'Paiement non trouvé ou déjà traité');
   }
 
-  // Libérer la réservation du produit seulement si c'est bien cet acheteur qui l'a réservé
-  await Product.findOneAndUpdate(
-    {
-      _id: payment.product,
-      isReserved: true,
-      reservedFor: userId
-    },
-    {
-      isReserved: false,
-      reservedFor: null,
-      reservedUntil: null
-    }
-  );
-
-  // Marquer le paiement comme annulé
   payment.status = 'cancelled';
   await payment.save();
 
-  logger.info('Paiement annulé et réservation libérée', {
+  logger.info('Paiement annulé', {
     orderId,
     productId: payment.product,
     userId: userId.substring(0, USER_ID_LOG_PREFIX_LENGTH) + '...'
@@ -279,14 +264,7 @@ export async function initiateDirectPayment(
     throw new HttpError(400, 'ID du produit requis');
   }
 
-  const product = await Product.findOne({
-    _id: productId,
-    isSold: false,
-    $or: [
-      { isAvailable: true, isReserved: false },
-      { isReserved: true, reservedFor: userId }
-    ]
-  });
+  const product = await Product.findOne({ _id: productId, isSold: false, isAvailable: true });
 
   if (!product) {
     throw new HttpError(404, 'Produit non trouvé ou non disponible');
@@ -332,15 +310,12 @@ export async function captureDirectPayment(userId: string, orderId: string) {
     );
   }
 
-  // Marquer le produit vendu AVANT d'encaisser, de façon atomique : si la
-  // réservation de cet acheteur a expiré et qu'un autre acheteur a payé entre
-  // temps, on refuse ici plutôt que de débiter deux personnes.
+  // Marquer le produit vendu AVANT d'encaisser, de façon atomique : les produits
+  // ne sont pas réservés pendant le paiement, donc si un autre acheteur a payé
+  // entre temps (ou si le vendeur a retiré l'annonce), on refuse ici plutôt
+  // que de débiter deux personnes.
   const claimedProduct = await Product.findOneAndUpdate(
-    {
-      _id: payment.product,
-      isSold: false,
-      $or: [{ isReserved: { $ne: true } }, { reservedFor: payment.buyer }]
-    },
+    { _id: payment.product, isSold: false, isAvailable: true },
     { $set: { isAvailable: false, isSold: true, soldAt: new Date(), soldTo: payment.buyer } },
     { new: false }
   );
@@ -361,7 +336,7 @@ export async function captureDirectPayment(userId: string, orderId: string) {
     if (!alreadyClaimedByBuyer || otherCompletedPayment) {
       throw new HttpError(
         409,
-        'Ce produit a déjà été vendu ou réservé pour un autre acheteur : le paiement n\'a pas été encaissé.'
+        'Ce produit a déjà été vendu ou retiré de la vente : le paiement n\'a pas été encaissé.'
       );
     }
   }
@@ -376,7 +351,7 @@ export async function captureDirectPayment(userId: string, orderId: string) {
     if (claimedProduct) {
       await Product.updateOne(
         { _id: payment.product, soldTo: payment.buyer },
-        { $set: { isAvailable: claimedProduct.isAvailable, isSold: false }, $unset: { soldAt: 1, soldTo: 1 } }
+        { $set: { isAvailable: true, isSold: false }, $unset: { soldAt: 1, soldTo: 1 } }
       );
     }
     throw error;

@@ -13,10 +13,9 @@ import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 import { queryInt, queryString } from '../../../commons/utils/query';
 
 const productStatusLabel = (
-  product: Pick<IProduct, 'isSold' | 'isReserved' | 'isAvailable' | 'moderationFlag'>
+  product: Pick<IProduct, 'isSold' | 'isAvailable' | 'moderationFlag'>
 ): string => {
   if (product.isSold) return 'vendu';
-  if (product.isReserved) return 'réservé';
   if (!product.isAvailable && product.moderationFlag?.suspect) return 'suspendu';
   return product.isAvailable ? 'disponible' : 'indisponible';
 };
@@ -43,7 +42,6 @@ export const getAllProducts = asyncHandler(async (req: Request, res: Response) =
 
   if (status === 'available') filter.isAvailable = true;
   if (status === 'sold') filter.isSold = true;
-  if (status === 'reserved') filter.isReserved = true;
   if (status === 'suspended') {
     filter.isAvailable = false;
     filter['moderationFlag.suspect'] = true;
@@ -97,11 +95,10 @@ export const getAllProducts = asyncHandler(async (req: Request, res: Response) =
  * Statistiques produits pour l'admin
  */
 export const getProductAdminStats = asyncHandler(async (req: Request, res: Response) => {
-  const [total, available, sold, reserved, suspended] = await Promise.all([
+  const [total, available, sold, suspended] = await Promise.all([
     Product.countDocuments({}),
     Product.countDocuments({ isAvailable: true }),
     Product.countDocuments({ isSold: true }),
-    Product.countDocuments({ isReserved: true }),
     Product.countDocuments({ isAvailable: false, 'moderationFlag.suspect': true })
   ]);
 
@@ -131,7 +128,6 @@ export const getProductAdminStats = asyncHandler(async (req: Request, res: Respo
     total,
     available,
     sold,
-    reserved,
     suspended,
     newProducts,
     recentSales,

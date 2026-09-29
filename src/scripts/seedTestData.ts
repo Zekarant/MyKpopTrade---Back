@@ -24,7 +24,7 @@ type PostDoc = InstanceType<typeof Post>;
 type SeedProduct = Pick<
   IProduct,
   | 'seller' | 'title' | 'description' | 'price' | 'currency' | 'condition' | 'category' | 'type'
-  | 'kpopGroup' | 'kpopMember' | 'albumName' | 'images' | 'isAvailable' | 'isReserved' | 'reservedFor'
+  | 'kpopGroup' | 'kpopMember' | 'albumName' | 'images' | 'isAvailable'
   | 'isSold' | 'soldAt' | 'soldTo' | 'shippingOptions' | 'allowOffers' | 'minOfferPercentage'
   | 'isPayWhatYouWant' | 'views' | 'favorites' | 'createdAt' | 'updatedAt'
 >;
@@ -319,6 +319,7 @@ async function resolveGroups() {
         profileImage: makeImage('profiles', `seed-group-${slug}.png`, [g.name], 400, 400),
         bannerImage: makeImage('banners', `seed-group-banner-${slug}.png`, [g.name], 1200, 400),
         genres: g.genres,
+        members: g.members,
         tags: [SEED_GROUP_TAG, 'K-pop'],
         discoverySource: 'Manual',
         followers: [],
@@ -433,7 +434,6 @@ async function seedProducts(usersByName: Record<string, UserDoc>) {
           );
 
       const sold = r() < 0.2;
-      const reserved = !sold && r() < 0.12;
       const createdAt = daysAgo(Math.floor(r() * 90));
 
       products.push({
@@ -454,9 +454,7 @@ async function seedProducts(usersByName: Record<string, UserDoc>) {
         kpopMember: type === 'merch' ? undefined : member,
         albumName: type === 'merch' ? undefined : album,
         images,
-        isAvailable: !sold && !reserved,
-        isReserved: reserved,
-        reservedFor: reserved ? pick(buyers, r)._id : undefined,
+        isAvailable: !sold,
         isSold: sold,
         soldAt: sold ? new Date(createdAt.getTime() + 5 * 24 * 3600 * 1000) : undefined,
         soldTo: sold ? pick(buyers, r)._id : undefined,
@@ -679,9 +677,6 @@ async function buildNegotiationThread(
   // Le produit doit rester « offrable » pour que le vendeur puisse répondre depuis l'UI.
   product.allowOffers = true;
   product.minOfferPercentage = 50;
-  product.isAvailable = spec.outcome !== 'accepted';
-  product.isReserved = spec.outcome === 'accepted';
-  if (spec.outcome === 'accepted') product.reservedFor = buyerDoc._id;
 
   const buyerSteps = spec.steps.filter((s) => s.by === 'buyer');
   const sellerCounters = spec.steps.filter((s) => s.by === 'seller');

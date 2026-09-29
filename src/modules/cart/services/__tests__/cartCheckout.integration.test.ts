@@ -12,8 +12,8 @@ import Product from '../../../../models/productModel';
 import Payment from '../../../../models/paymentModel';
 
 /**
- * Checkout du panier : tout ou rien. Chaque paiement réserve son produit ; un
- * échec au milieu ne doit laisser aucun produit réservé sans lien de paiement.
+ * Checkout du panier : tout ou rien. Un échec au milieu ne doit laisser aucun
+ * paiement en attente derrière lui.
  */
 describe('checkoutCart (integration)', () => {
   beforeAll(async () => {
@@ -32,11 +32,11 @@ describe('checkoutCart (integration)', () => {
   const connectedSeller = () =>
     createTestUser({ paypalConnected: true, paypalMerchantId: `MERCHANT${Math.random().toString(36).slice(2, 8)}` });
 
-  /** Simule PayPal : réserve le produit et enregistre le paiement, comme le vrai service. */
+  /** Simule PayPal : enregistre le paiement, comme le vrai service. */
   function fakePayPal(failOnProductId?: string) {
     return jest.spyOn(PayPalService, 'createDirectPayment').mockImplementation(async (productId: string, buyerId: string) => {
       if (productId === failOnProductId) throw new Error('PayPal indisponible');
-      const product = await Product.findByIdAndUpdate(productId, { isReserved: true, reservedFor: buyerId });
+      const product = await Product.findById(productId);
       const orderId = `ORDER-${productId}`;
       const payment = await Payment.create({
         product: productId,
@@ -65,7 +65,7 @@ describe('checkoutCart (integration)', () => {
     expect(results.map((r) => r.productIds[0]).sort()).toEqual([a._id.toString(), b._id.toString()].sort());
   });
 
-  it('renvoie l\'ordre PayPal de chaque paiement, qui permet à la page d\'annulation de tout libérer', async () => {
+  it('renvoie l\'ordre PayPal de chaque paiement, qui permet à la page d\'annulation de tout annuler', async () => {
     const buyer = await createTestUser();
     const sellerA = await connectedSeller();
     const sellerB = await connectedSeller();
@@ -86,7 +86,6 @@ describe('checkoutCart (integration)', () => {
     for (const result of results) {
       await expect(cancelDirectPayment(buyerId, result.paypalOrderId)).resolves.toEqual({ cancelled: true });
     }
-    expect((await Product.find({ _id: { $in: [a._id, b._id] } })).map((p) => p.isReserved)).toEqual([false, false]);
     expect((await Payment.find({ buyer: buyer._id })).map((p) => p.status)).toEqual(['cancelled', 'cancelled']);
   });
 
@@ -110,7 +109,7 @@ describe('checkoutCart (integration)', () => {
     expect(cart.items.map((item) => item.product?.title).sort()).toEqual(['Annulé', 'Vendu à un autre']);
   });
 
-  it('libère les produits déjà réservés si un paiement suivant échoue', async () => {
+  it('annule les paiements déjà créés si un paiement suivant échoue', async () => {
     const buyer = await createTestUser();
     const seller = await connectedSeller();
     const first = await createTestProduct(seller._id, { title: 'Premier' });
@@ -123,12 +122,10 @@ describe('checkoutCart (integration)', () => {
       statusCode: 400
     });
 
-    const released = await Product.findById(first._id);
-    expect(released!.isReserved).toBe(false);
     expect(await Payment.findOne({ paymentIntentId: `ORDER-${first._id}` })).toMatchObject({ status: 'cancelled' });
   });
 
-  it('refuse tout le panier, sans rien réserver, si un vendeur n\'est pas relié à PayPal', async () => {
+  it('refuse tout le panier, sans créer de paiement, si un vendeur n\'est pas relié à PayPal', async () => {
     const buyer = await createTestUser();
     const ready = await connectedSeller();
     const notReady = await createTestUser();
@@ -143,7 +140,7 @@ describe('checkoutCart (integration)', () => {
     );
 
     expect(paypal).not.toHaveBeenCalled();
-    expect((await Product.findById(payable._id))!.isReserved).not.toBe(true);
+    expect(await Payment.countDocuments({ product: payable._id })).toBe(0);
   });
 
   it('nomme le produit indisponible dans le message d\'erreur', async () => {

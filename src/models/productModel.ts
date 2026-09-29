@@ -38,11 +38,9 @@ export interface IProduct extends Document {
   images: string[];
   isAvailable: boolean;
   moderationFlag?: IProductModerationFlag;
-  isReserved: boolean;
   isSold: boolean; // Nouveau champ
   soldAt?: Date; // Nouveau champ
   soldTo?: mongoose.Types.ObjectId; // Nouveau champ
-  reservedFor?: mongoose.Types.ObjectId;
   shippingOptions: {
     worldwide: boolean;
     nationalOnly: boolean;
@@ -158,10 +156,6 @@ const ProductSchema: Schema = new Schema({
     }, { _id: false }),
     default: undefined
   },
-  isReserved: {
-    type: Boolean,
-    default: false
-  },
   isSold: {
     type: Boolean,
     default: false
@@ -170,10 +164,6 @@ const ProductSchema: Schema = new Schema({
     type: Date
   },
   soldTo: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
-  reservedFor: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },

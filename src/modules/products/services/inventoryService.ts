@@ -3,6 +3,9 @@ import User from '../../../models/userModel';
 import Product, { IProduct } from '../../../models/productModel';
 import { IUser } from '../../../models/userModel';
 
+/** Statuts visibles de tous ; les annonces retirées ne regardent que leur vendeur. */
+const PUBLIC_INVENTORY_STATUSES = new Set(['available', 'sold']);
+
 function buildInventoryFilter(sellerId: string, status: string): mongoose.QueryFilter<IProduct> {
   const filter: mongoose.QueryFilter<IProduct> = { seller: sellerId };
 
@@ -11,11 +14,13 @@ function buildInventoryFilter(sellerId: string, status: string): mongoose.QueryF
       filter.isAvailable = true;
       break;
     case 'sold':
-      filter.isAvailable = false;
+      filter.isSold = true;
       break;
-    case 'reserved':
-      filter.isAvailable = true;
-      filter.isReserved = true;
+    // Retirée de la vente sans avoir été vendue : en pause, supprimée en douceur
+    // ou suspendue par la modération.
+    case 'withdrawn':
+      filter.isAvailable = false;
+      filter.isSold = { $ne: true };
       break;
     case 'all':
       break;
@@ -39,7 +44,11 @@ export async function fetchUserInventory({
   page: number;
   limit: number;
 }) {
-  const filter = buildInventoryFilter(sellerId, status);
+  const isOwner = viewerId === sellerId;
+  const filter = buildInventoryFilter(
+    sellerId,
+    isOwner || PUBLIC_INVENTORY_STATUSES.has(status) ? status : 'available'
+  );
 
   const [products, total] = await Promise.all([
     Product.find(filter)
@@ -50,7 +59,7 @@ export async function fetchUserInventory({
   ]);
 
   let inventoryStats = null;
-  if (viewerId === sellerId) {
+  if (isOwner) {
     // aggregate() ne caste pas les types comme find() : ObjectId explicite.
     // sellerId === viewerId, l'identifiant du JWT, donc un ObjectId valide.
     const stats = await Product.aggregate([
@@ -59,21 +68,7 @@ export async function fetchUserInventory({
         $group: {
           _id: null,
           totalProducts: { $sum: 1 },
-          soldProducts: { $sum: { $cond: [{ $eq: ['$isAvailable', false] }, 1, 0] } },
-          reservedProducts: {
-            $sum: {
-              $cond: [
-                {
-                  $and: [
-                    { $eq: ['$isAvailable', true] },
-                    { $eq: ['$isReserved', true] }
-                  ]
-                },
-                1,
-                0
-              ]
-            }
-          },
+          soldProducts: { $sum: { $cond: [{ $eq: ['$isSold', true] }, 1, 0] } },
           totalViews: { $sum: '$views' },
           totalFavorites: { $sum: '$favorites' }
         }

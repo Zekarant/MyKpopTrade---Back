@@ -4,7 +4,6 @@ import env from './config/env';
 import logger from './commons/utils/logger';
 import { startGdprCleanupTask } from './commons/tasks/gdprCleanupTask';
 import { startShipmentTrackingTask } from './commons/tasks/shipmentTrackingTask';
-import { startReservationCleanupTask } from './commons/tasks/reservationCleanupTask';
 import { startSuspensionExpiryTask } from './commons/tasks/suspensionExpiryTask';
 import { startIdentityDocumentCleanupTask } from './commons/tasks/identityDocumentCleanupTask';
 import { startAccountDeletionTask } from './commons/tasks/accountDeletionTask';
@@ -12,7 +11,6 @@ import { startAccountDeletionTask } from './commons/tasks/accountDeletionTask';
 if (process.env.NODE_ENV !== 'test') {
   startGdprCleanupTask();
   startShipmentTrackingTask();
-  startReservationCleanupTask();
   startSuspensionExpiryTask();
   startIdentityDocumentCleanupTask();
   startAccountDeletionTask();

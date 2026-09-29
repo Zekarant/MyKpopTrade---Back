@@ -117,7 +117,7 @@ export const createReport = asyncHandler(async (req: Request, res: Response) => 
     return res.status(400).json({ message: 'Vous ne pouvez pas signaler votre propre profil' });
   }
 
-  let target = null;
+  let target: Awaited<ReturnType<typeof findTarget>>;
 
   try {
     target = await findTarget(targetType, targetId);
@@ -377,7 +377,7 @@ const loadReportTarget = async (targetType: string, targetId: mongoose.Types.Obj
 
   if (targetType === 'product') {
     const product = await Product.findById(targetId)
-      .select('title description price currency images isAvailable isSold isReserved type condition seller createdAt')
+      .select('title description price currency images isAvailable isSold type condition seller createdAt')
       .populate('seller', OWNER_FIELDS);
     if (!product) return null;
 
@@ -395,8 +395,7 @@ const loadReportTarget = async (targetType: string, targetId: mongoose.Types.Obj
         condition: product.condition,
         productType: product.type,
         isSold: product.isSold,
-        isAvailable: product.isAvailable,
-        isReserved: product.isReserved
+        isAvailable: product.isAvailable
       }
     };
   }

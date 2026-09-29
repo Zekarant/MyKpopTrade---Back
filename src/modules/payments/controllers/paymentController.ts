@@ -276,7 +276,7 @@ export const capturePayPalPayment = asyncHandler(async (req: Request, res: Respo
 });
 
 /**
- * Annule un paiement PayPal et libère la réservation
+ * Annule un paiement PayPal en attente
  */
 export const cancelPayPalPayment = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.id;

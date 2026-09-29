@@ -15,6 +15,7 @@ import {
 import { HttpError } from '../../../../commons/utils/httpError';
 import User from '../../../../models/userModel';
 import Product from '../../../../models/productModel';
+import Payment from '../../../../models/paymentModel';
 
 describe('productService (integration)', () => {
   beforeAll(async () => {
@@ -213,6 +214,59 @@ describe('productService (integration)', () => {
 
       expect((await User.findById(buyer._id))?.statistics?.totalPurchases).toBe(1);
       expect(String((await Product.findById(product._id))?.soldTo)).toBe(buyer._id.toString());
+    });
+
+    it('refuse (409) un article déjà vendu, sans compter une seconde vente', async () => {
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id);
+      const sale = { productId: product._id.toString(), userId: seller._id.toString() };
+      await markAsSold(sale);
+
+      await expect(markAsSold(sale)).rejects.toMatchObject({ statusCode: 409 });
+      expect((await User.findById(seller._id))?.statistics?.totalSales).toBe(1);
+    });
+  });
+
+  describe('remise en vente', () => {
+    const relist = (productId: unknown, userId: unknown) =>
+      updateProductForOwner({ productId: String(productId), userId: String(userId), body: { isAvailable: true } });
+
+    it('annule une vente déclarée à la main et ses statistiques', async () => {
+      const seller = await createTestUser();
+      const buyer = await createTestUser();
+      const product = await createTestProduct(seller._id);
+      await markAsSold({ productId: product._id.toString(), userId: seller._id.toString(), buyerId: buyer._id.toString() });
+
+      const relisted = await relist(product._id, seller._id);
+
+      expect(relisted).toMatchObject({ isAvailable: true, isSold: false });
+      expect(relisted?.soldAt).toBeUndefined();
+      expect(relisted?.soldTo).toBeUndefined();
+      expect((await User.findById(seller._id))?.statistics?.totalSales).toBe(0);
+      expect((await User.findById(buyer._id))?.statistics?.totalPurchases).toBe(0);
+    });
+
+    it('remet en vente une annonce retirée sans toucher aux statistiques', async () => {
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id, { isAvailable: false });
+
+      const relisted = await relist(product._id, seller._id);
+
+      expect(relisted?.isAvailable).toBe(true);
+      expect((await User.findById(seller._id))?.statistics?.totalSales ?? 0).toBe(0);
+    });
+
+    it('refuse (409) de remettre en vente un article payé via la plateforme', async () => {
+      const seller = await createTestUser();
+      const buyer = await createTestUser();
+      const product = await createTestProduct(seller._id, { isSold: true, isAvailable: false, soldTo: buyer._id });
+      await Payment.create({
+        product: product._id, buyer: buyer._id, seller: seller._id,
+        amount: 20, currency: 'EUR', paymentIntentId: 'ORDER-PAID', status: 'completed'
+      });
+
+      await expect(relist(product._id, seller._id)).rejects.toMatchObject({ statusCode: 409 });
+      expect((await Product.findById(product._id))?.isSold).toBe(true);
     });
   });
 

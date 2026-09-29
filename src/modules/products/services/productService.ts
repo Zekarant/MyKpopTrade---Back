@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import Product, { IProduct } from '../../../models/productModel';
 import User from '../../../models/userModel';
+import Payment, { IPayment } from '../../../models/paymentModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import KpopAlbum from '../../../models/albumModel';
 import { HttpError } from '../../../commons/utils/httpError';
@@ -20,8 +21,11 @@ const DEFAULT_LIST_SORT = '-createdAt';
 const ALLOWED_PRODUCT_UPDATES = [
   'title', 'description', 'price', 'currency', 'condition',
   'category', 'type', 'kpopGroup', 'kpopMember', 'albumName',
-  'isAvailable', 'isReserved', 'reservedFor', 'shippingOptions', 'allowOffers'
+  'isAvailable', 'shippingOptions', 'allowOffers'
 ];
+/** Paiements qui font d'un article une vente encaissée. */
+const PAID_SALE_STATUSES: IPayment['status'][] = ['completed', 'partially_refunded'];
+
 // Le prix libre (isPayWhatYouWant, pwywMinPrice, pwywMaxPrice) passe par
 // POST /api/messaging/pwyw, qui valide la fourchette.
 // `images` est volontairement absent : un chemin fourni par le client permettrait
@@ -121,6 +125,20 @@ function assertOwnership(product: Pick<IProduct, 'seller'>, userId: string, mess
   }
 }
 
+/** Retire des compteurs la vente que `markAsSold` y avait ajoutée. */
+async function revertManualSaleStatistics(sellerId: string, buyerId?: mongoose.Types.ObjectId) {
+  await User.updateOne(
+    { _id: sellerId, 'statistics.totalSales': { $gt: 0 } },
+    { $inc: { 'statistics.totalSales': -1 } }
+  );
+  if (buyerId) {
+    await User.updateOne(
+      { _id: buyerId, 'statistics.totalPurchases': { $gt: 0 } },
+      { $inc: { 'statistics.totalPurchases': -1 } }
+    );
+  }
+}
+
 /**
  * Chemins publics des images reçues par multer. `req.body.images` est ignoré :
  * un chemin fourni par le client finirait dans fs.unlinkSync à la suppression.
@@ -179,7 +197,7 @@ export async function createProductForSeller({
   if (typeof productData.shippingOptions === 'string') {
     try {
       productData.shippingOptions = JSON.parse(productData.shippingOptions);
-    } catch (e) {
+    } catch {
       throw new HttpError(400, 'shippingOptions est mal formé');
     }
   }
@@ -319,15 +337,6 @@ export async function updateProductForOwner({
     }
   }
 
-  if (updates.isReserved && updates.reservedFor) {
-    const userExists = await User.exists({ _id: updates.reservedFor });
-    if (!userExists) {
-      throw new HttpError(400, 'Utilisateur réservé invalide');
-    }
-  } else if (updates.isReserved === false) {
-    updates.reservedFor = null;
-  }
-
   // Une annonce mise en pause par la modération IA et pas encore validée par
   // un admin ne peut pas être republiée par le vendeur lui-même : seul
   // `reviewFlaggedProduct` (revue admin) peut lever la pause.
@@ -339,14 +348,28 @@ export async function updateProductForOwner({
     throw new HttpError(403, 'Cette annonce est en attente de revue par un administrateur et ne peut pas être republiée');
   }
 
+  // Remettre en vente un article vendu annule la vente. Seule une vente
+  // déclarée à la main peut l'être : une vente payée ne se défait que par un
+  // remboursement total, qui remet lui-même l'annonce en vente.
+  const cancelsSale = updates.isAvailable === true && product.isSold;
+  if (cancelsSale && await Payment.exists({ product: product._id, status: { $in: PAID_SALE_STATUSES } })) {
+    throw new HttpError(409, 'Cet article a été payé via la plateforme : remboursez l\'acheteur pour le remettre en vente');
+  }
+
   const previousPrice = product.price;
   const previousAvailable = product.isAvailable;
 
   const updated = await Product.findByIdAndUpdate(
     productId,
-    { $set: updates },
+    cancelsSale
+      ? { $set: { ...updates, isSold: false }, $unset: { soldAt: 1, soldTo: 1 } }
+      : { $set: updates },
     { new: true, runValidators: true }
   );
+
+  if (updated && cancelsSale) {
+    await revertManualSaleStatistics(userId, product.soldTo);
+  }
 
   if (updated) {
     if (
@@ -410,6 +433,10 @@ export async function markAsSold({
   if (buyerId && !mongoose.Types.ObjectId.isValid(buyerId)) {
     throw new HttpError(400, 'ID d\'acheteur invalide');
   }
+  // Sinon chaque clic compterait une vente de plus dans les statistiques.
+  if (product.isSold) {
+    throw new HttpError(409, 'Cet article est déjà marqué comme vendu');
+  }
 
   // Comme une vente payée : isSold distingue une annonce vendue d'une annonce
   // simplement retirée ou mise en pause par la modération.
@@ -453,7 +480,7 @@ export async function toggleFavoriteForUser(userId: string, productId: string): 
   }
 
   const favoriteIndex = user.favorites.indexOf(product._id);
-  let isFavorite = false;
+  let isFavorite: boolean;
 
   if (favoriteIndex === -1) {
     user.favorites.push(product._id);
