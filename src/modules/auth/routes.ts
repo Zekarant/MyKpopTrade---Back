@@ -19,11 +19,36 @@ import {
   rateLimitTwoFactorVerify
 } from './middleware/authRateLimiter';
 import env from '../../config/env';
+import { readOAuthState, OAuthAppState } from '../../config/oauthStateStore';
 
 const router = Router();
 
 /** `purpose` du jeton court qui transporte l'utilisateur à lier dans le `state` OAuth. */
 const SOCIAL_LINK_TOKEN_PURPOSE = 'social_link';
+
+/**
+ * Transporte le jeton de liaison dans le state OAuth. Un objet, et non une
+ * chaîne, pour que passport passe par CookieStateStore (cf. oauthStateStore).
+ */
+function linkState(linkToken: string): string {
+  const state: OAuthAppState = { linkToken };
+  return state as unknown as string;
+}
+
+/** Utilisateur à lier si le state porte un jeton de liaison valide. */
+function linkUserIdFromState(rawState: unknown): string | undefined {
+  const linkToken = readOAuthState(rawState)?.linkToken;
+  if (!linkToken) return undefined;
+  try {
+    const decoded = jwt.verify(linkToken, env.JWT_SECRET) as { userId?: string; purpose?: string };
+    // Même secret que le défi 2FA (qui porte aussi `userId`) : sans ce
+    // contrôle, un défi 2FA servait de jeton de liaison.
+    return decoded.purpose === SOCIAL_LINK_TOKEN_PURPOSE ? decoded.userId : undefined;
+  } catch {
+    // Jeton expiré ou falsifié : parcours de connexion normal.
+    return undefined;
+  }
+}
 
 // Routes d'enregistrement et de connexion
 router.post('/register', rateLimitRegister, registerController.register);
@@ -65,23 +90,10 @@ router.delete('/profile/paypal-email', authenticateJWT, profileController.remove
 // Routes d'authentification sociale - LOGIN/REGISTER
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 router.get('/google/callback', (req: Request, res: Response, next: NextFunction) => {
-  // Vérifier si c'est un flow de liaison (state contient linkToken)
-  const stateParam = req.query.state as string | undefined;
-  if (stateParam) {
-    try {
-      const state = JSON.parse(stateParam);
-      if (state.linkToken) {
-        const decoded = jwt.verify(state.linkToken, env.JWT_SECRET) as any;
-        // Même secret que le défi 2FA (qui porte aussi `userId`) : sans ce
-        // contrôle, un défi 2FA servait de jeton de liaison.
-        if (decoded.purpose === SOCIAL_LINK_TOKEN_PURPOSE) {
-          (req as any).linkUserId = decoded.userId;
-        }
-      }
-    } catch {
-      // State invalide ou pas un JSON de liaison - on continue en mode login normal
-    }
-  }
+  // Liaison si le state porte un jeton de liaison. L'authenticité du state
+  // (nonce ↔ cookie) est vérifiée par passport, avant tout usage du code.
+  const linkUserId = linkUserIdFromState(req.query.state);
+  if (linkUserId) (req as any).linkUserId = linkUserId;
 
   passport.authenticate('google', { session: false }, (err: any, user: any, info: any) => {
     if (err || !user) {
@@ -112,23 +124,9 @@ router.get('/facebook/callback',
 
 router.get('/discord', passport.authenticate('discord', { scope: ['identify', 'email'] }));
 router.get('/discord/callback', (req: Request, res: Response, next: NextFunction) => {
-  // Vérifier si c'est un flow de liaison (state contient linkToken)
-  const stateParam = req.query.state as string | undefined;
-  let isLinkFlow = false;
-  if (stateParam) {
-    try {
-      const state = JSON.parse(decodeURIComponent(stateParam));
-      if (state.linkToken) {
-        const decoded = jwt.verify(state.linkToken, env.JWT_SECRET) as any;
-        if (decoded.purpose === SOCIAL_LINK_TOKEN_PURPOSE) {
-          (req as any).linkUserId = decoded.userId;
-          isLinkFlow = true;
-        }
-      }
-    } catch (e) {
-      console.error('Discord callback state parse error:', e);
-    }
-  }
+  const linkUserId = linkUserIdFromState(req.query.state);
+  const isLinkFlow = Boolean(linkUserId);
+  if (linkUserId) (req as any).linkUserId = linkUserId;
 
   passport.authenticate('discord', { session: false, failWithError: true } as any, (err: any, user: any, info: any) => {
     if (err || !user) {
@@ -168,7 +166,7 @@ router.get('/google/link', (req: Request, res: Response, next: NextFunction) => 
     );
     passport.authenticate('google', {
       scope: ['profile', 'email'],
-      state: JSON.stringify({ linkToken })
+      state: linkState(linkToken)
     })(req, res, next);
   } catch {
     return res.redirect(`${process.env.FRONTEND_URL}/settings?error=invalid_token`);
@@ -191,7 +189,7 @@ router.get('/discord/link', (req: Request, res: Response, next: NextFunction) =>
     );
     passport.authenticate('discord', {
       scope: ['identify', 'email'],
-      state: JSON.stringify({ linkToken })
+      state: linkState(linkToken)
     })(req, res, next);
   } catch {
     return res.redirect(`${process.env.FRONTEND_URL}/settings?error=invalid_token`);

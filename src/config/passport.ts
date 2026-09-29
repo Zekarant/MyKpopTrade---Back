@@ -6,6 +6,7 @@ import { Strategy as DiscordStrategy } from 'passport-discord';
 import User from '../models/userModel';
 import crypto from 'crypto';
 import env from './env';
+import { CookieStateStore } from './oauthStateStore';
 import {
   generateUniqueUsername,
   splitDisplayName
@@ -43,17 +44,6 @@ function fillMissingIdentity(
   }
 }
 
-// Custom state store that bypasses session-based state verification
-// We handle state verification manually via JWT linkToken
-class NoopStateStore {
-  store(req: any, state: any, meta: any, callback: any) {
-    callback(null, state);
-  }
-  verify(req: any, providedState: any, callback: any) {
-    callback(null, true, providedState);
-  }
-}
-
 export const initializePassport = (): void => {
   // Configuration JWT
   passport.use(
@@ -84,8 +74,9 @@ export const initializePassport = (): void => {
           clientID: process.env.GOOGLE_CLIENT_ID,
           clientSecret: process.env.GOOGLE_CLIENT_SECRET,
           callbackURL: `${process.env.API_URL}/api/auth/google/callback`,
-          passReqToCallback: true
-        },
+          passReqToCallback: true,
+          store: new CookieStateStore()
+        } as any,
         async (req: any, accessToken: string, refreshToken: string, profile: any, done: any) => {
           try {
             const linkUserId = req.linkUserId;
@@ -204,9 +195,10 @@ export const initializePassport = (): void => {
           clientID: process.env.FACEBOOK_APP_ID,
           clientSecret: process.env.FACEBOOK_APP_SECRET,
           callbackURL: `${process.env.API_URL}/api/auth/facebook/callback`,
-          profileFields: ['id', 'emails', 'name', 'displayName']
-        },
-        async (accessToken, refreshToken, profile, done) => {
+          profileFields: ['id', 'emails', 'name', 'displayName'],
+          store: new CookieStateStore()
+        } as any,
+        async (accessToken: string, refreshToken: string, profile: any, done: any) => {
           try {
             const email = profile.emails?.[0]?.value;
             
@@ -281,7 +273,7 @@ export const initializePassport = (): void => {
           callbackURL: `${process.env.API_URL}/api/auth/discord/callback`,
           scope: ['identify', 'email'],
           passReqToCallback: true,
-          store: new NoopStateStore()
+          store: new CookieStateStore()
         } as any,
         async (req: any, accessToken: string, refreshToken: string, profile: any, done: any) => {
           try {
