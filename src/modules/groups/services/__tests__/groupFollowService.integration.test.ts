@@ -4,7 +4,7 @@ import {
   clearAllCollections
 } from '../../../../tests/helpers/mongoMemory';
 import { createTestUser } from '../../../../tests/helpers/fixtures';
-import { toggleFollow, getFollowStatusForUser } from '../groupFollowService';
+import { toggleFollow, getFollowStatusForUser, listGroupFollowers } from '../groupFollowService';
 import KpopGroup, { IKpopGroup } from '../../../../models/kpopGroupModel';
 
 async function createTestGroup(overrides: Partial<Pick<IKpopGroup, 'name' | 'followersCount' | 'isActive'>> = {}) {
@@ -95,6 +95,25 @@ describe('groupFollowService (integration)', () => {
 
       expect(status.isFollowing).toBe(false);
       expect(status.followersCount).toBe(0);
+    });
+  });
+
+  describe('listGroupFollowers', () => {
+    // Forme consommée par le panneau admin K-pop (groupService.getFollowers côté front).
+    it('renvoie les followers paginés, sans email', async () => {
+      const [first, second] = [await createTestUser(), await createTestUser()];
+      const group = await createTestGroup();
+      await toggleFollow(first._id.toString(), group._id.toString());
+      await toggleFollow(second._id.toString(), group._id.toString());
+
+      const result = await listGroupFollowers(group._id.toString(), 1, 1);
+
+      expect(result.groupName).toBe(group.name);
+      expect(result.pagination).toEqual({ page: 1, limit: 1, total: 2, pages: 2 });
+      expect(result.followers).toHaveLength(1);
+      const follower: unknown = JSON.parse(JSON.stringify(result.followers[0]));
+      expect(follower).toEqual(expect.objectContaining({ _id: expect.any(String), username: expect.any(String) }));
+      expect(follower).not.toHaveProperty('email');
     });
   });
 });

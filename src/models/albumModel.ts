@@ -47,9 +47,9 @@ const KpopAlbumSchema = new Schema<IKpopAlbum>({
     type: Date, 
     default: null
   },
-  totalTracks: { 
-    type: Number, 
-    default: 0,
+  // Absent tant que le nombre de pistes n'est pas connu.
+  totalTracks: {
+    type: Number,
     min: 1
   },
   albumType: { 

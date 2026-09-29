@@ -17,6 +17,7 @@ export interface IKpopGroup extends Document {
   socialLinks: ISocialLinks;
   tags: string[];
   genres: string[];
+  members: string[];
   discoverySource: string;
   lastScraped: Date;
   createdAt: Date;
@@ -68,8 +69,12 @@ const kpopGroupSchema = new Schema({
     type: String,
     default: ['K-pop']
   }],
-  discoverySource: { 
-    type: String, 
+  members: [{
+    type: String,
+    trim: true
+  }],
+  discoverySource: {
+    type: String,
     default: 'Manual',
     enum: ['Manual', 'Last.fm', 'User Submission']
   },

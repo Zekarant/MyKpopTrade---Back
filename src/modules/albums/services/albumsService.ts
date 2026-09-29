@@ -8,11 +8,16 @@ import logger from '../../../commons/utils/logger';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import { clampLimit } from '../../../commons/utils/pagination';
 import { queryInt, queryString } from '../../../commons/utils/query';
+import { pickFields } from '../../../commons/utils/pickFields';
 
 const CATALOG_MAX_LIMIT = 2000;
 
 /** Corps libre d'une requête admin, validé par le schéma Mongoose à l'écriture. */
 type AlbumInput = Record<string, unknown>;
+
+const EDITABLE_ALBUM_FIELDS = [
+  'name', 'coverImage', 'artistId', 'spotifyId', 'spotifyUrl', 'releaseDate', 'totalTracks', 'albumType'
+] as const;
 
 function assertValidId(id: string, message: string) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -20,16 +25,22 @@ function assertValidId(id: string, message: string) {
   }
 }
 
-export async function createAlbumForGroup(albumData: AlbumInput) {
+export async function createAlbumForGroup(body: AlbumInput) {
+  const albumData = pickFields(body, EDITABLE_ALBUM_FIELDS);
+  if (!mongoose.Types.ObjectId.isValid(String(albumData.artistId))) {
+    throw new HttpError(400, 'Groupe non trouvé');
+  }
   const group = await KpopGroup.findById(albumData.artistId);
   if (!group) {
     throw new HttpError(400, 'Groupe non trouvé');
   }
 
-  albumData.artistName = group.name;
-  albumData.lastScraped = new Date();
-
-  const album = new Album(albumData);
+  const album = new Album({
+    ...albumData,
+    artistName: group.name,
+    discoverySource: 'Manual',
+    lastScraped: new Date()
+  });
   await album.save();
 
   await album.populate('artistId', 'name description profileImage');
@@ -213,10 +224,14 @@ export async function searchAlbumsByQuery({
   };
 }
 
-export async function updateAlbumById(albumId: string, updates: AlbumInput) {
+export async function updateAlbumById(albumId: string, body: AlbumInput) {
   assertValidId(albumId, 'ID d\'album invalide');
 
+  const updates: Record<string, unknown> = pickFields(body, EDITABLE_ALBUM_FIELDS);
   if (updates.artistId) {
+    if (!mongoose.Types.ObjectId.isValid(String(updates.artistId))) {
+      throw new HttpError(400, 'Groupe non trouvé');
+    }
     const group = await KpopGroup.findById(updates.artistId);
     if (!group) {
       throw new HttpError(400, 'Groupe non trouvé');

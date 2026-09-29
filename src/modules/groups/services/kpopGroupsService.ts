@@ -7,8 +7,13 @@ import logger from '../../../commons/utils/logger';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import { clampLimit } from '../../../commons/utils/pagination';
 import { queryInt, queryString } from '../../../commons/utils/query';
+import { pickFields } from '../../../commons/utils/pickFields';
 
 const CATALOG_MAX_LIMIT = 2000;
+
+const EDITABLE_GROUP_FIELDS = [
+  'name', 'profileImage', 'bannerImage', 'socialLinks', 'tags', 'genres', 'members', 'spotifyId', 'isActive'
+] as const;
 
 function assertValidGroupId(groupId: string) {
   if (!mongoose.Types.ObjectId.isValid(groupId)) {
@@ -16,19 +21,25 @@ function assertValidGroupId(groupId: string) {
   }
 }
 
-export async function createGroup(groupData: Record<string, unknown>) {
+export async function createGroup(body: Record<string, unknown>) {
+  const groupData = pickFields(body, EDITABLE_GROUP_FIELDS);
+  if (typeof groupData.name !== 'string' || !groupData.name.trim()) {
+    throw new HttpError(400, 'Nom du groupe requis');
+  }
+
   const existingGroup = await KpopGroup.findOne({
-    name: { $regex: new RegExp(`^${escapeRegex(String(groupData.name))}$`, 'i') }
+    name: { $regex: new RegExp(`^${escapeRegex(groupData.name.trim())}$`, 'i') }
   });
 
   if (existingGroup) {
     throw new HttpError(400, 'Un groupe avec ce nom existe déjà');
   }
 
-  groupData.discoverySource = 'Manual';
-  groupData.lastScraped = new Date();
-
-  const group = new KpopGroup(groupData);
+  const group = new KpopGroup({
+    ...groupData,
+    discoverySource: 'Manual',
+    lastScraped: new Date()
+  });
   await group.save();
 
   logger.info('Nouveau groupe K-pop créé', {
@@ -252,7 +263,7 @@ export async function fetchGroupWithStats(groupId: string) {
   };
 }
 
-export async function updateGroup(groupId: string, updates: Record<string, unknown>) {
+export async function updateGroup(groupId: string, body: Record<string, unknown>) {
   assertValidGroupId(groupId);
 
   const oldGroup = await KpopGroup.findById(groupId);
@@ -260,6 +271,7 @@ export async function updateGroup(groupId: string, updates: Record<string, unkno
     throw new HttpError(404, 'Groupe non trouvé');
   }
 
+  const updates: Record<string, unknown> = pickFields(body, EDITABLE_GROUP_FIELDS);
   updates.lastScraped = new Date();
 
   const group = await KpopGroup.findByIdAndUpdate(

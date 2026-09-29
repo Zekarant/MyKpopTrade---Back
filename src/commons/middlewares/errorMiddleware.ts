@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import logger from '../utils/logger';
+import { asHttpError } from '../utils/httpErrorMapper';
 
 // Interface pour les erreurs avec des codes personnalisés
 export interface AppError extends Error {
@@ -16,8 +17,10 @@ export const errorHandler = (
   res: Response,
   next: NextFunction
 ): void => {
-  const statusCode = err.statusCode || 500;
-  const message = err.message || 'Erreur interne du serveur';
+  const clientError = err.statusCode ? null : asHttpError(err);
+  const statusCode = err.statusCode || clientError?.statusCode || 500;
+  const message = clientError?.message || err.message || 'Erreur interne du serveur';
+  const code = err.code || clientError?.code || 'INTERNAL_SERVER_ERROR';
 
   // Journaliser l'erreur (le body passe par le sanitizer du logger, cf. logger.ts)
   logger.error(`[${req.method}] ${req.path} - ${statusCode}: ${message}`, {
@@ -41,7 +44,7 @@ export const errorHandler = (
   res.status(statusCode).json({
     error: {
       message: clientMessage,
-      code: err.code || 'INTERNAL_SERVER_ERROR'
+      code
     }
   });
 };

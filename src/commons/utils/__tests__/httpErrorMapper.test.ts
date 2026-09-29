@@ -1,6 +1,7 @@
 import { mapHttpError } from '../httpErrorMapper';
 import { HttpError } from '../httpError';
 import type { Response } from 'express';
+import mongoose from 'mongoose';
 
 type ResMock = Response & { _status?: number; _body?: unknown };
 
@@ -47,6 +48,21 @@ describe('mapHttpError', () => {
     expect(mapHttpError(res, null)).toBeNull();
     expect(mapHttpError(res, undefined)).toBeNull();
     expect(mapHttpError(res, { statusCode: 404, message: 'fake' })).toBeNull();
+  });
+
+  it('traduit les erreurs de données Mongoose en erreurs client', () => {
+    const validation = new mongoose.Error.ValidationError();
+    validation.addError('albumType', new mongoose.Error.ValidatorError({ path: 'albumType', message: 'invalide' }));
+    const cases: Array<[unknown, number]> = [
+      [validation, 400],
+      [new mongoose.Error.CastError('ObjectId', 'abc', 'artistId'), 400],
+      [Object.assign(new Error('E11000 duplicate key'), { code: 11000 }), 409]
+    ];
+    for (const [error, status] of cases) {
+      const res = createResMock();
+      expect(mapHttpError(res, error)).toBe(res);
+      expect(res.status).toHaveBeenCalledWith(status);
+    }
   });
 
   it('propage le bon statusCode (403, 400, 409, ...)', () => {
