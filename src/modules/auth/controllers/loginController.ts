@@ -1,11 +1,14 @@
 import { Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
 import User from '../../../models/userModel';
+import env from '../../../config/env';
 import { 
   generateAccessToken, 
   generateRefreshToken,
   invalidateRefreshToken,
-  verifyRefreshToken,
-  tokenBlacklist 
+  invalidateAllUserRefreshTokens,
+  rotateRefreshToken,
+  revokeAccessToken
 } from '../../../commons/services/tokenService';
 import logger from '../../../commons/utils/logger';
 import {
@@ -116,6 +119,15 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
+function isValidAccessToken(token: string): boolean {
+  try {
+    jwt.verify(token, env.JWT_SECRET);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Déconnexion utilisateur
  */
@@ -123,13 +135,13 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
   try {
     const { refreshToken } = req.body;
 
-    // Ajouter le token d'accès à la liste noire
-    const authHeader = req.headers.authorization;
-    if (authHeader) {
-      const accessToken = authHeader.split(' ')[1];
-      if (accessToken) {
-        tokenBlacklist.add(accessToken);
-      }
+    // Le jeton d'accès reste signé jusqu'à son expiration : on le révoque.
+    // La route n'exige pas de session valide (un jeton d'accès expiré ne doit
+    // pas empêcher d'invalider le refresh token), d'où la vérification ici :
+    // seul un jeton authentique et encore valide mérite d'être révoqué.
+    const accessToken = req.headers.authorization?.split(' ')[1];
+    if (accessToken && isValidAccessToken(accessToken)) {
+      await revokeAccessToken(accessToken);
     }
 
     // Invalider le refresh token (chaîne uniquement : un objet deviendrait un filtre Mongo)
@@ -156,27 +168,25 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
       return;
     }
     
-    const userId = await verifyRefreshToken(refreshToken);
-    
-    if (!userId) {
+    // Le jeton présenté est consommé : le client doit garder celui renvoyé.
+    const rotated = await rotateRefreshToken(refreshToken);
+
+    if (!rotated) {
       res.status(401).json({ message: 'Refresh token invalide ou expiré' });
       return;
     }
-    
-    const user = await User.findById(userId);
-    
+
+    const user = await User.findById(rotated.userId);
+
     if (!user || user.accountStatus === 'deleted') {
-      await invalidateRefreshToken(refreshToken);
+      await invalidateAllUserRefreshTokens(rotated.userId);
       res.status(401).json({ message: 'Utilisateur non trouvé ou compte supprimé' });
       return;
     }
-    
-    // Génération d'un nouvel access token
-    const newAccessToken = generateAccessToken(user);
-    
+
     res.status(200).json({
-      accessToken: newAccessToken,
-      refreshToken: refreshToken // On renvoie le même refresh token
+      accessToken: generateAccessToken(user),
+      refreshToken: rotated.refreshToken
     });
   } catch (error) {
     console.error('Erreur lors du rafraîchissement du token:', error);

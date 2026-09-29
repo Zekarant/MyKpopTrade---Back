@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { tokenBlacklist } from '../services/tokenService';
+import { isAccessTokenRevoked } from '../services/tokenService';
 import env from '../../config/env';
 import User from '../../models/userModel';
 import logger from '../utils/logger';
@@ -40,19 +40,19 @@ export const authenticateJWT = async (req: Request, res: Response, next: NextFun
       return;
     }
     
-    // Vérifier si le token est dans la liste noire
-    if (tokenBlacklist.has(token)) {
-      res.status(401).json({ message: 'Token révoqué. Veuillez vous reconnecter.' });
-      return;
-    }
-    
     try {
       // Décodage avec typage du payload
       const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
-      
+
       // Vérifier que l'ID est présent
       if (!decoded.id) {
         res.status(401).json({ message: 'Token invalide: identifiant utilisateur manquant' });
+        return;
+      }
+
+      // Après la signature : un jeton falsifié ne coûte pas de lecture en base.
+      if (await isAccessTokenRevoked(token)) {
+        res.status(401).json({ message: 'Token révoqué. Veuillez vous reconnecter.' });
         return;
       }
       

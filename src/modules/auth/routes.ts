@@ -53,7 +53,9 @@ function linkUserIdFromState(rawState: unknown): string | undefined {
 // Routes d'enregistrement et de connexion
 router.post('/register', rateLimitRegister, registerController.register);
 router.post('/login', rateLimitLogin, loginController.login);
-router.post('/logout', authenticateJWT, loginController.logout);
+// Sans authenticateJWT : se déconnecter doit rester possible une fois le jeton
+// d'accès expiré, sinon le refresh token survivait 7 jours en base.
+router.post('/logout', loginController.logout);
 router.post('/refresh-token', loginController.refreshToken);
 
 // Routes de vérification d'email
