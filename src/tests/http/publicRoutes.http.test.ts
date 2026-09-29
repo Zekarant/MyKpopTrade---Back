@@ -8,6 +8,7 @@ import {
 import { createTestUser, createTestProduct } from '../helpers/fixtures';
 import KpopGroup from '../../models/kpopGroupModel';
 import Album from '../../models/albumModel';
+import { generateAccessToken } from '../../commons/services/tokenService';
 
 const app = createApp();
 
@@ -66,6 +67,20 @@ describe('HTTP — routes publiques (via supertest)', () => {
       const res = await request(app).get('/api/search/suggestions').query({ query: 'b' });
 
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe('routes retirées', () => {
+    it('n\'expose plus le changement d\'email PayPal sans mot de passe (/api/accounts)', async () => {
+      const user = await createTestUser();
+      const token = generateAccessToken(user);
+
+      const res = await request(app)
+        .put('/api/accounts/seller/paypal-email')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ paypalEmail: 'pirate@exemple.fr' });
+
+      expect(res.status).toBe(404);
     });
   });
 

@@ -11,7 +11,6 @@ import { productRoutes } from './modules/products';
 import { messagingRoutes } from './modules/messaging';
 import notificationRoutes from './modules/notifications/routes';
 import paymentRoutes from './modules/payments/routes';
-import accountsRoutes from './modules/accounts/routes';
 import groupRoutes from './modules/groups/routes';
 import albumRoutes from './modules/albums/routes';
 import searchRoutes from './modules/search/routes';
@@ -109,7 +108,6 @@ export function createApp(): express.Express {
   }
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/payments', paymentRoutes);
-  app.use('/api/accounts', accountsRoutes);
   app.use('/api/groups', groupRoutes);
   app.use('/api/albums', albumRoutes);
   app.use('/api/search', searchRoutes);
