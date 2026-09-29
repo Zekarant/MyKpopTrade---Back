@@ -20,6 +20,7 @@ import {
 } from './middleware/authRateLimiter';
 import env from '../../config/env';
 import { readOAuthState, OAuthAppState } from '../../config/oauthStateStore';
+import { issueOneTimeCode, consumeOneTimeCode } from './services/oneTimeCodeService';
 
 const router = Router();
 
@@ -89,6 +90,9 @@ router.delete('/delete-account', authenticateJWT, profileController.deleteAccoun
 router.put('/profile/paypal-email', authenticateJWT, profileController.updatePayPalEmail);
 router.delete('/profile/paypal-email', authenticateJWT, profileController.removePayPalEmail);
 
+// Fin de connexion OAuth : le front échange le code reçu contre les jetons.
+router.post('/oauth/exchange', socialAuthController.exchangeOAuthCode);
+
 // Routes d'authentification sociale - LOGIN/REGISTER
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 router.get('/google/callback', (req: Request, res: Response, next: NextFunction) => {
@@ -150,52 +154,50 @@ router.get('/discord/callback', (req: Request, res: Response, next: NextFunction
   })(req, res, next);
 });
 
-// Routes de LIAISON de comptes sociaux (utilisateur déjà connecté)
-// Le token JWT est passé en query param car window.location.href ne supporte pas les headers
-router.get('/google/link', (req: Request, res: Response, next: NextFunction) => {
-  const token = req.query.token as string;
-  if (!token) {
-    return res.redirect(`${process.env.FRONTEND_URL}/settings?error=no_token`);
-  }
+// Routes de LIAISON de comptes sociaux (utilisateur déjà connecté).
+//
+// Une redirection ne peut pas porter d'en-tête Authorization : le front mettait
+// son jeton d'accès dans l'URL. Il obtient maintenant, par une requête
+// authentifiée, un ticket à usage unique valable une minute, qu'il place dans
+// l'URL à la place du jeton.
+const LINK_SCOPES = { google: ['profile', 'email'], discord: ['identify', 'email'] } as const;
+type LinkProvider = keyof typeof LINK_SCOPES;
+const isLinkProvider = (value: unknown): value is LinkProvider =>
+  value === 'google' || value === 'discord';
 
-  try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as any;
-    const userId = decoded.id;
-    const linkToken = jwt.sign(
-      { userId, purpose: SOCIAL_LINK_TOKEN_PURPOSE },
-      env.JWT_SECRET,
-      { expiresIn: '5m' }
-    );
-    passport.authenticate('google', {
-      scope: ['profile', 'email'],
-      state: linkState(linkToken)
-    })(req, res, next);
-  } catch {
-    return res.redirect(`${process.env.FRONTEND_URL}/settings?error=invalid_token`);
+router.post('/link/:provider', authenticateJWT, async (req: Request, res: Response) => {
+  if (!isLinkProvider(req.params.provider)) {
+    return res.status(404).json({ message: 'Fournisseur inconnu.' });
   }
+  const ticket = await issueOneTimeCode((req.user as any).id, 'social_link');
+  return res.status(200).json({ ticket });
 });
 
-router.get('/discord/link', (req: Request, res: Response, next: NextFunction) => {
-  const token = req.query.token as string;
-  if (!token) {
-    return res.redirect(`${process.env.FRONTEND_URL}/settings?error=no_token`);
-  }
+for (const provider of Object.keys(LINK_SCOPES) as LinkProvider[]) {
+  router.get(`/${provider}/link`, async (req: Request, res: Response, next: NextFunction) => {
+    const ticket = req.query.ticket;
+    if (typeof ticket !== 'string' || !ticket) {
+      return res.redirect(`${process.env.FRONTEND_URL}/settings?error=no_token`);
+    }
 
-  try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as any;
-    const userId = decoded.id;
-    const linkToken = jwt.sign(
-      { userId, purpose: SOCIAL_LINK_TOKEN_PURPOSE },
-      env.JWT_SECRET,
-      { expiresIn: '5m' }
-    );
-    passport.authenticate('discord', {
-      scope: ['identify', 'email'],
-      state: linkState(linkToken)
-    })(req, res, next);
-  } catch {
-    return res.redirect(`${process.env.FRONTEND_URL}/settings?error=invalid_token`);
-  }
-});
+    try {
+      const userId = await consumeOneTimeCode(ticket, 'social_link');
+      if (!userId) {
+        return res.redirect(`${process.env.FRONTEND_URL}/settings?error=invalid_token`);
+      }
+      const linkToken = jwt.sign(
+        { userId, purpose: SOCIAL_LINK_TOKEN_PURPOSE },
+        env.JWT_SECRET,
+        { expiresIn: '5m' }
+      );
+      return passport.authenticate(provider, {
+        scope: [...LINK_SCOPES[provider]],
+        state: linkState(linkToken)
+      })(req, res, next);
+    } catch (error) {
+      return next(error);
+    }
+  });
+}
 
 export default router;
