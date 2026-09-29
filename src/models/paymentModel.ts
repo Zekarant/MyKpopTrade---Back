@@ -41,8 +41,8 @@ export interface IPayment extends Document {
   paymentMethod: 'paypal' | 'stripe' | 'other';
   paymentType: 'direct' | 'platform';
   paymentMetadata?: string;
-  ipAddress: string;
-  userAgent: string;
+  ipAddress?: string;
+  userAgent?: string;
   isAnonymized: boolean;
   completedAt?: Date;
   // Ajout des propriétés pour les remboursements
@@ -349,4 +349,4 @@ paymentSchema.index({ seller: 1, createdAt: -1 });
 paymentSchema.index({ paymentIntentId: 1 });
 paymentSchema.index({ product: 1, status: 1 });
 
-export default mongoose.models.Payment || mongoose.model<IPayment>('Payment', paymentSchema);
+export default (mongoose.models.Payment as mongoose.Model<IPayment>) || mongoose.model<IPayment>('Payment', paymentSchema);

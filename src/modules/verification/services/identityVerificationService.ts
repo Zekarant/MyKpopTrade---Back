@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import IdentityVerification from '../../../models/identityVerificationModel';
 import User from '../../../models/userModel';
 import {
@@ -233,7 +234,7 @@ export async function approveIdentityVerification({
 
   verification.status = 'approved';
   verification.processedAt = new Date();
-  verification.processedBy = adminId;
+  verification.processedBy = new mongoose.Types.ObjectId(adminId);
   await verification.save();
   // Supprimé avant l'email : la demande n'étant plus « pending », un échec
   // d'envoi laisserait le document sur le disque pour toujours.
@@ -251,7 +252,7 @@ export async function approveIdentityVerification({
     adminId,
     action: 'verification_approved',
     targetType: 'verification',
-    targetId: verification._id as any,
+    targetId: verification._id,
     metadata: { userId: String(verification.user) }
   });
 
@@ -278,7 +279,7 @@ export async function rejectIdentityVerification({
 
   verification.status = 'rejected';
   verification.processedAt = new Date();
-  verification.processedBy = adminId;
+  verification.processedBy = new mongoose.Types.ObjectId(adminId);
   verification.rejectionReason = reason;
   await verification.save();
   safelyDeleteDocument(verification.documentReferenceId);
@@ -289,7 +290,7 @@ export async function rejectIdentityVerification({
     adminId,
     action: 'verification_rejected',
     targetType: 'verification',
-    targetId: verification._id as any,
+    targetId: verification._id,
     details: reason,
     metadata: { userId: String(verification.user) }
   });
@@ -349,7 +350,7 @@ export async function getVerificationDocumentForAdmin(verificationId: string, ad
     adminId,
     action: 'verification_document_viewed',
     targetType: 'verification',
-    targetId: verification._id as any,
+    targetId: verification._id,
     metadata: { userId: String(verification.user) }
   });
 

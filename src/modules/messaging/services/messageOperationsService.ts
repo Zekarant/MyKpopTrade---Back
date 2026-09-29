@@ -99,7 +99,7 @@ export async function markSingleMessageRead(userId: string, messageId: string) {
     throw new HttpError(403, 'Accès refusé à ce message');
   }
 
-  if (!message.readBy.includes(userId)) {
+  if (!message.readBy.some(readerId => readerId.toString() === userId)) {
     await Message.findByIdAndUpdate(
       messageId,
       { $addToSet: { readBy: userId } }

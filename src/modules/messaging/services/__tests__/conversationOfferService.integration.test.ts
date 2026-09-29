@@ -56,8 +56,8 @@ describe('conversationOfferService (integration)', () => {
       expect(conv?.negotiation?.status).toBe('pending');
 
       const refreshedProduct = await Product.findById(product._id);
-      expect(refreshedProduct?.negotiations.length).toBe(1);
-      expect(refreshedProduct?.negotiations[0].currentOffer).toBe(70);
+      expect(refreshedProduct?.negotiations?.length).toBe(1);
+      expect(refreshedProduct?.negotiations?.[0].currentOffer).toBe(70);
     });
 
     it('rejette une offre sous le seuil minOfferPercentage', async () => {
@@ -179,7 +179,7 @@ describe('conversationOfferService (integration)', () => {
       expect(conv?.offerHistory[0].status).toBe('accepted');
 
       const refreshedProduct = await Product.findById(product._id);
-      expect(refreshedProduct?.negotiations[0].status).toBe('accepted');
+      expect(refreshedProduct?.negotiations?.[0].status).toBe('accepted');
     });
 
     it('rejette l\'offre avec une raison : ajoute la raison au message système', async () => {
@@ -350,8 +350,8 @@ describe('conversationOfferService (integration)', () => {
       expect(offers.type).toBe('negotiation');
       expect(offers.offerHistory.length).toBe(1);
       expect(offers.currentNegotiation).toBeDefined();
-      expect(offers.currentNegotiation.initialPrice).toBe(100);
-      expect(offers.currentNegotiation.currentOffer).toBe(70);
+      expect(offers.currentNegotiation?.initialPrice).toBe(100);
+      expect(offers.currentNegotiation?.currentOffer).toBe(70);
       expect(offers.isOwner).toBe(false);
     });
 

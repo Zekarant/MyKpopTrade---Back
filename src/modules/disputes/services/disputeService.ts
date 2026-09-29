@@ -28,6 +28,10 @@ interface OpenDisputeInput {
   evidence?: unknown;
 }
 
+function isDisputeReason(value: unknown): value is DisputeReason {
+  return typeof value === 'string' && VALID_REASONS.includes(value as DisputeReason);
+}
+
 function assertString(value: unknown, label: string, max: number): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new HttpError(400, `${label} requis`);
@@ -78,7 +82,7 @@ export async function openDispute({
   if (!mongoose.Types.ObjectId.isValid(paymentId)) {
     throw new HttpError(400, 'paymentId invalide');
   }
-  if (typeof reason !== 'string' || !VALID_REASONS.includes(reason as DisputeReason)) {
+  if (!isDisputeReason(reason)) {
     throw new HttpError(400, 'reason invalide');
   }
   const desc = assertString(description, 'description', 2000);

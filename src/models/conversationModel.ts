@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 // Interface pour l'historique des offres
 export interface IOfferHistory {
+  _id: mongoose.Types.ObjectId;
   offeredBy: mongoose.Types.ObjectId;
   amount: number;
   offerType: 'initial' | 'counter';
@@ -13,7 +14,7 @@ export interface IOfferHistory {
 
 export interface IConversation extends Document {
   participants: mongoose.Types.ObjectId[];
-  productId?: mongoose.Types.ObjectId;
+  productId?: mongoose.Types.ObjectId | null;
   lastMessage?: mongoose.Types.ObjectId;
   lastMessageAt: Date;
   isActive: boolean;
@@ -178,4 +179,4 @@ ConversationSchema.index({ deletedBy: 1 });
 ConversationSchema.index({ archivedBy: 1 });
 ConversationSchema.index({ favoritedBy: 1 });
 
-export default mongoose.models.Conversation || mongoose.model<IConversation>('Conversation', ConversationSchema);
+export default (mongoose.models.Conversation as mongoose.Model<IConversation>) || mongoose.model<IConversation>('Conversation', ConversationSchema);

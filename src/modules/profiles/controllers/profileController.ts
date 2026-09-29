@@ -13,9 +13,8 @@ import {
 
 function mapHttpError(res: Response, error: unknown): Response | null {
   if (error instanceof HttpError) {
-    const body: any = { message: error.message };
-    const details = (error as any).details;
-    if (details) Object.assign(body, details);
+    const body: Record<string, unknown> = { message: error.message };
+    if (error.details) Object.assign(body, error.details);
     return res.status(error.statusCode).json(body);
   }
   return null;

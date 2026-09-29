@@ -115,4 +115,4 @@ DisputeSchema.index(
   { unique: true, partialFilterExpression: { status: { $in: ['opened', 'under_review'] } } }
 );
 
-export default mongoose.models.Dispute || mongoose.model<IDispute>('Dispute', DisputeSchema);
+export default (mongoose.models.Dispute as mongoose.Model<IDispute>) || mongoose.model<IDispute>('Dispute', DisputeSchema);

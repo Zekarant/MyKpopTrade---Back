@@ -4,7 +4,7 @@ import User from '../../../models/userModel';
 import Product from '../../../models/productModel';
 import AuditLog from '../../../models/auditLogModel';
 import Report from '../../../models/reportModel';
-import Dispute from '../../../models/disputeModel';
+import Dispute, { DisputeStatus } from '../../../models/disputeModel';
 import IdentityVerification from '../../../models/identityVerificationModel';
 import Payment from '../../../models/paymentModel';
 import Post from '../../posts/model';
@@ -269,7 +269,7 @@ export const adminGlobalSearch = asyncHandler(async (req: Request, res: Response
 
 const QUEUE_ITEMS_PER_SOURCE = 25;
 
-const DISPUTE_PENDING_STATUSES = ['opened', 'under_review'];
+const DISPUTE_PENDING_STATUSES: DisputeStatus[] = ['opened', 'under_review'];
 
 const VERIFICATION_DOCUMENT_LABELS: Record<string, string> = {
   id_card: 'Carte d\'identité',

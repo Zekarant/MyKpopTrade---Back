@@ -67,4 +67,4 @@ MessageSchema.index({ isDeleted: 1 });
 MessageSchema.index({ contentType: 1 });
 MessageSchema.index({ createdAt: -1 });
 
-export default mongoose.models.Message || mongoose.model<IMessage>('Message', MessageSchema);
+export default (mongoose.models.Message as mongoose.Model<IMessage>) || mongoose.model<IMessage>('Message', MessageSchema);

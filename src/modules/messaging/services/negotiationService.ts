@@ -19,7 +19,7 @@ export const startPayWhatYouWant = async ({
   minimumPrice: number;
   maximumPrice?: number;
   message?: string;
-}): Promise<any> => {
+}) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -39,16 +39,16 @@ export const startPayWhatYouWant = async ({
     }
 
     // Créer une conversation Pay What You Want avec offerHistory initialisé
-    const conversationData: any = {
+    const conversationData = {
       participants: [sellerId],
       productId,
-      type: 'pay_what_you_want',
+      type: 'pay_what_you_want' as const,
       title: `PWYW: ${product.title}`,
       createdBy: sellerId,
       payWhatYouWant: {
         minimumPrice,
         maximumPrice,
-        status: 'pending'
+        status: 'pending' as const
       },
       offerHistory: []
     };
@@ -71,13 +71,7 @@ export const startPayWhatYouWant = async ({
       conversationId: conversation[0]._id,
       senderId: sellerId,
       content: `Option "Pay What You Want" activée avec un prix minimum de ${minimumPrice} €${maximumPrice ? ` et un maximum de ${maximumPrice} €` : ''}`,
-      contentType: 'system_notification',
-      metadata: {
-        negotiationAction: 'pwyw_start',
-        minimumPrice,
-        maximumPrice
-      },
-      encrypt: false
+      contentType: 'system_notification'
     });
 
     // Ajouter un message explicatif si fourni
@@ -115,7 +109,7 @@ export const makePayWhatYouWantOffer = async ({
   buyerId: string;
   proposedPrice: number;
   message?: string;
-}): Promise<any> => {
+}) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -154,7 +148,7 @@ export const makePayWhatYouWantOffer = async ({
     }
 
     // Ajouter l'acheteur à la conversation s'il n'y est pas déjà
-    if (!conversation.participants.includes(buyerId as any)) {
+    if (!conversation.participants.some(participant => participant.toString() === buyerId)) {
       await Conversation.updateOne(
         { _id: conversationId },
         { $addToSet: { participants: buyerId } },
@@ -187,12 +181,7 @@ export const makePayWhatYouWantOffer = async ({
       conversationId,
       senderId: buyerId,
       content: `Une offre de ${proposedPrice} € a été proposée`,
-      contentType: 'offer',
-      metadata: {
-        offerAmount: proposedPrice,
-        negotiationAction: 'pwyw_offer'
-      },
-      encrypt: false
+      contentType: 'offer'
     });
 
     // Ajouter un message explicatif si fourni

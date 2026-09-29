@@ -1,4 +1,4 @@
-import Notification from '../../../models/notificationModel';
+import Notification, { INotification } from '../../../models/notificationModel';
 import User from '../../../models/userModel';
 import mongoose from 'mongoose';
 import logger from '../../../commons/utils/logger';
@@ -25,7 +25,7 @@ export class NotificationService {
     title: string;
     content: string;
     link?: string | null;
-    data?: any;
+    data?: Record<string, unknown>;
     expiresInDays?: number;
   }) {
     try {
@@ -94,7 +94,7 @@ export class NotificationService {
     title: string;
     content: string;
     link?: string | null;
-    data?: any;
+    data?: Record<string, unknown>;
     expiresInDays?: number;
   }) {
     try {
@@ -102,7 +102,7 @@ export class NotificationService {
       const results = await Promise.allSettled(
         admins.map((admin) =>
           NotificationService.createNotification({
-            recipientId: admin._id as any,
+            recipientId: admin._id,
             ...payload
           })
         )
@@ -131,7 +131,7 @@ export class NotificationService {
     onlyUnread = false
   } = {}) {
     try {
-      const query: any = { recipient: userId };
+      const query: mongoose.QueryFilter<INotification> = { recipient: userId };
       
       if (onlyUnread) {
         query.isRead = false;

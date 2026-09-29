@@ -1,5 +1,6 @@
-import User from '../../models/userModel';
-import Product from '../../models/productModel';
+import { Types } from 'mongoose';
+import User, { IUser } from '../../models/userModel';
+import Product, { IProduct } from '../../models/productModel';
 
 let uniqueCounter = 0;
 
@@ -7,7 +8,7 @@ let uniqueCounter = 0;
  * Crée un utilisateur minimal avec des valeurs par défaut uniques.
  * Toutes les propriétés peuvent être surchargées via `overrides`.
  */
-export async function createTestUser(overrides: Partial<any> = {}) {
+export async function createTestUser(overrides: Partial<IUser> = {}) {
   uniqueCounter += 1;
   const suffix = `${Math.random().toString(36).substring(2, 8)}${uniqueCounter}`;
 
@@ -18,7 +19,7 @@ export async function createTestUser(overrides: Partial<any> = {}) {
     isActive: true,
     accountStatus: 'active',
     verificationLevel: 'none'
-  };
+  } satisfies Partial<IUser>;
 
   return await User.create({ ...defaults, ...overrides });
 }
@@ -26,11 +27,11 @@ export async function createTestUser(overrides: Partial<any> = {}) {
 /**
  * Crée un produit minimal rattaché à un vendeur.
  */
-export async function createTestProduct(sellerId: any, overrides: Partial<any> = {}) {
+export async function createTestProduct(sellerId: Types.ObjectId | string, overrides: Partial<IProduct> = {}) {
   uniqueCounter += 1;
 
   const defaults = {
-    seller: sellerId,
+    seller: new Types.ObjectId(sellerId),
     title: 'Photocard BTS Jungkook',
     description: 'Photocard officielle en excellent état',
     price: 20,
@@ -43,7 +44,7 @@ export async function createTestProduct(sellerId: any, overrides: Partial<any> =
     isAvailable: true,
     views: 0,
     favorites: 0
-  };
+  } satisfies Partial<IProduct>;
 
   return await Product.create({ ...defaults, ...overrides });
 }

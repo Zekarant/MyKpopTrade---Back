@@ -4,6 +4,19 @@ import Message from '../../../models/messageModel';
 import Conversation from '../../../models/conversationModel';
 import logger from '../../../commons/utils/logger';
 
+type MediaMessage = {
+  _id: mongoose.Types.ObjectId;
+  attachments?: string[];
+  createdAt: Date;
+  sender: unknown;
+};
+
+type MessagePreviewSource = {
+  content: string;
+  contentType?: string;
+  isEncrypted?: boolean;
+};
+
 export class MessagingUtilsService {
   /**
    * Vérifie l'accès d'un utilisateur à une conversation
@@ -48,9 +61,9 @@ export class MessagingUtilsService {
   /**
    * Formate les médias d'une conversation
    */
-  static formatConversationMedia(mediaMessages: any[]) {
-    return mediaMessages.flatMap(msg => 
-      (msg.attachments as string[]).map((attachment: string) => {
+  static formatConversationMedia(mediaMessages: MediaMessage[]) {
+    return mediaMessages.flatMap(msg =>
+      (msg.attachments ?? []).map(attachment => {
         const extension = path.extname(attachment).toLowerCase();
         const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(extension);
         const isPDF = extension === '.pdf';
@@ -116,7 +129,7 @@ export class MessagingUtilsService {
   /**
    * Génère un aperçu de message selon son type
    */
-  static generateMessagePreview(message: any): string {
+  static generateMessagePreview(message: MessagePreviewSource | null | undefined): string {
     if (!message) return '';
     
     if (message.isEncrypted) {

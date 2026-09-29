@@ -65,4 +65,4 @@ const TransactionProofSchema: Schema = new Schema({
   timestamps: true
 });
 
-export default mongoose.models.TransactionProof || mongoose.model<ITransactionProof>('TransactionProof', TransactionProofSchema);
+export default (mongoose.models.TransactionProof as mongoose.Model<ITransactionProof>) || mongoose.model<ITransactionProof>('TransactionProof', TransactionProofSchema);

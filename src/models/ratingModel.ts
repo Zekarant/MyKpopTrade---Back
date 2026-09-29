@@ -85,4 +85,4 @@ RatingSchema.index({ reviewer: 1, transaction: 1 }, { unique: true });
 // Avis reçus affichés sur chaque profil public.
 RatingSchema.index({ recipient: 1, createdAt: -1 });
 
-export default mongoose.models.Rating || mongoose.model<IRating>('Rating', RatingSchema);
+export default (mongoose.models.Rating as mongoose.Model<IRating>) || mongoose.model<IRating>('Rating', RatingSchema);

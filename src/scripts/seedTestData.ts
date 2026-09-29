@@ -792,9 +792,7 @@ async function insertThreadMessages(
  * Boîte de réception de `mina_collects` : fils de discussion crédibles — questions
  * sur une annonce, message support, vente clôturée — et plusieurs négociations
  * avec offres et contre-offres (en cours, acceptée, refusée). Certains fils
- * restent non lus côté Mina pour afficher un badge. Messages stockés en clair
- * (isEncrypted absent) : la couche de lecture ne déchiffre que si le message
- * est marqué chiffré.
+ * restent non lus côté Mina pour afficher un badge.
  */
 async function seedConversations(usersByName: Record<string, any>, products: any[]) {
   const mina = usersByName['mina_collects'];

@@ -553,4 +553,4 @@ UserSchema.methods.generatePasswordResetToken = function(): string {
 
 UserSchema.index({ accountStatus: 1, 'suspension.until': 1 });
 
-export default mongoose.models.User || mongoose.model<IUser>('User', UserSchema);
+export default (mongoose.models.User as mongoose.Model<IUser>) || mongoose.model<IUser>('User', UserSchema);

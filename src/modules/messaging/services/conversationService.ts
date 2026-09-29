@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import Conversation from '../../../models/conversationModel';
+import Conversation, { IConversation, IOfferHistory } from '../../../models/conversationModel';
 import Message from '../../../models/messageModel';
 import User from '../../../models/userModel';
 import Product from '../../../models/productModel';
@@ -33,11 +33,24 @@ const CONVERSATION_FILTER = {
 
 const DEFAULT_CURRENCY = 'EUR';
 
+type LastMessageSummary = {
+  _id: mongoose.Types.ObjectId;
+  content: string;
+  contentType: string;
+  sender: mongoose.Types.ObjectId | { _id: mongoose.Types.ObjectId; username: string };
+  createdAt: Date;
+  isEncrypted?: boolean;
+};
+
+type ListedConversation = Omit<LeanConversation, 'participants'> & {
+  participants: { _id: mongoose.Types.ObjectId }[];
+};
+
 /**
  * Retourne la dernière offre pertinente de l'historique :
  * la plus récente acceptée si elle existe, sinon la toute dernière.
  */
-function resolveLatestOffer(offerHistory: any[]): any | null {
+function resolveLatestOffer(offerHistory: IOfferHistory[]): IOfferHistory | null {
   if (!offerHistory.length) return null;
   const accepted = offerHistory.filter(o => o.status === OFFER_STATUS.ACCEPTED);
   return accepted.length > 0
@@ -98,23 +111,27 @@ export async function fetchConversation(
     throw new HttpError(404, 'Conversation non trouvée');
   }
 
-  const conversation = conversationRaw as LeanConversation;
+  const conversation = conversationRaw as LeanConversation & {
+    isOwner?: boolean;
+    userMetadata?: { isArchived: boolean; isFavorited: boolean };
+    formattedOfferHistory?: ReturnType<typeof formatOfferHistory>;
+  };
 
   if (conversation.productId) {
-    (conversation as any).isOwner = conversation.productId.seller.toString() === userId;
+    conversation.isOwner = conversation.productId.seller.toString() === userId;
 
     if (conversation.productId.category) {
       conversation.productId.categoryLabel = MessagingUtilsService.formatCategory(conversation.productId.category);
     }
   }
 
-  (conversation as any).userMetadata = {
+  conversation.userMetadata = {
     isArchived: isArchivedByUser(conversation, userId),
     isFavorited: isFavoritedByUser(conversation, userId)
   };
 
   if (Array.isArray(conversation.offerHistory) && conversation.offerHistory.length > 0) {
-    (conversation as any).formattedOfferHistory = formatOfferHistory(
+    conversation.formattedOfferHistory = formatOfferHistory(
       conversation,
       userId,
       conversation.productId?.currency || DEFAULT_CURRENCY
@@ -182,7 +199,7 @@ export async function fetchConversation(
  */
 async function loadConversationSummaries(conversationIds: unknown[], userId: string) {
   const unreadCounts = new Map<string, number>();
-  const lastMessages = new Map<string, any>();
+  const lastMessages = new Map<string, LastMessageSummary>();
   if (!conversationIds.length) return { unreadCounts, lastMessages };
 
   // Un pipeline d'agrégation ne convertit pas les types : ObjectId explicites.
@@ -194,7 +211,7 @@ async function loadConversationSummaries(conversationIds: unknown[], userId: str
       { $match: { conversation: { $in: ids }, sender: { $ne: me }, readBy: { $ne: me }, isDeleted: false } },
       { $group: { _id: '$conversation', count: { $sum: 1 } } }
     ]),
-    Message.aggregate<{ _id: mongoose.Types.ObjectId; message: any }>([
+    Message.aggregate<{ _id: mongoose.Types.ObjectId; message: LastMessageSummary }>([
       { $match: { conversation: { $in: ids }, isDeleted: false } },
       { $sort: { conversation: 1, createdAt: -1 } },
       {
@@ -229,7 +246,7 @@ export async function listUserConversations(
   limit: number,
   filter: string
 ) {
-  const query: any = {
+  const query: mongoose.QueryFilter<IConversation> = {
     participants: userId,
     isActive: true,
     deletedBy: { $ne: userId }
@@ -260,7 +277,7 @@ export async function listUserConversations(
     .populate('productId', 'title price images currency')
     .lean();
 
-  const conversations = conversationsRaw as LeanConversation[];
+  const conversations = conversationsRaw as unknown as ListedConversation[];
   const { unreadCounts, lastMessages } = await loadConversationSummaries(
     conversations.map((conversation) => conversation._id),
     userId
@@ -287,7 +304,7 @@ export async function listUserConversations(
         preview: messagePreview
       } : null,
       otherParticipant: Array.isArray(conversation.participants) && conversation.participants.length === 2
-        ? conversation.participants.find((p: any) => p._id.toString() !== userId)
+        ? conversation.participants.find(p => p._id.toString() !== userId)
         : null,
       metadata: {
         isArchived: isArchivedByUser(conversation, userId),
@@ -320,7 +337,7 @@ export async function createConversationForUser({
   recipientId: string;
   productId?: string;
   initialMessage?: string;
-  type: string;
+  type: IConversation['type'];
 }) {
   if (!recipientId) {
     throw new HttpError(400, 'Destinataire requis');
@@ -342,7 +359,7 @@ export async function createConversationForUser({
     }
   }
 
-  const query: any = {
+  const query: mongoose.QueryFilter<IConversation> = {
     participants: { $all: [userId, recipientId] },
     type
   };

@@ -1,12 +1,27 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import Payment from '../../../models/paymentModel';
+import Payment, { IPayment } from '../../../models/paymentModel';
+import { IProduct } from '../../../models/productModel';
 import User from '../../../models/userModel';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
 import {
   anonymizeBuyerPayments,
   anonymizeExpiredPayments
 } from '../services/paymentAnonymizationService';
+
+interface ExportedPayment {
+  transaction_id: string;
+  external_reference?: string;
+  date: string;
+  completed_at: string | null;
+  amount: number;
+  currency: string;
+  status: IPayment['status'];
+  payment_method: IPayment['paymentMethod'];
+  product: { id: string; title: string; price: number; currency: string } | null;
+  role: 'buyer' | 'seller';
+  refund?: { amount: number; date: string | null; reference?: string };
+}
 
 /**
  * Exporte les données de paiement d'un utilisateur (droit à la portabilité)
@@ -28,12 +43,13 @@ export const exportPaymentData = asyncHandler(async (req: Request, res: Response
     const payments = await Payment.find({
       $or: [{ buyer: userId }, { seller: userId }]
     })
-    .populate('product', 'title images price currency')
+    .populate<{ product: Pick<IProduct, '_id' | 'title' | 'price' | 'currency'> | null }>('product', 'title images price currency')
     .sort({ createdAt: -1 });
-    
+
     // Formater les données en respectant la portabilité (format commun et lisible)
     const formattedData = payments.map(payment => {
-      const paymentData: any = {
+      const { product } = payment;
+      const paymentData: ExportedPayment = {
         transaction_id: payment._id.toString(),
         external_reference: payment.captureId || payment.paymentIntentId,
         date: payment.createdAt.toISOString(),
@@ -42,23 +58,16 @@ export const exportPaymentData = asyncHandler(async (req: Request, res: Response
         currency: payment.currency,
         status: payment.status,
         payment_method: payment.paymentMethod,
-        product: {
-          id: payment.product._id.toString(),
-          title: payment.product.title,
-          price: payment.product.price,
-          currency: payment.product.currency
-        }
+        product: product ? {
+          id: product._id.toString(),
+          title: product.title,
+          price: product.price,
+          currency: product.currency
+        } : null,
+        // Pas de détails sur l'autre partie, pour respecter sa vie privée.
+        role: payment.buyer.toString() === userId ? 'buyer' : 'seller'
       };
-      
-      // N'inclure que les données pertinentes pour l'utilisateur
-      if (payment.buyer.toString() === userId) {
-        paymentData.role = 'buyer';
-        // Ne pas inclure les détails du vendeur pour respecter sa vie privée
-      } else {
-        paymentData.role = 'seller';
-        // Ne pas inclure les détails de l'acheteur pour respecter sa vie privée
-      }
-      
+
       // Ajouter les informations de remboursement si présentes
       if (payment.refundAmount) {
         paymentData.refund = {

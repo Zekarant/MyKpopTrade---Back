@@ -64,7 +64,7 @@ function removeFileIfExists(absolutePath: string) {
 export async function fetchPublicProfile(identifier: string) {
   const isValidObjectId = mongoose.Types.ObjectId.isValid(identifier);
 
-  const query: any = { accountStatus: 'active' };
+  const query: mongoose.QueryFilter<IUser> = { accountStatus: 'active' };
   if (isValidObjectId) {
     query._id = identifier;
   } else {
@@ -91,7 +91,7 @@ export async function fetchPublicProfile(identifier: string) {
 
   if (!user) {
     const err = new HttpError(404, 'Utilisateur non trouvé');
-    (err as any).details = {
+    err.details = {
       searchedBy: isValidObjectId ? 'ID' : 'username',
       searchedValue: identifier
     };
@@ -122,7 +122,7 @@ export async function fetchPublicProfile(identifier: string) {
       isSellerVerified: user.isSellerVerified,
       kpopGroups: user.preferences?.kpopGroups || [],
       statistics: {
-        ...user.statistics?.toObject(),
+        ...user.toObject().statistics,
         activeListings
       },
       memberSince: user.createdAt,
@@ -169,7 +169,7 @@ export async function fetchMyProfile(userId: string) {
       socialLinks: user.socialLinks,
       preferences: user.preferences,
       statistics: {
-        ...user.statistics?.toObject(),
+        ...user.toObject().statistics,
         activeListings,
         soldItems,
         totalFavorites
@@ -206,8 +206,7 @@ export async function updateMyProfile(userId: string, body: Record<string, any>)
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
 
-  user.statistics = user.statistics || {};
-  user.statistics.lastActive = new Date();
+  user.set('statistics.lastActive', new Date());
   await user.save();
 
   return {
@@ -265,12 +264,13 @@ export async function removeProfileImage({
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
 
-  if (!user[field]) {
+  const current = user[field];
+  if (!current) {
     throw new HttpError(400, missingMessage);
   }
 
-  removeFileIfExists(resolveProjectPath(user[field] as string));
+  removeFileIfExists(resolveProjectPath(current));
 
-  user[field] = undefined;
+  user.set(field, undefined);
   await user.save();
 }

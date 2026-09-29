@@ -25,5 +25,5 @@ const RevokedAccessTokenSchema: Schema = new Schema({
   }
 });
 
-export default mongoose.models.RevokedAccessToken ||
+export default (mongoose.models.RevokedAccessToken as mongoose.Model<IRevokedAccessToken>) ||
   mongoose.model<IRevokedAccessToken>('RevokedAccessToken', RevokedAccessTokenSchema);

@@ -74,4 +74,4 @@ const ReportSchema: Schema = new Schema({
 // Empêcher les doublons de signalements par le même utilisateur
 ReportSchema.index({ reporter: 1, targetType: 1, targetId: 1 }, { unique: true });
 
-export default mongoose.models.Report || mongoose.model<IReport>('Report', ReportSchema);
+export default (mongoose.models.Report as mongoose.Model<IReport>) || mongoose.model<IReport>('Report', ReportSchema);

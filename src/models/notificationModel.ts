@@ -5,9 +5,9 @@ export interface INotification extends Document {
     type: string;
     title: string;
     content: string;
-    link?: string;
+    link?: string | null;
     isRead: boolean;
-    data?: any;
+    data?: Record<string, unknown> | null;
     expiresAt?: Date;
     createdAt: Date;
     updatedAt: Date;
@@ -73,4 +73,4 @@ NotificationSchema.index({ recipient: 1, isRead: 1 });
 NotificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 NotificationSchema.index({ recipient: 1, createdAt: -1 });
 
-export default mongoose.models.Notification || mongoose.model<INotification>('Notification', NotificationSchema);
+export default (mongoose.models.Notification as mongoose.Model<INotification>) || mongoose.model<INotification>('Notification', NotificationSchema);

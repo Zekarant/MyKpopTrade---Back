@@ -1,6 +1,7 @@
-import Conversation from '../../../models/conversationModel';
+import { Types } from 'mongoose';
+import Conversation, { IConversation, IOfferHistory } from '../../../models/conversationModel';
 import Message from '../../../models/messageModel';
-import Product from '../../../models/productModel';
+import Product, { IProduct } from '../../../models/productModel';
 import { MessagingUtilsService } from './messagingUtilsService';
 import {
   startPayWhatYouWant as startPayWhatYouWantFlow,
@@ -40,12 +41,17 @@ type MessageContentType =
   | typeof MESSAGE_CONTENT_TYPE.COUNTER_OFFER
   | typeof MESSAGE_CONTENT_TYPE.SYSTEM_NOTIFICATION;
 
+type ObjectIdLike = Types.ObjectId | string;
+type OfferProduct = Pick<IProduct, '_id' | 'seller' | 'title' | 'price' | 'currency' | 'isAvailable' | 'allowOffers' | 'minOfferPercentage'>;
+type NegotiatedProduct = Pick<IProduct, '_id' | 'seller' | 'title' | 'price' | 'currency'>;
+type ProductNegotiation = NonNullable<IProduct['negotiations']>[number];
+
 /**
  * Crée un message système puis un message texte optionnel,
  * et met à jour lastMessage / lastMessageAt de la conversation.
  */
 async function createOfferMessages(
-  conversationId: any,
+  conversationId: ObjectIdLike,
   senderId: string,
   systemContent: string,
   contentType: MessageContentType,
@@ -60,7 +66,7 @@ async function createOfferMessages(
     readBy: [senderId]
   });
 
-  let lastMessageId: any = systemMessage._id;
+  let lastMessageId = systemMessage._id;
 
   if (optionalUserMessage && optionalUserMessage.trim()) {
     const userMessage = await Message.create({
@@ -79,8 +85,8 @@ async function createOfferMessages(
   );
 }
 
-function populateOfferConversation(query: any) {
-  return query
+function findOfferConversation(conversationId: ObjectIdLike) {
+  return Conversation.findById(conversationId)
     .populate('participants', 'username profilePicture')
     .populate('productId', 'title price images')
     .populate('lastMessage')
@@ -104,10 +110,10 @@ function buildOfferEntry(
 }
 
 async function setOfferHistoryStatus(
-  conversationId: any,
-  offerId: any,
+  conversationId: ObjectIdLike,
+  offerId: Types.ObjectId,
   status: typeof OFFER_STATUS[keyof typeof OFFER_STATUS],
-  extraSet: Record<string, any> = {}
+  extraSet: Record<string, unknown> = {}
 ): Promise<void> {
   await Conversation.updateOne(
     { _id: conversationId, 'offerHistory._id': offerId },
@@ -115,7 +121,7 @@ async function setOfferHistoryStatus(
   );
 }
 
-function assertProductOfferable(product: any, userId: string): void {
+function assertProductOfferable(product: OfferProduct | null, userId: string): asserts product is OfferProduct {
   if (!product) {
     throw new HttpError(404, 'Produit non trouvé');
   }
@@ -130,7 +136,7 @@ function assertProductOfferable(product: any, userId: string): void {
   }
 }
 
-function assertOfferAboveMinimum(product: any, offer: number): void {
+function assertOfferAboveMinimum(product: OfferProduct, offer: number): void {
   const minPercentage = product.minOfferPercentage || DEFAULT_MIN_OFFER_PERCENTAGE;
   const minOffer = product.price * minPercentage / 100;
   if (offer < minOffer) {
@@ -142,14 +148,14 @@ function assertOfferAboveMinimum(product: any, offer: number): void {
 }
 
 async function updateExistingNegotiation(
-  conversation: any,
+  conversation: IConversation,
   userId: string,
-  product: any,
+  product: OfferProduct,
   initialOffer: number,
   message?: string
 ): Promise<{ oldOffer: number | null }> {
   const lastOffer = conversation.offerHistory.find(
-    (offer: any) => offer.offeredBy.toString() === userId && offer.status === OFFER_STATUS.PENDING
+    offer => offer.offeredBy.toString() === userId && offer.status === OFFER_STATUS.PENDING
   );
 
   const oldOffer = lastOffer ? lastOffer.amount : null;
@@ -189,7 +195,7 @@ async function updateExistingNegotiation(
 
 async function createNegotiationConversation(
   userId: string,
-  product: any,
+  product: OfferProduct,
   initialOffer: number,
   message?: string
 ) {
@@ -265,7 +271,7 @@ export async function initiateNegotiationFlow({
     isActive: true
   });
 
-  let conversationId: any;
+  let conversationId: Types.ObjectId;
   let isUpdatingOffer = false;
   let oldOffer: number | null = null;
 
@@ -279,7 +285,7 @@ export async function initiateNegotiationFlow({
     conversationId = created._id;
   }
 
-  const populatedConversation = await populateOfferConversation(Conversation.findById(conversationId));
+  const populatedConversation = await findOfferConversation(conversationId);
 
   await NotificationService.createNotification({
     recipientId: product.seller,
@@ -305,9 +311,9 @@ type NegotiationActionResult = {
 
 async function applyAcceptAction(
   conversationId: string,
-  pendingOffer: any,
-  product: any,
-  negotiation: any
+  pendingOffer: IOfferHistory,
+  product: NegotiatedProduct,
+  negotiation: ProductNegotiation
 ): Promise<NegotiationActionResult> {
   const offerAmount = pendingOffer.amount;
   negotiation.status = OFFER_STATUS.ACCEPTED;
@@ -332,9 +338,9 @@ async function applyAcceptAction(
 
 async function applyRejectAction(
   conversationId: string,
-  pendingOffer: any,
-  product: any,
-  negotiation: any,
+  pendingOffer: IOfferHistory,
+  product: NegotiatedProduct,
+  negotiation: ProductNegotiation,
   message?: string
 ): Promise<NegotiationActionResult> {
   const offerAmount = pendingOffer.amount;
@@ -363,9 +369,9 @@ async function applyRejectAction(
 
 async function applyCounterAction(
   conversationId: string,
-  pendingOffer: any,
-  product: any,
-  negotiation: any,
+  pendingOffer: IOfferHistory,
+  product: NegotiatedProduct,
+  negotiation: ProductNegotiation,
   userId: string,
   counterOffer: number,
   message?: string
@@ -413,7 +419,7 @@ export async function respondToNegotiationFlow({
     throw new HttpError(400, 'Contre-offre requise et doit être un nombre positif');
   }
 
-  const conversation = await Conversation.findById(conversationId).populate({
+  const conversation = await Conversation.findById(conversationId).populate<{ productId: NegotiatedProduct | null }>({
     path: 'productId',
     select: 'title price images seller negotiations currency'
   });
@@ -425,7 +431,7 @@ export async function respondToNegotiationFlow({
     throw new HttpError(400, 'Cette conversation n\'est pas une négociation');
   }
 
-  const product = conversation.productId as any;
+  const product = conversation.productId;
   if (!product) {
     throw new HttpError(400, 'Produit non trouvé dans cette négociation');
   }
@@ -434,20 +440,21 @@ export async function respondToNegotiationFlow({
   }
 
   const pendingOffer = conversation.offerHistory.find(
-    (offer: any) => offer.status === OFFER_STATUS.PENDING
+    offer => offer.status === OFFER_STATUS.PENDING
   );
   if (!pendingOffer) {
     throw new HttpError(404, 'Aucune offre en attente');
   }
 
   const productDoc = await Product.findById(product._id);
-  const negotiationIndex = productDoc.negotiations.findIndex(
-    (n: { conversationId: { toString(): string } }) => n.conversationId.toString() === conversationId
+  const negotiations = productDoc?.negotiations ?? [];
+  const negotiationIndex = negotiations.findIndex(
+    n => n.conversationId.toString() === conversationId
   );
-  if (negotiationIndex === -1) {
+  if (!productDoc || negotiationIndex === -1) {
     throw new HttpError(404, 'Négociation non trouvée pour ce produit');
   }
-  const negotiation = productDoc.negotiations[negotiationIndex];
+  const negotiation = negotiations[negotiationIndex];
 
   let result: NegotiationActionResult;
   switch (action) {
@@ -466,15 +473,13 @@ export async function respondToNegotiationFlow({
       throw new HttpError(400, 'Action invalide');
   }
 
-  productDoc.negotiations[negotiationIndex] = negotiation;
+  negotiations[negotiationIndex] = negotiation;
   await productDoc.save();
 
   const optionalMsg = action !== 'reject' ? message : undefined;
   await createOfferMessages(conversationId, userId, result.statusMessage, result.contentType, optionalMsg);
 
-  const buyerId = pendingOffer.userId || conversation.participants.find(
-    (p: any) => p.toString() !== userId
-  );
+  const buyerId = conversation.participants.find(p => p.toString() !== userId);
 
   if (buyerId) {
     const offerAmount = pendingOffer.amount;
@@ -508,7 +513,7 @@ export async function respondToNegotiationFlow({
     }
   }
 
-  const updatedConversation = await populateOfferConversation(Conversation.findById(conversationId));
+  const updatedConversation = await findOfferConversation(conversationId);
 
   return {
     action,
@@ -552,8 +557,8 @@ export async function initiatePayWhatYouWantFlow({
       maximumPrice: max,
       message: message || ''
     });
-  } catch (error: any) {
-    throw new HttpError(400, error.message);
+  } catch (error) {
+    throw new HttpError(400, (error as Error).message);
   }
 }
 
@@ -580,8 +585,8 @@ export async function makePayWhatYouWantProposalFlow({
       proposedPrice: price,
       message: message || ''
     });
-  } catch (error: any) {
-    throw new HttpError(400, error.message);
+  } catch (error) {
+    throw new HttpError(400, (error as Error).message);
   }
 }
 
@@ -602,7 +607,15 @@ export async function fetchConversationOffers(userId: string, conversationId: st
 
   const conversation = conversationRaw as LeanConversation;
 
-  const response: any = {
+  const response: {
+    conversationId: string;
+    type: LeanConversation['type'];
+    offerHistory: IOfferHistory[];
+    currentNegotiation?: LeanConversation['negotiation'];
+    payWhatYouWant?: LeanConversation['payWhatYouWant'];
+    product?: LeanConversation['productId'];
+    isOwner?: boolean;
+  } = {
     conversationId,
     type: conversation.type,
     offerHistory: conversation.offerHistory
@@ -636,7 +649,7 @@ export async function fetchConversationOffers(userId: string, conversationId: st
 }
 
 export async function cancelOfferFlow(userId: string, conversationId: string) {
-  const conversation = await Conversation.findById(conversationId).populate({
+  const conversation = await Conversation.findById(conversationId).populate<{ productId: NegotiatedProduct | null }>({
     path: 'productId',
     select: 'title price currency seller'
   });
@@ -652,13 +665,13 @@ export async function cancelOfferFlow(userId: string, conversationId: string) {
   }
 
   const userOffer = conversation.offerHistory.find(
-    (offer: any) => offer.offeredBy.toString() === userId && offer.status === OFFER_STATUS.PENDING
+    offer => offer.offeredBy.toString() === userId && offer.status === OFFER_STATUS.PENDING
   );
   if (!userOffer) {
     throw new HttpError(404, 'Aucune offre en cours à annuler');
   }
 
-  const product = conversation.productId as any;
+  const product = conversation.productId;
 
   await setOfferHistoryStatus(
     conversationId,

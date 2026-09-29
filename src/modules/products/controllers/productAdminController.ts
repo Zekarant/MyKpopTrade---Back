@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import Product from '../../../models/productModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { recordAuditLog } from '../../../commons/utils/auditService';
@@ -199,7 +200,7 @@ export const reviewFlaggedProduct = asyncHandler(async (req: Request, res: Respo
     return res.status(400).json({ message: 'Ce produit n\'a pas d\'analyse de modération à revoir' });
   }
 
-  product.moderationFlag.reviewedBy = adminId;
+  product.moderationFlag.reviewedBy = new mongoose.Types.ObjectId(adminId);
   product.moderationFlag.reviewedAt = new Date();
   product.moderationFlag.reviewDecision = approve ? 'approved' : 'rejected';
   if (approve) {

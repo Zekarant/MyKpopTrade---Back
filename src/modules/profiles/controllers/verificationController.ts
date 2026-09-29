@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import TransactionProof from '../../../models/transactionProofModel';
+import { QueryFilter } from 'mongoose';
+import TransactionProof, { ITransactionProof } from '../../../models/transactionProofModel';
 import User from '../../../models/userModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
@@ -12,7 +13,7 @@ export const getUserProofs = asyncHandler(async (req: Request, res: Response) =>
   const page = parseInt(req.query.page as string) || 1;
   const limit = clampLimit(req.query.limit, 10, MAX_PAGE_SIZE);
   
-  const filter = { 
+  const filter: QueryFilter<ITransactionProof> = {
     user: userId,
     status: req.query.includeAll ? { $in: ['pending', 'verified', 'rejected'] } : 'verified'
   };

@@ -1,10 +1,11 @@
-import Payment from '../../../models/paymentModel';
+import mongoose from 'mongoose';
+import Payment, { IPayment } from '../../../models/paymentModel';
 
 /** Durée de conservation des données personnelles d'un paiement (politique de confidentialité). */
 const PERSONAL_DATA_RETENTION_YEARS = 3;
 
 /** Paiements clos : plus aucune expédition ni remboursement ne dépend de l'adresse. */
-const CLOSED_PAYMENT_FILTER = {
+const CLOSED_PAYMENT_FILTER: mongoose.QueryFilter<IPayment> = {
   $or: [
     { status: { $in: ['refunded', 'cancelled', 'failed'] } },
     { status: { $in: ['completed', 'partially_refunded'] }, 'shipment.status': 'delivered' }
@@ -15,7 +16,7 @@ const CLOSED_PAYMENT_FILTER = {
  * Efface les données personnelles d'un paiement en gardant ce que la
  * comptabilité exige (montants, dates, statut, références PayPal).
  */
-function erasePersonalData(payment: any): void {
+function erasePersonalData(payment: IPayment): void {
   payment.ipAddress = '0.0.0.0';
   payment.userAgent = 'anonymized';
   payment.shippingAddress = undefined;

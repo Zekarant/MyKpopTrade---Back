@@ -57,4 +57,4 @@ const IIdentityVerificationSchema: Schema = new Schema({
 // chacune une alerte Discord distincte pour le même utilisateur.
 IIdentityVerificationSchema.index({ user: 1 }, { unique: true, partialFilterExpression: { status: 'pending' } });
 
-export default mongoose.models.IIdentityVerification || mongoose.model<IIdentityVerification>('IIdentityVerification', IIdentityVerificationSchema);
+export default (mongoose.models.IIdentityVerification as mongoose.Model<IIdentityVerification>) || mongoose.model<IIdentityVerification>('IIdentityVerification', IIdentityVerificationSchema);

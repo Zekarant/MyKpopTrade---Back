@@ -327,4 +327,4 @@ ProductSchema.index({ createdAt: -1 });
 ProductSchema.index({ 'negotiations.buyer': 1, 'negotiations.status': 1 });
 ProductSchema.index({ 'pwywOffers.buyer': 1, 'pwywOffers.status': 1 });
 
-export default mongoose.models.Product || mongoose.model<IProduct>('Product', ProductSchema);
+export default (mongoose.models.Product as mongoose.Model<IProduct>) || mongoose.model<IProduct>('Product', ProductSchema);

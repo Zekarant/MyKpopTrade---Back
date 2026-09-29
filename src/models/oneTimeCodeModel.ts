@@ -39,5 +39,5 @@ const OneTimeCodeSchema: Schema = new Schema({
   }
 });
 
-export default mongoose.models.OneTimeCode ||
+export default (mongoose.models.OneTimeCode as mongoose.Model<IOneTimeCode>) ||
   mongoose.model<IOneTimeCode>('OneTimeCode', OneTimeCodeSchema);
