@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 import User from '../models/userModel';
 import { PayPalPartnerService, SELLER_BLOCK_MESSAGES } from '../modules/payments/services/paypalPartnerService';

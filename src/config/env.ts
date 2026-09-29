@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 
 // Charger le fichier .env
-dotenv.config();
+dotenv.config({ quiet: true });
 
 // Schéma de validation pour les variables d'environnement
 const envSchema = z.object({

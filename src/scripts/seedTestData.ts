@@ -13,7 +13,7 @@ import Message from '../models/messageModel';
 import Post from '../modules/posts/model';
 import Follow from '../modules/follows/model';
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 /**
  * Jeu de données de test : profils variés, annonces et publications crédibles.

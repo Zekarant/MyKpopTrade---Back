@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import IdentityVerification from '../models/identityVerificationModel';
 
 // Charger les variables d'environnement
-dotenv.config({ path: '.env.local' });
+dotenv.config({ path: '.env.local', quiet: true });
 
 // L'ancien index unique (user, expiresAt) a été remplacé par un index unique
 // sur (user) seul (cf. src/models/identityVerificationModel.ts). Mongoose ne

@@ -31,7 +31,7 @@ export async function fixPostImagePaths(): Promise<number> {
 }
 
 async function main() {
-  dotenv.config({ path: '.env.local' });
+  dotenv.config({ path: '.env.local', quiet: true });
   try {
     await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/mykpoptrade');
     const fixed = await fixPostImagePaths();

@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import User from '../models/userModel';
 
-dotenv.config({ path: '.env.local' });
+dotenv.config({ path: '.env.local', quiet: true });
 
 /**
  * Script de test : relie un vendeur à un compte business sandbox sans passer

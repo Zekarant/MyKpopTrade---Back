@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import User from '../models/userModel';
 
 // Charger les variables d'environnement
-dotenv.config({ path: '.env.local' });
+dotenv.config({ path: '.env.local', quiet: true });
 
 // Fonction pour promouvoir un utilisateur en admin
 async function makeUserAdmin(email: string) {
