@@ -10,7 +10,8 @@ dotenv.config({ quiet: true });
 const envSchema = z.object({
   // Variables d'environnement générales
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.string().transform(val => parseInt(val, 10)).default('3000'),
+  // zod 4 : la valeur par défaut est celle de sortie (déjà transformée).
+  PORT: z.string().transform(val => parseInt(val, 10)).default(3000),
   API_URL: z.string().url().default('http://localhost:3000'),
   FRONTEND_URL: z.string().url().default('http://localhost:8080'),
   // Origines autorisées par CORS, séparées par des virgules. FRONTEND_URL est
@@ -20,7 +21,7 @@ const envSchema = z.object({
   // req.ip soit l'IP réelle du client et non celle du proxy : sans ça, le rate
   // limiting par IP s'applique à tous les utilisateurs en même temps.
   // ⚠️ Ne jamais surévaluer : une valeur trop haute permet de forger X-Forwarded-For.
-  TRUST_PROXY: z.string().transform(val => parseInt(val, 10)).default('0'),
+  TRUST_PROXY: z.string().transform(val => parseInt(val, 10)).default(0),
   // Taille maximale d'un corps de requête JSON / urlencoded.
   BODY_LIMIT: z.string().default('1mb'),
   
@@ -58,7 +59,7 @@ const envSchema = z.object({
   GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
 
   // SMS
-  SMS_ENABLED: z.string().transform(val => val === 'true').default('false'),
+  SMS_ENABLED: z.string().transform(val => val === 'true').default(false),
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_PHONE_NUMBER: z.string().optional(),
