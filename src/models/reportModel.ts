@@ -4,6 +4,19 @@ export type ReportTargetType = 'rating' | 'product' | 'user' | 'post';
 
 export const REPORT_TARGET_TYPES: ReportTargetType[] = ['rating', 'product', 'user', 'post'];
 
+export const REPORT_REASONS = [
+  'inappropriate_content',
+  'offensive_language',
+  'false_information',
+  'spam',
+  'fraud',
+  'copyright_violation',
+  'other'
+] as const;
+
+/** Longueur maximale des détails d'un signalement et des notes admin. */
+export const REPORT_TEXT_MAX_LENGTH = 500;
+
 export interface IReport extends Document {
   reporter: mongoose.Types.ObjectId;
   targetType: ReportTargetType;
@@ -35,19 +48,11 @@ const ReportSchema: Schema = new Schema({
   reason: {
     type: String,
     required: true,
-    enum: [
-      'inappropriate_content',
-      'offensive_language',
-      'false_information',
-      'spam',
-      'fraud',
-      'copyright_violation',
-      'other'
-    ]
+    enum: REPORT_REASONS
   },
   details: {
     type: String,
-    maxlength: 500
+    maxlength: REPORT_TEXT_MAX_LENGTH
   },
   status: {
     type: String,
@@ -57,7 +62,7 @@ const ReportSchema: Schema = new Schema({
   },
   adminNotes: {
     type: String,
-    maxlength: 500
+    maxlength: REPORT_TEXT_MAX_LENGTH
   },
   resolvedAt: {
     type: Date

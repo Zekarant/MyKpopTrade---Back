@@ -1,6 +1,11 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import Report, { REPORT_TARGET_TYPES, type ReportTargetType } from '../../../models/reportModel';
+import Report, {
+  REPORT_REASONS,
+  REPORT_TARGET_TYPES,
+  REPORT_TEXT_MAX_LENGTH,
+  type ReportTargetType
+} from '../../../models/reportModel';
 import Rating from '../../../models/ratingModel';
 import Product from '../../../models/productModel';
 import Post from '../../posts/model';
@@ -10,6 +15,21 @@ import logger from '../../../commons/utils/logger';
 import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { CSV_EXPORT_ROW_LIMIT, sendCsvDownload, wantsCsv } from '../../../commons/utils/csv';
+import { clampLimit } from '../../../commons/utils/pagination';
+
+/** Code MongoDB d'une violation d'index unique. */
+const DUPLICATE_KEY_ERROR = 11000;
+
+/** Page et taille de page bornées : `limit` venait tel quel de l'URL. */
+function pagination(req: Request, defaultLimit: number, maxLimit: number) {
+  return {
+    page: Math.max(1, parseInt(req.query.page as string) || 1),
+    limit: clampLimit(req.query.limit, defaultLimit, maxLimit)
+  };
+}
+
+const isReason = (value: unknown): value is (typeof REPORT_REASONS)[number] =>
+  typeof value === 'string' && (REPORT_REASONS as readonly string[]).includes(value);
 
 const REASON_LABELS: Record<string, string> = {
   inappropriate_content: 'Contenu inapproprié',
@@ -71,8 +91,16 @@ export const createReport = asyncHandler(async (req: Request, res: Response) => 
     });
   }
 
-  if (!mongoose.Types.ObjectId.isValid(targetId)) {
+  if (typeof targetId !== 'string' || !mongoose.Types.ObjectId.isValid(targetId)) {
     return res.status(400).json({ message: 'ID de cible invalide' });
+  }
+
+  // Validés ici plutôt que par le schéma : une ValidationError répondait 500.
+  if (!isReason(reason)) {
+    return res.status(400).json({ message: `Motif invalide. Valeurs acceptées : ${REPORT_REASONS.join(', ')}` });
+  }
+  if (details !== undefined && details !== null && (typeof details !== 'string' || details.length > REPORT_TEXT_MAX_LENGTH)) {
+    return res.status(400).json({ message: `Les détails sont limités à ${REPORT_TEXT_MAX_LENGTH} caractères` });
   }
 
   if (targetType === 'user' && String(targetId) === String(userId)) {
@@ -115,8 +143,16 @@ export const createReport = asyncHandler(async (req: Request, res: Response) => 
     details: details || '',
     status: 'pending'
   });
-  
-  await report.save();
+
+  try {
+    await report.save();
+  } catch (error: any) {
+    // Double envoi simultané : l'index unique a refusé le second.
+    if (error?.code === DUPLICATE_KEY_ERROR) {
+      return res.status(400).json({ message: 'Vous avez déjà signalé cet élément' });
+    }
+    throw error;
+  }
   
   logger.info('Nouveau signalement créé', {
     reportId: report._id,
@@ -159,8 +195,7 @@ export const createReport = asyncHandler(async (req: Request, res: Response) => 
  */
 export const getUserReports = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 10;
+  const { page, limit } = pagination(req, 10, 50);
   const status = req.query.status as string;
   
   // Construire le filtre
@@ -236,8 +271,7 @@ export const checkUserReport = asyncHandler(async (req: Request, res: Response) 
  * Récupérer tous les signalements (admin)
  */
 export const getAllReports = asyncHandler(async (req: Request, res: Response) => {
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const { page, limit } = pagination(req, 20, 100);
   const status = req.query.status as string;
   const targetType = req.query.targetType as string;
   
@@ -449,7 +483,7 @@ export const bulkUpdateReportStatus = asyncHandler(async (req: Request, res: Res
   }
 
   const update: Record<string, unknown> = { status };
-  if (adminNotes) update.adminNotes = String(adminNotes).slice(0, 500);
+  if (adminNotes) update.adminNotes = String(adminNotes).slice(0, REPORT_TEXT_MAX_LENGTH);
   if (status === 'resolved') update.resolvedAt = new Date();
 
   const result = await Report.updateMany({ _id: { $in: validIds } }, { $set: update });
@@ -479,22 +513,22 @@ export const updateReportStatus = asyncHandler(async (req: Request, res: Respons
   const { status, adminNotes } = req.body;
   const adminId = (req.user as any).id;
   
-  if (!status || !['reviewed', 'resolved', 'rejected'].includes(status)) {
-    return res.status(400).json({ 
-      message: 'Statut invalide. Doit être "reviewed", "resolved" ou "rejected"' 
+  if (!status || !RESOLVABLE_STATUSES.includes(status)) {
+    return res.status(400).json({
+      message: 'Statut invalide. Doit être "reviewed", "resolved" ou "rejected"'
     });
   }
-  
-  const report = await Report.findById(reportId);
-  
+
+  const report = mongoose.Types.ObjectId.isValid(reportId) ? await Report.findById(reportId) : null;
+
   if (!report) {
     return res.status(404).json({ message: 'Signalement non trouvé' });
   }
-  
+
   // Mettre à jour le signalement
   report.status = status;
   if (adminNotes) {
-    report.adminNotes = adminNotes;
+    report.adminNotes = String(adminNotes).slice(0, REPORT_TEXT_MAX_LENGTH);
   }
   
   if (status === 'resolved') {

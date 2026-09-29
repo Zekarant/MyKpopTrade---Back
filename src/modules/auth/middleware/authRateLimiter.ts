@@ -43,7 +43,12 @@ const LIMITS = {
    */
   twoFactorVerify: { points: 10, duration: 15 * 60 },
   /** Anti spam du formulaire de contact (route publique). */
-  contact: { points: 5, duration: 60 * 60 }
+  contact: { points: 5, duration: 60 * 60 },
+  /**
+   * Anti inondation des signalements : chacun déclenche une alerte admin
+   * (webhook), et un compte pouvait en émettre un par élément du site.
+   */
+  report: { points: 20, duration: 60 * 60 }
 } as const;
 
 type LimitName = keyof typeof LIMITS;
@@ -161,6 +166,11 @@ export const rateLimitSmsVerify = createUserRateLimiter(
 export const rateLimitContact = createIpRateLimiter(
   'contact',
   'Trop de messages envoyés. Veuillez réessayer dans une heure.'
+);
+
+export const rateLimitReports = createUserRateLimiter(
+  'report',
+  'Trop de signalements envoyés. Veuillez réessayer dans une heure.'
 );
 
 export const rateLimitTwoFactorVerify = createIpRateLimiter(
