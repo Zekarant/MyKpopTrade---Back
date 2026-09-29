@@ -25,7 +25,8 @@ export async function fixPostImagePaths(): Promise<number> {
           }
         }
       }
-    }]
+    }],
+    { updatePipeline: true }
   );
   return result.modifiedCount;
 }

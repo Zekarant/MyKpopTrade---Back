@@ -87,7 +87,7 @@ export const adminDeletePost = asyncHandler(async (req: Request, res: Response) 
     admin: adminId,
     action: 'delete_post',
     targetType: 'post',
-    targetId: postId,
+    targetId: post._id,
     details: reason || 'Suppression par modération',
     metadata: {
       authorUsername: (post.author as any)?.username,

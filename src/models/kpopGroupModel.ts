@@ -28,6 +28,7 @@ export interface IKpopGroup extends Document {
   spotifyFollowers?: number;
   invalidReason?: string;
   invalidatedAt?: Date;
+  isActive: boolean;
 }
 
 const SocialLinksSchema = new Schema<ISocialLinks>({
@@ -118,18 +119,16 @@ kpopGroupSchema.index({ followers: 1 });
 kpopGroupSchema.index({ spotifyId: 1 }, { sparse: true, unique: true });
 kpopGroupSchema.index({ parentGroup: 1 }, { sparse: true });
 
-kpopGroupSchema.pre('save', function(next) {
+kpopGroupSchema.pre('save', function() {
   if (!this.tags || this.tags.length === 0) {
     this.tags = ['K-pop'];
   }
-  
+
   if (!this.genres || this.genres.length === 0) {
     this.genres = ['K-pop'];
   }
-  
+
   this.lastScraped = new Date();
-  
-  next();
 });
 
 kpopGroupSchema.statics.findPopular = function(limit: number = 50) {

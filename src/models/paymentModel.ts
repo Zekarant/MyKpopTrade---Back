@@ -310,14 +310,13 @@ const paymentSchema: Schema = new Schema({
 });
 
 // Middleware pre-save pour définir la date d'expiration de la rétention
-paymentSchema.pre('save', function(next) {
+paymentSchema.pre('save', function() {
   if (!this.retentionExpiresAt) {
     // Fixer la rétention à 10 ans pour les transactions financières (obligation légale)
     const expirationDate = new Date();
     expirationDate.setFullYear(expirationDate.getFullYear() + 10);
     this.retentionExpiresAt = expirationDate;
   }
-  next();
 });
 
 // Middleware pour masquer les données sensibles dans les réponses JSON

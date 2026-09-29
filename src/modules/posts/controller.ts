@@ -170,7 +170,7 @@ export const replyToPost = asyncHandler(async (req: Request, res: Response) => {
   const reply = await Post.create({
     author: userId,
     content,
-    parentPost: postId,
+    parentPost: parentPost._id,
     isReply: true
   });
 

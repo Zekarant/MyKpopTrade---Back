@@ -75,12 +75,10 @@ const RatingSchema: Schema = new Schema({
   timestamps: true
 });
 
-RatingSchema.pre('save', function(this: IRating, next) {
+RatingSchema.pre('save', function(this: IRating) {
   if (this.reviewer.toString() === this.recipient.toString()) {
-    const err = new Error('Un utilisateur ne peut pas s\'auto-évaluer');
-    return next(err);
+    throw new Error('Un utilisateur ne peut pas s\'auto-évaluer');
   }
-  next();
 });
 
 RatingSchema.index({ reviewer: 1, transaction: 1 }, { unique: true });

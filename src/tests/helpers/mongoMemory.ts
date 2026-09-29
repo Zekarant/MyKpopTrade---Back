@@ -1,5 +1,6 @@
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
+import os from 'os';
 
 let mongoServer: MongoMemoryServer | null = null;
 
@@ -10,7 +11,9 @@ let mongoServer: MongoMemoryServer | null = null;
 export async function startInMemoryMongo(): Promise<void> {
   mongoServer = await MongoMemoryServer.create();
   const uri = mongoServer.getUri();
-  await mongoose.connect(uri);
+  // Le pilote MongoDB 7 charge `os` par import() dynamique, qui échoue sous Jest :
+  // ses métadonnées partent vides et le serveur refuse la connexion.
+  await mongoose.connect(uri, { runtimeAdapters: { os } });
 }
 
 /**

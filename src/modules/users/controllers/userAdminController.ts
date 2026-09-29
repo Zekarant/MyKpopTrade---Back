@@ -544,7 +544,7 @@ export const updateUserRole = asyncHandler(async (req: Request, res: Response) =
     admin: (req as any).user.id,
     action: 'change_role',
     targetType: 'user',
-    targetId: userId,
+    targetId: user._id,
     details: `Rôle de ${user.username} changé: ${oldRole} → ${role}`
   });
 
