@@ -3,6 +3,18 @@ import mongoose from 'mongoose';
 import User from '../../models/userModel';
 import { NotificationService } from '../notifications/services/notificationService';
 
+/** Code MongoDB d'une violation d'index unique. */
+const DUPLICATE_KEY_ERROR = 11000;
+
+export class FollowTargetNotFoundError extends Error {
+  constructor() {
+    super('Utilisateur introuvable');
+  }
+}
+
+/** Un compte supprimé définitivement laisse un `null` après populate. */
+const existingUsers = <T>(users: (T | null)[]): T[] => users.filter((user): user is T => user !== null);
+
 export class FollowService {
   /**
    * Follow a user
@@ -58,7 +70,19 @@ export class FollowService {
       return { isFollowing: false };
     }
 
-    await Follow.create({ follower: followerId, following: followingId });
+    // On pouvait « suivre » un identifiant quelconque, compte supprimé compris.
+    const target = await User.findById(followingId).select('accountStatus').lean<{ accountStatus?: string } | null>();
+    if (!target || target.accountStatus === 'deleted') {
+      throw new FollowTargetNotFoundError();
+    }
+
+    try {
+      await Follow.create({ follower: followerId, following: followingId });
+    } catch (error: any) {
+      // Double clic simultané : l'index unique a refusé le second abonnement.
+      if (error?.code === DUPLICATE_KEY_ERROR) return { isFollowing: true };
+      throw error;
+    }
     await this.notifyNewFollower(followerId, followingId);
     return { isFollowing: true };
   }
@@ -102,7 +126,7 @@ export class FollowService {
     ]);
 
     return {
-      followers: followers.map(f => f.follower),
+      followers: existingUsers(followers.map(f => f.follower)),
       total,
       page,
       totalPages: Math.ceil(total / limit)
@@ -124,7 +148,7 @@ export class FollowService {
     ]);
 
     return {
-      following: following.map(f => f.following),
+      following: existingUsers(following.map(f => f.following)),
       total,
       page,
       totalPages: Math.ceil(total / limit)
