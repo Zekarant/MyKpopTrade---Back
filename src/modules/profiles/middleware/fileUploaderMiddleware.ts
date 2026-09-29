@@ -2,6 +2,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { Request } from 'express';
+import { sanitizedMulter } from '../../../commons/middlewares/sanitizedMulter';
 
 // L'extension enregistrée dépend du type MIME validé par fileFilter, jamais du
 // nom envoyé par le client : sinon un `x.html` déclaré `image/png` serait servi
@@ -112,7 +113,7 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
 };
 
 // Configurer l'upload avec une taille maximum de 5MB
-export const profilePictureUpload = multer({ 
+export const profilePictureUpload = sanitizedMulter({
   storage: profilePictureStorage,
   limits: {
     fileSize: 5 * 1024 * 1024 // 5MB
@@ -121,7 +122,7 @@ export const profilePictureUpload = multer({
 });
 
 // Upload pour les bannières de profil (plus grande taille max)
-export const profileBannerUpload = multer({ 
+export const profileBannerUpload = sanitizedMulter({
   storage: profileBannerStorage,
   limits: {
     fileSize: 10 * 1024 * 1024 // 10MB car les bannières sont plus grandes
@@ -130,7 +131,7 @@ export const profileBannerUpload = multer({
 });
 
 // Upload pour les images de produits
-export const productImagesUpload = multer({ 
+export const productImagesUpload = sanitizedMulter({
   storage: productImageStorage,
   limits: {
     fileSize: 8 * 1024 * 1024, // 8MB
@@ -140,7 +141,7 @@ export const productImagesUpload = multer({
 });
 
 // Upload pour les images d'avis
-export const ratingImageUpload = multer({ 
+export const ratingImageUpload = sanitizedMulter({
   storage: ratingImageStorage,
   limits: {
     fileSize: 5 * 1024 * 1024 // 5MB

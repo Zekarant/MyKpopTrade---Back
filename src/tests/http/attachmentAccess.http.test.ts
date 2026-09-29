@@ -154,6 +154,70 @@ describe('HTTP — confidentialité des pièces jointes de conversation', () => 
       expect(res.status).toBe(403);
     });
 
+    it('sert une image avec son type et interdit au navigateur de le deviner', async () => {
+      const { bob, message } = await seedConversation();
+      const token = generateAccessToken(bob);
+
+      const res = await request(app)
+        .get(`/api/messaging/messages/${message._id}/attachments/${ATTACHMENT_NAME}`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.headers['content-type']).toBe('image/jpeg');
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+      expect(res.headers['content-disposition']).toBeUndefined();
+    });
+
+    it('ne sert jamais en HTML une ancienne pièce jointe à l\'extension arbitraire', async () => {
+      const { alice, bob } = await seedConversation();
+      const legacyName = 'ancienne-piece-jointe.html';
+      const legacyPath = path.join(path.dirname(attachmentPath()), legacyName);
+      fs.writeFileSync(legacyPath, '<script>alert(1)</script>');
+      try {
+        const conversation = await Conversation.findOne({ participants: alice._id });
+        const legacy = await Message.create({
+          conversation: conversation!._id,
+          sender: alice._id,
+          content: 'ancien envoi',
+          contentType: 'text',
+          attachments: [legacyName]
+        });
+
+        const res = await request(app)
+          .get(`/api/messaging/messages/${legacy._id}/attachments/${legacyName}`)
+          .set('Authorization', `Bearer ${generateAccessToken(bob)}`);
+
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toBe('application/octet-stream');
+        expect(res.headers['content-disposition']).toBe('attachment');
+        expect(res.headers['x-content-type-options']).toBe('nosniff');
+      } finally {
+        fs.rmSync(legacyPath, { force: true });
+      }
+    });
+
+    it('enregistre une pièce jointe avec l\'extension de son type, pas celle de son nom', async () => {
+      const { alice, bob } = await seedConversation();
+      const conversation = await Conversation.findOne({ participants: alice._id });
+
+      const res = await request(app)
+        .post(`/api/messaging/${conversation!._id}/messages`)
+        .set('Authorization', `Bearer ${generateAccessToken(bob)}`)
+        .field('content', 'Regarde')
+        .attach('attachments', Buffer.from('<script>alert(1)</script>'), {
+          filename: 'piege.html',
+          contentType: 'image/png'
+        });
+
+      expect(res.status).toBe(201);
+      const sent = await Message.findOne({ content: 'Regarde' });
+      const [stored] = sent!.attachments as string[];
+      try {
+        expect(stored).toMatch(/^[0-9a-f]{32}\.png$/);
+      } finally {
+        fs.rmSync(path.join(path.dirname(attachmentPath()), stored), { force: true });
+      }
+    });
+
     it('refuse un nom de pièce jointe non rattaché au message', async () => {
       const { alice, message } = await seedConversation();
       const token = generateAccessToken(alice);

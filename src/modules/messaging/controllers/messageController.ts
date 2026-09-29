@@ -1,3 +1,4 @@
+import path from 'path';
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { mapHttpError } from '../../../commons/utils/httpErrorMapper';
@@ -11,6 +12,31 @@ import {
 } from '../services/messageOperationsService';
 
 export { upload } from '../middleware/messageUploadConfig';
+
+/**
+ * Types affichables dans le navigateur. Les pièces jointes envoyées avant que
+ * l'extension ne soit déduite du type MIME peuvent porter n'importe quelle
+ * extension (`.html`, `.svg`…) : elles partent en téléchargement binaire.
+ */
+const INLINE_ATTACHMENT_TYPES = new Map([
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.png', 'image/png'],
+  ['.gif', 'image/gif'],
+  ['.pdf', 'application/pdf']
+]);
+
+function setAttachmentHeaders(res: Response, fileName: string): void {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  const inlineType = INLINE_ATTACHMENT_TYPES.get(path.extname(fileName).toLowerCase());
+  if (inlineType) {
+    res.type(inlineType);
+  } else {
+    // `sendFile` ne remplace pas un Content-Type déjà posé.
+    res.type('application/octet-stream');
+    res.attachment();
+  }
+}
 
 /**
  * Envoie un nouveau message dans une conversation
@@ -130,6 +156,7 @@ export const getMessageAttachment = asyncHandler(async (req: Request, res: Respo
       attachmentName
     });
 
+    setAttachmentHeaders(res, filePath);
     return res.sendFile(filePath);
   } catch (error: any) {
     const mapped = mapHttpError(res, error);

@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import * as identityVerificationController from './controllers/identityVerificationController';
+import { sanitizedMulter } from '../../commons/middlewares/sanitizedMulter';
 // requireAdmin vérifie le rôle en base : un admin rétrogradé perd l'accès tout
 // de suite, pas à l'expiration de son JWT (roleMiddleware lisait le JWT).
 import { authenticateJWT, requireAdmin } from '../../commons/middlewares/authMiddleware';
@@ -9,7 +10,7 @@ const router = express.Router();
 
 // Configuration de Multer pour stocker temporairement en mémoire
 const storage = multer.memoryStorage();
-const upload = multer({ 
+const upload = sanitizedMulter({
   storage,
   limits: {
     fileSize: 5 * 1024 * 1024 // limite à 5MB

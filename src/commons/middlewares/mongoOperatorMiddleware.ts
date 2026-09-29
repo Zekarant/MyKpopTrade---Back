@@ -25,8 +25,8 @@ export function stripMongoOperators(value: unknown): void {
 /**
  * Protège contre l'injection d'opérateurs NoSQL via le corps JSON/urlencoded.
  * `req.query` n'est pas concerné : le parser "simple" d'Express 5 ne produit
- * que des chaînes ou tableaux de chaînes. Les corps multipart (multer) sont
- * parsés plus tard, dans les routes, et ne passent pas par ici.
+ * que des chaînes ou tableaux de chaînes. Les corps multipart sont parsés plus
+ * tard, dans les routes : ils sont nettoyés par `sanitizedMulter`.
  */
 export const stripMongoOperatorsFromBody =(req: Request, _res: Response, next: NextFunction): void => {
   stripMongoOperators(req.body);
