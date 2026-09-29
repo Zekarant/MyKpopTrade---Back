@@ -11,6 +11,7 @@ import { EncryptionService } from '../../../commons/utils/encryptionService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import env from '../../../config/env';
+import { consumeTwoFactorAttempt } from './twoFactorAttemptLimiter';
 
 /**
  * Double authentification par TOTP (RFC 6238).
@@ -189,6 +190,8 @@ export async function verifyTwoFactorCode(
   if (!isTwoFactorEnabled(user) || !user.twoFactor?.secret) {
     throw new HttpError(409, 'La double authentification n\'est pas activée sur ce compte.');
   }
+
+  await consumeTwoFactorAttempt(userId);
 
   const submitted = code.trim().toUpperCase();
 

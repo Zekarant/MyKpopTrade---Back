@@ -188,6 +188,40 @@ describe('twoFactorService (integration)', () => {
     });
   });
 
+  describe('plafond de tentatives par compte', () => {
+    it('bloque le compte après 10 codes, même si le suivant est bon', async () => {
+      const user = await createTestUser();
+      const { recoveryCodes } = await enableTwoFactorFor(user._id.toString());
+
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await expect(verifyTwoFactorCode(user._id.toString(), '000000')).rejects.toMatchObject({
+          statusCode: 401
+        });
+      }
+
+      await expect(verifyTwoFactorCode(user._id.toString(), recoveryCodes[0])).rejects.toMatchObject({
+        statusCode: 429
+      });
+      // Le code de secours n'a pas été consommé par la tentative bloquée.
+      const status = await getTwoFactorStatus(user._id.toString());
+      expect(status.remainingRecoveryCodes).toBe(8);
+    });
+
+    it('compte les tentatives de chaque compte séparément', async () => {
+      const victim = await createTestUser();
+      const other = await createTestUser();
+      await enableTwoFactorFor(victim._id.toString());
+      const { recoveryCodes } = await enableTwoFactorFor(other._id.toString());
+
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await expect(verifyTwoFactorCode(victim._id.toString(), '000000')).rejects.toThrow(HttpError);
+      }
+
+      const result = await verifyTwoFactorCode(other._id.toString(), recoveryCodes[0]);
+      expect(result.usedRecoveryCode).toBe(true);
+    });
+  });
+
   describe('codes de secours', () => {
     it('accepte un code de secours et le consomme définitivement', async () => {
       const user = await createTestUser();
