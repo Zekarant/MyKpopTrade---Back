@@ -17,13 +17,14 @@ import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { CSV_EXPORT_ROW_LIMIT, sendCsvDownload, wantsCsv } from '../../../commons/utils/csv';
 import { clampLimit } from '../../../commons/utils/pagination';
+import { queryInt, queryString } from '../../../commons/utils/query';
 
 /** Code MongoDB d'une violation d'index unique. */
 const DUPLICATE_KEY_ERROR = 11000;
 
 function pagination(req: Request, defaultLimit: number, maxLimit: number) {
   return {
-    page: Math.max(1, parseInt(req.query.page as string) || 1),
+    page: Math.max(1, queryInt(req.query.page) || 1),
     limit: clampLimit(req.query.limit, defaultLimit, maxLimit)
   };
 }
@@ -205,7 +206,7 @@ export const createReport = asyncHandler(async (req: Request, res: Response) => 
 export const getUserReports = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const { page, limit } = pagination(req, 10, 50);
-  const status = req.query.status as string;
+  const status = queryString(req.query.status);
   
   // Construire le filtre
   const filter: mongoose.QueryFilter<IReport> = { reporter: userId };
@@ -281,8 +282,8 @@ export const checkUserReport = asyncHandler(async (req: Request, res: Response) 
  */
 export const getAllReports = asyncHandler(async (req: Request, res: Response) => {
   const { page, limit } = pagination(req, 20, 100);
-  const status = req.query.status as string;
-  const targetType = req.query.targetType as string;
+  const status = queryString(req.query.status);
+  const targetType = queryString(req.query.targetType);
   
   // Construire le filtre
   const filter: mongoose.QueryFilter<IReport> = {};

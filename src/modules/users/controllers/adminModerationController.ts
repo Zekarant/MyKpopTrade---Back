@@ -7,15 +7,16 @@ import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { queryInt, queryString } from '../../../commons/utils/query';
 
 /**
  * Lister tous les posts (admin) avec filtres
  */
 export const getAdminPosts = asyncHandler(async (req: Request, res: Response) => {
-  const page = parseInt(req.query.page as string) || 1;
+  const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
-  const search = req.query.search as string;
-  const type = req.query.type as string; // 'post' | 'reply' | 'all'
+  const search = queryString(req.query.search);
+  const type = queryString(req.query.type); // 'post' | 'reply' | 'all'
 
   const filter: mongoose.QueryFilter<IPost> = {};
 
@@ -117,9 +118,9 @@ export const adminDeletePost = asyncHandler(async (req: Request, res: Response) 
  * Récupérer les logs d'audit
  */
 export const getAuditLogs = asyncHandler(async (req: Request, res: Response) => {
-  const page = parseInt(req.query.page as string) || 1;
+  const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 30, MAX_PAGE_SIZE);
-  const targetType = req.query.targetType as string;
+  const targetType = queryString(req.query.targetType);
 
   const filter: mongoose.QueryFilter<IAuditLog> = {};
   if (targetType && ['user', 'product', 'post', 'report', 'verification', 'system', 'dispute', 'payment'].includes(targetType)) {

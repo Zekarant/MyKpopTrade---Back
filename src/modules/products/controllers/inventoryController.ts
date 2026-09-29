@@ -8,6 +8,7 @@ import {
   fetchProductStats
 } from '../services/inventoryService';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { queryInt, queryString } from '../../../commons/utils/query';
 
 /**
  * Récupérer l'inventaire d'un utilisateur (produits en vente)
@@ -15,9 +16,9 @@ import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 export const getUserInventory = asyncHandler(async (req: Request, res: Response) => {
   const sellerId = (req.params.userId || req.user!.id) as string;
   const viewerId = req.user?.id;
-  const page = parseInt(req.query.page as string) || 1;
+  const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
-  const status = (req.query.status as string) || 'available';
+  const status = queryString(req.query.status) || 'available';
 
   const result = await fetchUserInventory({ sellerId, viewerId, status, page, limit });
   return res.status(200).json(result);
@@ -28,7 +29,7 @@ export const getUserInventory = asyncHandler(async (req: Request, res: Response)
  */
 export const getUserFavorites = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const page = parseInt(req.query.page as string) || 1;
+  const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
   const result = await fetchUserFavorites(userId, page, limit);

@@ -4,13 +4,14 @@ import TransactionProof, { ITransactionProof } from '../../../models/transaction
 import User from '../../../models/userModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { queryInt } from '../../../commons/utils/query';
 
 /**
  * Récupérer les preuves de transaction d'un utilisateur
  */
 export const getUserProofs = asyncHandler(async (req: Request, res: Response) => {
   const { userId } = req.params;
-  const page = parseInt(req.query.page as string) || 1;
+  const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 10, MAX_PAGE_SIZE);
   
   const filter: QueryFilter<ITransactionProof> = {

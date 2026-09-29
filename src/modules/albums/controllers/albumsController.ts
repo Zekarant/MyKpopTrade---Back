@@ -49,6 +49,8 @@ export const getAlbums = asyncHandler(async (req: Request, res: Response) => {
     const result = await listAlbums(req.query);
     return res.status(200).json(result);
   } catch (error) {
+    const mapped = mapHttpError(res, error);
+    if (mapped) return mapped;
     logger.error('Erreur lors de la récupération des albums', {
       error: error instanceof Error ? error.message : 'Erreur inconnue'
     });

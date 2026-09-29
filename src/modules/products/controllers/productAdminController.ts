@@ -10,6 +10,7 @@ import { NotificationService } from '../../notifications/services/notificationSe
 import logger from '../../../commons/utils/logger';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { queryInt, queryString } from '../../../commons/utils/query';
 
 const productStatusLabel = (
   product: Pick<IProduct, 'isSold' | 'isReserved' | 'isAvailable' | 'moderationFlag'>
@@ -24,11 +25,11 @@ const productStatusLabel = (
  * Liste tous les produits avec pagination et filtrage (admin)
  */
 export const getAllProducts = asyncHandler(async (req: Request, res: Response) => {
-  const page = parseInt(req.query.page as string) || 1;
+  const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
-  const search = req.query.search as string;
-  const status = req.query.status as string;
-  const type = req.query.type as string;
+  const search = queryString(req.query.search);
+  const status = queryString(req.query.status);
+  const type = queryString(req.query.type);
 
   const filter: mongoose.QueryFilter<IProduct> = {};
 

@@ -27,6 +27,8 @@ import {
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { queryInt, queryString } from '../../../commons/utils/query';
 
 function devErrorDetails(error: unknown) {
   return process.env.NODE_ENV === 'development'
@@ -487,18 +489,13 @@ export const refundPayment = asyncHandler(async (req: Request, res: Response) =>
  */
 export const getMyPayments = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const { role = 'all', status, page = 1, limit = 10 } = req.query;
-
   try {
-    const pageNum = parseInt(String(page), 10) || 1;
-    const limitNum = parseInt(String(limit), 10) || 10;
-
     const { data, pagination } = await listUserPayments(
       userId,
-      role as string,
-      status as string | undefined,
-      pageNum,
-      limitNum
+      queryString(req.query.role) || 'all',
+      queryString(req.query.status),
+      queryInt(req.query.page) || 1,
+      clampLimit(req.query.limit, 10, MAX_PAGE_SIZE)
     );
 
     return res.status(200).json({

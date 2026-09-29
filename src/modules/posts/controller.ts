@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import Post, { IPost } from './model';
 import { asyncHandler } from '../../commons/middlewares/errorMiddleware';
 import { clampLimit } from '../../commons/utils/pagination';
+import { queryInt } from '../../commons/utils/query';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
@@ -11,7 +12,7 @@ const AUTHOR_FIELDS = 'username profilePicture isIdentityVerified';
 
 function pagination(req: Request) {
   return {
-    page: Math.max(1, parseInt(req.query.page as string) || 1),
+    page: Math.max(1, queryInt(req.query.page) || 1),
     limit: clampLimit(req.query.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
   };
 }

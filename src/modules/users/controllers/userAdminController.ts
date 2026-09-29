@@ -17,16 +17,17 @@ import { CSV_EXPORT_ROW_LIMIT, sendCsvDownload, wantsCsv } from '../../../common
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { reactivateUser, suspendUser } from '../services/userSanctionService';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { queryInt, queryString } from '../../../commons/utils/query';
 
 /**
  * Liste tous les utilisateurs avec pagination et filtrage (admin)
  */
 export const getUsers = asyncHandler(async (req: Request, res: Response) => {
-  const page = parseInt(req.query.page as string) || 1;
+  const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
-  const search = req.query.search as string;
-  const role = req.query.role as string;
-  const status = req.query.status as string;
+  const search = queryString(req.query.search);
+  const role = queryString(req.query.role);
+  const status = queryString(req.query.status);
 
   const filter: mongoose.QueryFilter<IUser> = {};
 

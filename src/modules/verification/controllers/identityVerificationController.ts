@@ -11,6 +11,7 @@ import {
   getVerificationDocumentForAdmin
 } from '../services/identityVerificationService';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { queryInt } from '../../../commons/utils/query';
 
 /**
  * Soumettre une demande de vérification d'identité
@@ -99,7 +100,7 @@ export const rejectVerification = asyncHandler(async (req: Request, res: Respons
  */
 export const getPendingVerifications = asyncHandler(async (req: Request, res: Response) => {
   const adminId = req.user!.id;
-  const page = parseInt(req.query.page as string) || 1;
+  const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
   try {

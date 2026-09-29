@@ -3,13 +3,14 @@ import { Request, Response } from 'express';
 import followService, { FollowTargetNotFoundError } from './service';
 import { clampLimit } from '../../commons/utils/pagination';
 import logger from '../../commons/utils/logger';
+import { queryInt } from '../../commons/utils/query';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
 
 function pagination(req: Request) {
   return {
-    page: Math.max(1, parseInt(req.query.page as string) || 1),
+    page: Math.max(1, queryInt(req.query.page) || 1),
     limit: clampLimit(req.query.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
   };
 }

@@ -14,6 +14,7 @@ import {
 import logger from '../../../commons/utils/logger';
 import User from '../../../models/userModel';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { queryInt, queryString } from '../../../commons/utils/query';
 
 function replyHttpError(res: Response, error: HttpError) {
   return res.status(error.statusCode).json({
@@ -47,7 +48,7 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
 /** GET /api/disputes/me — Liste paginée des litiges où l'utilisateur est partie. */
 export const listMine = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const page = parseInt(req.query.page as string) || 1;
+  const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 10, MAX_PAGE_SIZE);
   const result = await listMyDisputes(userId, page, limit);
   return res.status(200).json({ success: true, ...result });
@@ -101,8 +102,8 @@ export const cancel = asyncHandler(async (req: Request, res: Response) => {
 
 /** GET /api/disputes — Admin : liste tous les litiges, filtrable par status. */
 export const adminList = asyncHandler(async (req: Request, res: Response) => {
-  const status = req.query.status as string | undefined;
-  const page = parseInt(req.query.page as string) || 1;
+  const status = queryString(req.query.status);
+  const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
   const result = await listAllDisputes({ status, page, limit });
   return res.status(200).json({ success: true, ...result });

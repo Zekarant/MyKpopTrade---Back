@@ -11,6 +11,7 @@ import {
   type FollowedGroupSummary
 } from '../services/groupFollowService';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { queryInt } from '../../../commons/utils/query';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -141,7 +142,7 @@ export const getFollowStatus = asyncHandler(async (req: AuthenticatedRequest, re
  */
 export const getUserFollowedGroups = asyncHandler(async (req: AuthenticatedRequest, res: Response<UserFollowedGroupsResponse>) => {
   const userId = req.user?.id;
-  const page = parseInt(req.query.page as string) || 1;
+  const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
   if (!userId) {
@@ -182,7 +183,7 @@ export const getUserFollowedGroups = asyncHandler(async (req: AuthenticatedReque
  */
 export const getGroupFollowers = asyncHandler(async (req: Request, res: Response) => {
   const groupId = req.params.groupId as string;
-  const page = parseInt(req.query.page as string) || 1;
+  const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
   try {

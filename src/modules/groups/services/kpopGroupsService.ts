@@ -6,6 +6,7 @@ import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import { clampLimit } from '../../../commons/utils/pagination';
+import { queryInt, queryString } from '../../../commons/utils/query';
 
 const CATALOG_MAX_LIMIT = 2000;
 
@@ -39,28 +40,31 @@ export async function createGroup(groupData: Record<string, unknown>) {
 }
 
 export async function listGroups(query: Record<string, unknown>) {
-  const page = parseInt((query.page as string) || '1');
+  const page = queryInt(query.page) || 1;
   // Le panneau admin K-pop charge jusqu'à 2000 groupes d'un coup.
   const limit = clampLimit(query.limit, 20, CATALOG_MAX_LIMIT);
-  const sortBy = (query.sortBy as string) || 'name';
+  const sortBy = queryString(query.sortBy) || 'name';
   const sortOrder = query.sortOrder === 'desc' ? -1 : 1;
 
-  // Le modèle n'a pas de champ `description` : la condition de recherche sur ce champ ne trouve rien, conservée telle quelle.
-  const filters: mongoose.QueryFilter<IKpopGroup & { description?: string }> = {};
+  const filters: mongoose.QueryFilter<IKpopGroup> = {};
 
-  if (query.genre) {
-    filters.genres = { $in: [query.genre as string] };
+  const genre = queryString(query.genre);
+  const tag = queryString(query.tag);
+  const search = queryString(query.search);
+  if (genre) {
+    filters.genres = { $in: [genre] };
   }
 
-  if (query.tag) {
-    filters.tags = { $in: [query.tag as string] };
+  if (tag) {
+    filters.tags = { $in: [tag] };
   }
 
-  if (query.search) {
-    const pattern = escapeRegex(String(query.search));
+  if (search) {
+    const searchRegex = new RegExp(escapeRegex(search), 'i');
     filters.$or = [
-      { name: { $regex: pattern, $options: 'i' } },
-      { description: { $regex: pattern, $options: 'i' } }
+      { name: { $regex: searchRegex } },
+      { tags: { $elemMatch: { $regex: searchRegex } } },
+      { genres: { $elemMatch: { $regex: searchRegex } } }
     ];
   }
 

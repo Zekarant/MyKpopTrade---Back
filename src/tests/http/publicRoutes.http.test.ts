@@ -81,6 +81,34 @@ describe('HTTP — routes publiques (via supertest)', () => {
     });
   });
 
+  describe('paramètres de query', () => {
+    it('ignore un filtre répété sur la liste des produits (répondait 500)', async () => {
+      const seller = await createTestUser();
+      await createTestProduct(seller._id, { condition: 'likeNew' });
+
+      const res = await request(app).get('/api/products?condition=likeNew&condition=new&search=a&search=b');
+
+      expect(res.status).toBe(200);
+      expect(res.body.products).toHaveLength(1);
+    });
+
+    it('refuse un identifiant d\'artiste invalide sur la liste des albums', async () => {
+      const res = await request(app).get('/api/albums?artistId=pas-un-id');
+
+      expect(res.status).toBe(400);
+    });
+
+    it('cherche les groupes par nom, tag ou genre', async () => {
+      await KpopGroup.create({ name: 'Stray Kids', tags: ['boy group'], isActive: true });
+      await KpopGroup.create({ name: 'IVE', tags: ['girl group'], isActive: true });
+
+      const res = await request(app).get('/api/groups?search=boy');
+
+      expect(res.status).toBe(200);
+      expect(res.body.groups.map((g: { name: string }) => g.name)).toEqual(['Stray Kids']);
+    });
+  });
+
   describe('routes retirées', () => {
     it('n\'expose plus le changement d\'email PayPal sans mot de passe (/api/accounts)', async () => {
       const user = await createTestUser();

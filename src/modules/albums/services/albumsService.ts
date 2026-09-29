@@ -7,6 +7,7 @@ import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import { clampLimit } from '../../../commons/utils/pagination';
+import { queryInt, queryString } from '../../../commons/utils/query';
 
 const CATALOG_MAX_LIMIT = 2000;
 
@@ -26,7 +27,6 @@ export async function createAlbumForGroup(albumData: AlbumInput) {
   }
 
   albumData.artistName = group.name;
-  albumData.discoverySource = albumData.discoverySource;
   albumData.lastScraped = new Date();
 
   const album = new Album(albumData);
@@ -45,38 +45,43 @@ export async function createAlbumForGroup(albumData: AlbumInput) {
 }
 
 export async function listAlbums(query: Request['query']) {
-  const page = parseInt(query.page as string) || 1;
+  const page = queryInt(query.page) || 1;
   // Le panneau admin K-pop charge jusqu'à 2000 albums d'un coup.
   const limit = clampLimit(query.limit, 20, CATALOG_MAX_LIMIT);
-  const sortBy = query.sortBy as string || 'releaseDate';
+  const sortBy = queryString(query.sortBy) || 'releaseDate';
   const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
 
   const filters: mongoose.QueryFilter<IKpopAlbum> = {};
 
-  if (query.artistId) {
-    // Transmis tel quel : Mongoose caste la valeur de la query en ObjectId.
-    filters.artistId = query.artistId as string;
+  const artistId = queryString(query.artistId);
+  if (artistId) {
+    if (!mongoose.Types.ObjectId.isValid(artistId)) {
+      throw new HttpError(400, 'ID d\'artiste invalide');
+    }
+    filters.artistId = artistId;
   }
 
-  if (query.artistName) {
-    filters.artistName = { $regex: escapeRegex(String(query.artistName)), $options: 'i' };
+  const artistName = queryString(query.artistName);
+  if (artistName) {
+    filters.artistName = { $regex: escapeRegex(artistName), $options: 'i' };
   }
 
-  if (query.search) {
-    const pattern = escapeRegex(String(query.search));
+  const search = queryString(query.search);
+  if (search) {
+    const pattern = escapeRegex(search);
     filters.$or = [
       { name: { $regex: pattern, $options: 'i' } },
       { artistName: { $regex: pattern, $options: 'i' } }
     ];
   }
 
-  if (query.minTracks) {
-    const minTracks = parseInt(query.minTracks as string);
+  const minTracks = queryInt(query.minTracks);
+  if (!isNaN(minTracks)) {
     filters.totalTracks = { $gte: minTracks };
   }
 
-  if (query.year) {
-    const year = parseInt(query.year as string);
+  const year = queryInt(query.year);
+  if (!isNaN(year)) {
     filters.releaseDate = {
       $gte: new Date(`${year}-01-01`),
       $lt: new Date(`${year + 1}-01-01`)

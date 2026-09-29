@@ -7,6 +7,7 @@ import KpopGroup from '../../../models/kpopGroupModel';
 import KpopAlbum from '../../../models/albumModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import { clampLimit } from '../../../commons/utils/pagination';
+import { queryInt, queryString } from '../../../commons/utils/query';
 import { validateProductData } from './productValidationService';
 import { notifyWishlistPriceDrop, notifyWishlistUnavailable } from './wishlistAlertService';
 import { dispatchProductModeration } from './productModerationService';
@@ -241,39 +242,44 @@ export async function fetchProductById(productId: string, userId?: string) {
 }
 
 export async function listProducts(query: Record<string, unknown>) {
-  const page = parseInt(query.page as string) || DEFAULT_LIST_PAGE;
+  const page = queryInt(query.page) || DEFAULT_LIST_PAGE;
   const limit = clampLimit(query.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
-  const sort = query.sort || DEFAULT_LIST_SORT;
+  const sort = queryString(query.sort) || DEFAULT_LIST_SORT;
 
   const filter: mongoose.QueryFilter<IProduct> = { isAvailable: true };
 
-  if (query.seller) filter.seller = query.seller as string;
-  if (query.type) filter.type = query.type as IProduct['type'];
-  if (query.kpopGroup) filter.kpopGroup = query.kpopGroup as string;
-  if (query.kpopMember) filter.kpopMember = query.kpopMember as string;
+  const seller = queryString(query.seller);
+  const type = queryString(query.type);
+  const kpopGroup = queryString(query.kpopGroup);
+  const kpopMember = queryString(query.kpopMember);
+  if (seller) filter.seller = seller;
+  if (type) filter.type = type as IProduct['type'];
+  if (kpopGroup) filter.kpopGroup = kpopGroup;
+  if (kpopMember) filter.kpopMember = kpopMember;
 
-  if (query.minPrice || query.maxPrice) {
+  const minPrice = parseFloat(queryString(query.minPrice) ?? '');
+  const maxPrice = parseFloat(queryString(query.maxPrice) ?? '');
+  if (!isNaN(minPrice) || !isNaN(maxPrice)) {
     const price: { $gte?: number; $lte?: number } = {};
     filter.price = price;
-    if (query.minPrice) price.$gte = parseFloat(query.minPrice as string);
-    if (query.maxPrice) price.$lte = parseFloat(query.maxPrice as string);
+    if (!isNaN(minPrice)) price.$gte = minPrice;
+    if (!isNaN(maxPrice)) price.$lte = maxPrice;
   }
 
-  if (query.condition) {
-    const conditions = (query.condition as string).split(',');
-    if (conditions.length > 0) {
-      filter.condition = { $in: conditions as IProduct['condition'][] };
-    }
+  const condition = queryString(query.condition);
+  if (condition) {
+    filter.condition = { $in: condition.split(',') as IProduct['condition'][] };
   }
 
-  if (query.search) {
-    filter.$text = { $search: query.search as string };
+  const search = queryString(query.search);
+  if (search) {
+    filter.$text = { $search: search };
   }
 
   const [products, total] = await Promise.all([
     Product.find(filter)
       .populate('seller', 'username profilePicture isIdentityVerified')
-      .sort(sort as string)
+      .sort(sort)
       .skip((page - 1) * limit)
       .limit(limit),
     Product.countDocuments(filter)
