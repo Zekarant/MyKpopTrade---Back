@@ -44,9 +44,7 @@ if (process.env.NODE_ENV !== 'production') {
   );
 } else {
   // En production, rotation des logs. L'import de 'winston-daily-rotate-file'
-  // (en tête de fichier) enregistre le transport sur winston.transports ; le
-  // module exporte la classe elle-même, un `{ DailyRotateFile }` destructuré
-  // valait undefined et faisait planter le démarrage en production.
+  // enregistre le transport sur winston.transports.
   transports.push(
     new winston.transports.DailyRotateFile({
       filename: path.join(logDir, '%DATE%-app.log'),
@@ -90,7 +88,6 @@ const SENSITIVE_EXACT_FIELDS = new Set([
   'streetLine2',
   'postalCode',
   'city',
-  // Contenu des messages privés entre membres.
   'content',
   'iban',
   'bic',
@@ -101,9 +98,8 @@ const isSensitiveKey = (key: string): boolean =>
   SENSITIVE_EXACT_FIELDS.has(key) || SENSITIVE_PATTERNS.some(pattern => pattern.test(key));
 
 /**
- * Jetons transportés dans une URL (lien de réinitialisation ou de vérification,
- * `?token=` des pièces jointes) : ils apparaissent dans `url` et dans le texte
- * des messages de log, pas seulement sous une clé nommée « token ».
+ * Jetons transportés dans une URL : ils apparaissent dans `url` et dans le texte
+ * des logs, pas seulement sous une clé nommée « token ».
  */
 const maskUrlSecrets = (value: string): string =>
   value

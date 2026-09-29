@@ -43,7 +43,6 @@ export function createApp(): express.Express {
   // req.ip doit refléter l'IP réelle du client : le rate limiting par IP en dépend.
   // 0 en local, 1 derrière un unique reverse proxy (nginx, Heroku, Render...).
   app.set('trust proxy', env.TRUST_PROXY);
-  // Ne pas annoncer la pile technique aux scanners.
   app.disable('x-powered-by');
   app.use(securityHeaders);
 
@@ -100,8 +99,6 @@ export function createApp(): express.Express {
   // GET /api/messaging/messages/:messageId/attachments/:attachment.
   //
   // Seuls les dossiers dont le contenu est public par nature sont servis ici.
-  // (nosniff, posé par securityHeaders, empêche d'interpréter un fichier
-  // uploadé comme du HTML ou du script.)
   const PUBLIC_UPLOAD_DIRS = ['products', 'profiles', 'banners', 'ratings'];
   for (const dir of PUBLIC_UPLOAD_DIRS) {
     app.use(`/uploads/${dir}`, express.static(path.join(__dirname, '../uploads', dir)));

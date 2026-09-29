@@ -146,10 +146,8 @@ export async function fetchAlbumsByGroup(groupId: string) {
     return { albums: [], empty: true };
   }
 
-  // Une seule agrégation au lieu d'un comptage par album : les annonces en
-  // ligne sont regroupées par (groupe, album), puis chaque album additionne les
-  // paires qui le concernent — même règle qu'avant : même nom d'album OU même
-  // groupe.
+  // Une seule agrégation par (groupe, album) ; un album compte les annonces de
+  // même nom d'album OU de même groupe.
   const names = [...new Set(albums.map((album) => album.name))];
   const artists = [...new Set(albums.map((album) => album.artistName))];
   const pairs = await Product.aggregate<{ _id: { kpopGroup?: string; albumName?: string }; count: number }>([

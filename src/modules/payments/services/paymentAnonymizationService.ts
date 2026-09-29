@@ -14,8 +14,6 @@ const CLOSED_PAYMENT_FILTER = {
 /**
  * Efface les données personnelles d'un paiement en gardant ce que la
  * comptabilité exige (montants, dates, statut, références PayPal).
- * L'ancien code écrivait `paypalEmail` / `buyerDetails`, absents du schéma
- * (ignorés par Mongoose), et laissait l'adresse et le téléphone de livraison.
  */
 function erasePersonalData(payment: any): void {
   payment.ipAddress = '0.0.0.0';

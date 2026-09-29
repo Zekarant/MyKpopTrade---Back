@@ -3,9 +3,8 @@ import { eraseAccountsDueForDeletion } from '../../modules/users/services/accoun
 import logger from '../utils/logger';
 
 /**
- * Chaque nuit à 3h30 : efface les comptes dont la suppression demandée arrive
- * au terme du délai de 30 jours. La politique de confidentialité le promet ;
- * sans cette tâche, rien ne se passait tant qu'un admin n'intervenait pas.
+ * Chaque nuit à 3h30 : efface les comptes arrivés au terme du délai de
+ * suppression de 30 jours promis par la politique de confidentialité.
  */
 export const startAccountDeletionTask = () => {
   cron.schedule('30 3 * * *', async () => {

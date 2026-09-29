@@ -35,11 +35,8 @@ type CartProduct = { _id: { toString(): string }; title?: string; seller: { toSt
  * Checkout multi-seller : groupe les items du panier par vendeur,
  * crée un paiement PayPal par produit, et renvoie les URLs d'approbation.
  *
- * Tout ou rien : chaque paiement réserve son produit. Un échec au milieu
- * laissait les produits précédents réservés sans que l'acheteur reçoive leurs
- * liens de paiement — bloqués pour tout le monde. Les vendeurs sont donc tous
- * vérifiés avant de créer le moindre paiement, et un échec annule ceux déjà
- * créés pendant ce passage.
+ * Tout ou rien : chaque paiement réserve son produit, donc les vendeurs sont
+ * tous vérifiés avant le premier paiement et un échec annule ceux déjà créés.
  */
 export async function checkoutCart(
   userId: string,

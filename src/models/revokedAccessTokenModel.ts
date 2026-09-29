@@ -1,11 +1,8 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 /**
- * Jeton d'accès révoqué avant son expiration (déconnexion).
- *
- * En base plutôt qu'en mémoire : une liste en mémoire se vidait à chaque
- * redémarrage et n'était pas partagée entre plusieurs instances de l'API, ce
- * qui rendait un jeton « déconnecté » de nouveau utilisable.
+ * Jeton d'accès révoqué avant son expiration (déconnexion). En base plutôt qu'en
+ * mémoire : la révocation survit aux redémarrages et vaut pour toutes les instances.
  */
 export interface IRevokedAccessToken extends Document {
   /** Empreinte SHA-256 du jeton. */

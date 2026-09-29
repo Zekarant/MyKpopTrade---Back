@@ -135,10 +135,8 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
   try {
     const { refreshToken } = req.body;
 
-    // Le jeton d'accès reste signé jusqu'à son expiration : on le révoque.
-    // La route n'exige pas de session valide (un jeton d'accès expiré ne doit
-    // pas empêcher d'invalider le refresh token), d'où la vérification ici :
-    // seul un jeton authentique et encore valide mérite d'être révoqué.
+    // La route n'exige pas de session (un jeton d'accès expiré ne doit pas
+    // bloquer la déconnexion) : seul un jeton authentique et valide est révoqué.
     const accessToken = req.headers.authorization?.split(' ')[1];
     if (accessToken && isValidAccessToken(accessToken)) {
       await revokeAccessToken(accessToken);

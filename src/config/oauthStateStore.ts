@@ -4,7 +4,6 @@ import { Request } from 'express';
 /** Cookie qui lie un parcours OAuth au navigateur qui l'a lancé. */
 export const OAUTH_STATE_COOKIE = 'oauth_state';
 
-/** Le cookie n'est envoyé qu'aux routes OAuth. */
 const COOKIE_PATH = '/api/auth';
 
 /** Délai laissé pour consentir chez le fournisseur. */
@@ -20,9 +19,8 @@ interface EncodedState extends OAuthAppState {
 }
 
 /**
- * Décode le `state` renvoyé par le fournisseur, sans le vérifier : la
- * vérification (nonce ↔ cookie) est faite par `CookieStateStore.verify`, que
- * passport exécute avant d'accepter le code d'autorisation.
+ * Décode le `state` renvoyé par le fournisseur, sans le vérifier : passport
+ * exécute `CookieStateStore.verify` avant d'accepter le code d'autorisation.
  */
 export function readOAuthState(raw: unknown): EncodedState | null {
   if (typeof raw !== 'string' || raw === '') return null;
@@ -61,17 +59,9 @@ type StoreCallback = (error: Error | null, state?: string) => void;
 type VerifyCallback = (error: Error | null, ok: boolean, state?: OAuthAppState | { message: string }) => void;
 
 /**
- * Magasin de `state` OAuth sans session serveur (l'API n'en a pas).
- *
- * Sans `state` lié au navigateur, un attaquant pouvait faire aboutir chez une
- * victime un parcours qu'il avait lui-même lancé : la victime se retrouvait
- * connectée au compte de l'attaquant, ou son compte Google/Discord lié à
- * celui-ci, et y saisissait ensuite adresse et informations de paiement.
- *
- * Le nonce part à la fois dans le `state` et dans un cookie HttpOnly
- * `SameSite=Lax` (envoyé lors du retour du fournisseur, qui est une
- * navigation de premier niveau). Au retour, les deux doivent correspondre ;
- * le cookie est à usage unique.
+ * Magasin de `state` OAuth sans session serveur : le nonce part dans le `state`
+ * et dans un cookie HttpOnly `SameSite=Lax` à usage unique, qui doivent
+ * correspondre au retour (empêche la CSRF de connexion ou de liaison de compte).
  *
  * passport-oauth2 n'utilise ce magasin que si l'option `state` n'est PAS une
  * chaîne : les routes passent donc un objet (`{ linkToken }`) ou rien.

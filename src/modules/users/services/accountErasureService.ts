@@ -21,8 +21,6 @@ export const deletedUsernameFor = (userId: string): string => `deleted_${userId.
 /**
  * Efface les données personnelles portées par le document utilisateur.
  * Partagé par l'effacement complet et l'anonymisation « compte conservé ».
- * Les anciennes implémentations (4 variantes) gardaient au passage l'email
- * complet, le nom, l'adresse, le téléphone et les identités sociales.
  */
 export function erasePersonalFields(user: IUser, pseudonym: string): void {
   user.username = pseudonym;
@@ -65,7 +63,7 @@ export function erasePersonalFields(user: IUser, pseudonym: string): void {
  * - les paiements restent pour la comptabilité, anonymisés quand ils sont clos.
  *
  * Point d'entrée unique : suppression par l'utilisateur, confirmation admin,
- * anonymisation admin et échéance des 30 jours (accountDeletionTask).
+ * anonymisation admin et échéance des 30 jours.
  */
 export async function eraseUserAccount(userId: string): Promise<{ pseudonym: string }> {
   const user = await User.findById(userId);

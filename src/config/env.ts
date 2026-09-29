@@ -44,7 +44,6 @@ const envSchema = z.object({
   // fait déjà `Boolean(...)` dessus, donc '' est traité comme "absent" en aval.
   ADMIN_DISCORD_WEBHOOK_URL: z.union([z.string().url(), z.literal('')]).optional(),
   // Canal des messages du formulaire de contact. Absent : repli sur le webhook admin.
-  // Auparavant exposé dans le bundle du front (VITE_DISCORD_WEBHOOK_URL).
   SUPPORT_DISCORD_WEBHOOK_URL: z.union([z.string().url(), z.literal('')]).optional(),
 
   // Analyse IA (Mistral La Plateforme) : pré-diagnostic de litiges, modération

@@ -1,10 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 
 /**
- * Supprime récursivement les clés commençant par `$` d'un objet.
- * Aucun formulaire légitime n'envoie de telles clés ; elles ne servent qu'à
- * glisser un opérateur Mongo (`{"$ne": null}`, `{"$regex": "^a"}`) dans un
- * champ que le code utilise ensuite comme valeur de filtre.
+ * Supprime récursivement les clés commençant par `$` : aucun formulaire légitime
+ * n'en envoie, elles ne servent qu'à glisser un opérateur Mongo dans un filtre.
  */
 export function stripMongoOperators(value: unknown): void {
   if (Array.isArray(value)) {
@@ -24,9 +22,8 @@ export function stripMongoOperators(value: unknown): void {
 
 /**
  * Protège contre l'injection d'opérateurs NoSQL via le corps JSON/urlencoded.
- * `req.query` n'est pas concerné : le parser "simple" d'Express 5 ne produit
- * que des chaînes ou tableaux de chaînes. Les corps multipart sont parsés plus
- * tard, dans les routes : ils sont nettoyés par `sanitizedMulter`.
+ * `req.query` n'est pas concerné : le parser "simple" d'Express 5 ne produit que
+ * des chaînes. Les corps multipart sont nettoyés par `sanitizedMulter`.
  */
 export const stripMongoOperatorsFromBody =(req: Request, _res: Response, next: NextFunction): void => {
   stripMongoOperators(req.body);

@@ -14,7 +14,6 @@ const client = smsEnabled && accountSid && authToken ?
   twilio(accountSid, authToken) :
   null;
 
-/** L'envoi de SMS n'est pas possible dans cet environnement (config absente). */
 export class SmsUnavailableError extends Error {
   constructor() {
     super('L\'envoi de SMS est momentanément indisponible. Veuillez réessayer plus tard.');
@@ -31,8 +30,7 @@ export const sendVerificationSMS = async (phoneNumber: string, code: string): Pr
   const message = `Votre code de vérification MyKpopTrade est : ${code}`;
 
   if (smsEnabled) {
-    // env.ts refuse déjà de démarrer si SMS_ENABLED=true sans config Twilio ;
-    // ce garde-fou évite qu'un « succès » soit renvoyé sans SMS réellement parti.
+    // Ne jamais renvoyer un « succès » sans SMS réellement parti.
     if (!client || !fromPhoneNumber) {
       throw new SmsUnavailableError();
     }
@@ -52,14 +50,12 @@ export const sendVerificationSMS = async (phoneNumber: string, code: string): Pr
     return;
   }
 
-  // En production, ne jamais simuler : l'utilisateur croirait avoir reçu un
-  // code, et celui-ci finirait lisible dans les logs.
+  // En production, ne jamais simuler : le code finirait lisible dans les logs.
   if (env.NODE_ENV === 'production') {
     throw new SmsUnavailableError();
   }
 
-  // Développement / tests uniquement : on trace le code pour rendre le
-  // parcours testable sans compte Twilio.
+  // Hors production : code tracé pour tester le parcours sans Twilio.
   logger.warn('SMS désactivé — code de vérification non envoyé', {
     phoneNumber,
     simulatedCode: code
@@ -78,6 +74,6 @@ export const generateVerificationCode = (): string => {
   return crypto.randomInt(100000, 1000000).toString();
 };
 
-/** Condensat stocké en base à la place du code, comme les codes de secours 2FA. */
+/** Condensat stocké en base à la place du code. */
 export const hashVerificationCode = (code: string): string =>
   crypto.createHash('sha256').update(code).digest('hex');

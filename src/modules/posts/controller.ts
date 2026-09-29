@@ -9,7 +9,6 @@ const MAX_PAGE_SIZE = 50;
 const MAX_CONTENT_LENGTH = 1000;
 const AUTHOR_FIELDS = 'username profilePicture isIdentityVerified';
 
-/** Page et taille de page bornées : `limit` venait tel quel de l'URL. */
 function pagination(req: Request) {
   return {
     page: Math.max(1, parseInt(req.query.page as string) || 1),
@@ -38,9 +37,7 @@ export const createPost = asyncHandler(async (req: Request, res: Response) => {
     return res.status(400).json({ message: `Le contenu est requis (${MAX_CONTENT_LENGTH} caractères maximum)` });
   }
 
-  // Les images passent par le stockage des annonces, qui les range dans
-  // uploads/products : elles étaient référencées sous /uploads/posts/, dossier
-  // qui n'est pas servi, et ne s'affichaient jamais.
+  // Les images passent par le stockage des annonces : /uploads/posts/ n'est pas servi.
   const images: string[] = [];
   if (req.files && Array.isArray(req.files)) {
     for (const file of req.files) {
@@ -162,8 +159,7 @@ export const replyToPost = asyncHandler(async (req: Request, res: Response) => {
     return res.status(400).json({ message: `Le contenu est requis (${MAX_CONTENT_LENGTH} caractères maximum)` });
   }
 
-  // $inc atomique : lire, incrémenter puis sauver perdait des réponses
-  // concurrentes dans le compteur.
+  // $inc atomique : aucune réponse concurrente perdue dans le compteur.
   const parentPost = isObjectId(postId)
     ? await Post.findByIdAndUpdate(postId, { $inc: { repliesCount: 1 } })
     : null;
@@ -186,9 +182,8 @@ export const replyToPost = asyncHandler(async (req: Request, res: Response) => {
 /**
  * Liker/Unliker un post
  *
- * Mises à jour conditionnelles et atomiques : la version lire-modifier-sauver
- * perdait des « j'aime » simultanés, et un double clic pouvait compter deux
- * fois le même utilisateur.
+ * Mises à jour conditionnelles et atomiques : aucun « j'aime » simultané perdu,
+ * et un double clic ne compte pas deux fois le même utilisateur.
  */
 export const toggleLike = asyncHandler(async (req: Request, res: Response) => {
   const userId = String((req as any).user.id);

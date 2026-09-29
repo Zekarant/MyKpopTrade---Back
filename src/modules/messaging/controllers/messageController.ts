@@ -14,9 +14,8 @@ import {
 export { upload } from '../middleware/messageUploadConfig';
 
 /**
- * Types affichables dans le navigateur. Les pièces jointes envoyées avant que
- * l'extension ne soit déduite du type MIME peuvent porter n'importe quelle
- * extension (`.html`, `.svg`…) : elles partent en téléchargement binaire.
+ * Types affichables dans le navigateur. Toute autre extension (`.html`,
+ * `.svg`…, possible sur d'anciennes pièces jointes) part en téléchargement.
  */
 const INLINE_ATTACHMENT_TYPES = new Map([
   ['.jpg', 'image/jpeg'],

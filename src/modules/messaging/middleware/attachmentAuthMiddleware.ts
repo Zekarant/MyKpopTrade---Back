@@ -25,11 +25,9 @@ export function issueAttachmentReadToken(userId: string): string {
  * Authentifie le téléchargement d'une pièce jointe.
  *
  * Une balise `<img src>` ou `<a href>` ne peut pas porter d'en-tête
- * `Authorization` : le jeton arrive donc dans l'URL. Ce n'est plus le jeton
- * d'accès (un « copier l'adresse de l'image » partagé ouvrait le compte
- * pendant 15 minutes) mais un jeton de lecture dédié, délivré par
- * POST /api/messaging/attachment-token. L'appartenance à la conversation reste
- * vérifiée pour chaque fichier par le contrôleur.
+ * `Authorization` : l'URL porte un jeton de lecture dédié, jamais le jeton
+ * d'accès (une adresse d'image partagée ouvrirait le compte). L'appartenance à
+ * la conversation est vérifiée pour chaque fichier par le contrôleur.
  *
  * Avec un en-tête Authorization, c'est l'authentification normale.
  */

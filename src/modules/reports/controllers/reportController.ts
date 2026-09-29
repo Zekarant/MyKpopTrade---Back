@@ -20,7 +20,6 @@ import { clampLimit } from '../../../commons/utils/pagination';
 /** Code MongoDB d'une violation d'index unique. */
 const DUPLICATE_KEY_ERROR = 11000;
 
-/** Page et taille de page bornées : `limit` venait tel quel de l'URL. */
 function pagination(req: Request, defaultLimit: number, maxLimit: number) {
   return {
     page: Math.max(1, parseInt(req.query.page as string) || 1),
@@ -95,7 +94,7 @@ export const createReport = asyncHandler(async (req: Request, res: Response) => 
     return res.status(400).json({ message: 'ID de cible invalide' });
   }
 
-  // Validés ici plutôt que par le schéma : une ValidationError répondait 500.
+  // Validés ici plutôt que par le schéma : une ValidationError répondrait 500.
   if (!isReason(reason)) {
     return res.status(400).json({ message: `Motif invalide. Valeurs acceptées : ${REPORT_REASONS.join(', ')}` });
   }

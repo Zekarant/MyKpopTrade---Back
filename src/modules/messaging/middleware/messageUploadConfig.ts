@@ -7,8 +7,8 @@ import { sanitizedMulter } from '../../../commons/middlewares/sanitizedMulter';
 /**
  * Seuls types acceptés, avec l'extension enregistrée pour chacun. L'extension
  * ne vient jamais du nom envoyé par le client : `sendFile` déduit le
- * Content-Type de l'extension, et un `piege.html` déclaré `image/png` aurait
- * été servi en HTML au destinataire (XSS stockée sur le domaine de l'API).
+ * Content-Type de l'extension, et un `piege.html` déclaré `image/png` serait
+ * servi en HTML au destinataire (XSS stockée sur le domaine de l'API).
  */
 const ATTACHMENT_EXTENSION_BY_MIME_TYPE = new Map([
   ['image/jpeg', '.jpg'],

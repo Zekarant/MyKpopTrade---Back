@@ -3,10 +3,8 @@ import { expireStaleVerifications } from '../../modules/verification/services/id
 import logger from '../utils/logger';
 
 /**
- * Chaque nuit à 4h : clôt les demandes de vérification d'identité restées sans
- * examen au-delà de leur échéance et supprime les pièces d'identité expirées.
- * La politique de confidentialité promet une conservation limitée ; sans cette
- * tâche, les documents restaient stockés indéfiniment.
+ * Chaque nuit à 4h : clôt les demandes de vérification d'identité échues et
+ * supprime les pièces d'identité expirées (conservation limitée, RGPD).
  */
 export const startIdentityDocumentCleanupTask = () => {
   cron.schedule('0 4 * * *', async () => {

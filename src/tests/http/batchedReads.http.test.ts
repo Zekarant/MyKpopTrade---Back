@@ -9,11 +9,7 @@ import Message from '../../models/messageModel';
 import { listUserConversations } from '../../modules/messaging/services/conversationService';
 import { generateAccessToken } from '../../commons/services/tokenService';
 
-/**
- * Lectures regroupées : ces listes faisaient une ou deux requêtes par élément
- * (N+1). Les tests vérifient que le résultat est resté le même, cas limites
- * compris.
- */
+/** Lectures regroupées (anti N+1) : résultats inchangés, cas limites compris. */
 const app = createApp();
 
 describe('lectures regroupées (N+1)', () => {

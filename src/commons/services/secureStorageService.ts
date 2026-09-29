@@ -26,8 +26,7 @@ const ensureStorageDirectory = (): void => {
     // Créer avec des permissions restreintes
     fs.mkdirSync(SECURE_STORAGE_PATH, { recursive: true, mode: 0o700 });
     
-    // Restreindre l'accès au dossier (mkdirSync applique l'umask au mode).
-    // fs.chmodSync plutôt qu'un `execSync('chmod ...')` construit par interpolation.
+    // mkdirSync applique l'umask au mode : on le force.
     if (process.platform !== 'win32') {
       fs.chmodSync(SECURE_STORAGE_PATH, 0o700);
     }
@@ -197,8 +196,7 @@ export const secureStoreDocument = async (
   // Écrire le fichier chiffré et les métadonnées
   const encryptedFilePath = path.join(SECURE_STORAGE_PATH, `${fileId}.enc`);
   const metadataPath = path.join(SECURE_STORAGE_PATH, `${fileId}.meta`);
-  
-  // 0600 : lisibles par le seul compte qui fait tourner l'API.
+
   fs.writeFileSync(encryptedFilePath, encrypted, { mode: 0o600 });
   fs.writeFileSync(metadataPath, JSON.stringify(metadata), { mode: 0o600 });
   

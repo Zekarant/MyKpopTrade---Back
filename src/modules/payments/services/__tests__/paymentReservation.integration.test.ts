@@ -29,9 +29,6 @@ import { captureDirectPayment } from '../paymentService';
 /**
  * Ces tests verrouillent l'anti double-vente : un produit ne peut être réservé
  * que par un acheteur à la fois, et n'est encaissé qu'une fois.
- * Régression historique : vérifier puis réserver en deux requêtes laissait
- * deux acheteurs (panier + achat direct, ou requêtes simultanées) payer le
- * même article.
  */
 
 const mockedPost = axios.post as jest.Mock;

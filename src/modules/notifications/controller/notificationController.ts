@@ -17,7 +17,6 @@ export const getMyNotifications = asyncHandler(async (req: Request, res: Respons
   try {
     const result = await NotificationService.getUserNotifications(userId, {
       page: Math.max(1, parseInt(page as string) || 1),
-      // `limit` venait tel quel de l'URL.
       limit: clampLimit(limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
       onlyUnread: unread === 'true'
     });

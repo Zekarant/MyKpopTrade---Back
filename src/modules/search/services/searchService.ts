@@ -175,12 +175,8 @@ const MAX_SUGGESTION_QUERY_LENGTH = 100;
 
 /**
  * Suggestions de la barre de recherche : groupes, albums et membres.
- *
- * Cette fonction interrogeait des champs qui n'existent dans aucun schéma
- * (`koreanName`, `members` sur les groupes ; `title`, `group` sur les albums) :
- * le `populate('group')` levait une erreur et la route répondait 500 à chaque
- * frappe. Les membres ne sont pas modélisés sur les groupes ; ils sont tirés
- * des annonces en ligne, seule source où ils figurent.
+ * Les membres ne sont pas modélisés sur les groupes : ils sont tirés des
+ * annonces en ligne, seule source où ils figurent.
  */
 export async function fetchSearchSuggestions(query: unknown) {
   if (!query || typeof query !== 'string' || query.trim().length < 2) {

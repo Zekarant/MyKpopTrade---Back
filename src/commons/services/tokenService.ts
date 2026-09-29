@@ -9,10 +9,8 @@ import logger from '../utils/logger';
 const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Délai pendant lequel un jeton tout juste échangé est encore accepté. Deux
- * onglets partagent les cookies et peuvent renouveler en même temps avec le
- * même jeton : sans ce délai, le second serait pris pour un vol et toutes les
- * sessions seraient fermées.
+ * Délai de grâce après un échange : deux onglets peuvent renouveler en même
+ * temps avec le même jeton sans être pris pour un vol.
  */
 const ROTATION_GRACE_MS = 30 * 1000;
 
@@ -69,10 +67,8 @@ export const generateRefreshToken = async (userId: string): Promise<string> =>
   createRefreshToken(userId, new Date(Date.now() + SESSION_LIFETIME_MS));
 
 /**
- * Échange un refresh token contre un nouveau : chaque jeton ne sert qu'une
- * fois. Présenter un jeton déjà échangé (hors délai de grâce) trahit un vol —
- * le voleur ou la victime l'a utilisé en premier — et ferme toutes les
- * sessions du compte.
+ * Échange un refresh token contre un nouveau (usage unique). Un jeton déjà
+ * échangé, hors délai de grâce, trahit un vol : toutes les sessions sont fermées.
  *
  * @returns le nouveau jeton et son utilisateur, ou null si le jeton est refusé.
  */

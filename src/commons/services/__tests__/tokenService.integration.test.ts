@@ -12,10 +12,7 @@ import {
   invalidateRefreshToken
 } from '../tokenService';
 
-/**
- * Refresh tokens : stockés hachés, à usage unique, et un jeton volé se
- * trahit dès que le voleur et la victime l'utilisent tous les deux.
- */
+/** Refresh tokens : stockés hachés, à usage unique, détection d'un jeton volé. */
 describe('tokenService — refresh tokens (integration)', () => {
   beforeAll(async () => {
     await startInMemoryMongo();
@@ -43,7 +40,6 @@ describe('tokenService — refresh tokens (integration)', () => {
     const stored = await RefreshToken.findOne({});
     expect(stored!.token).toBe(sha256(token));
     expect(stored!.token).not.toBe(token);
-    // Une copie de la base ne donne pas de session : l'empreinte n'est pas un jeton.
     expect(await rotateRefreshToken(stored!.token)).toBeNull();
   });
 

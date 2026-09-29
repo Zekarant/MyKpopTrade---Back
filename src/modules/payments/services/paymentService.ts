@@ -705,8 +705,7 @@ export async function processRefund({
 export async function fetchPaymentDetails(userId: string, paymentId: string) {
   const payment = await Payment.findById(paymentId)
     .populate('product', 'title description price images')
-    // Jamais l'email de l'autre partie : acheteur et vendeur échangent via la
-    // messagerie. `profilePicture` est le vrai champ avatar (`profileImage` n'existait pas).
+    // Jamais l'email de l'autre partie : acheteur et vendeur échangent via la messagerie.
     .populate('buyer', 'username profilePicture')
     .populate('seller', 'username profilePicture');
 

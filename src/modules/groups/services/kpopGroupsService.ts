@@ -116,8 +116,6 @@ export async function searchGroupsByQuery({
     .sort({ isActive: -1, name: 1 })
     .lean();
 
-  // Statistiques d'albums de tous les groupes trouvés en une agrégation (une
-  // par groupe auparavant).
   const albumStats = await Album.aggregate<{
     _id: unknown;
     albumCount: number;

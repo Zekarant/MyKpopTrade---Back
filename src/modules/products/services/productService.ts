@@ -21,8 +21,7 @@ const ALLOWED_PRODUCT_UPDATES = [
   'category', 'kpopGroup', 'kpopMember', 'albumName',
   'isAvailable', 'isReserved', 'reservedFor', 'shippingOptions'
 ];
-// `images` est volontairement absent : les chemins d'images ne doivent venir
-// que des fichiers reçus par multer. Accepter des chemins du client permettait
+// `images` est volontairement absent : un chemin fourni par le client permettrait
 // de faire supprimer n'importe quel fichier du serveur via DELETE /:id/images.
 
 function assertValidObjectId(productId: string) {
@@ -35,10 +34,8 @@ type KpopEntity = { _id: mongoose.Types.ObjectId; name: string };
 
 /**
  * Groupes (ou albums) désignés par les annonces, en une requête pour toute la
- * liste : l'enrichissement faisait deux requêtes par annonce, soit jusqu'à
- * 1 000 pour une page de 500. Un identifiant désigne l'entité par son `_id`,
- * sinon par son nom exact ; à nom égal, la première trouvée l'emporte, comme
- * avec le `findOne` d'origine.
+ * liste. Un identifiant désigne l'entité par son `_id`, sinon par son nom
+ * exact ; à nom égal, la première trouvée l'emporte.
  *
  * @returns les entités indexées par l'identifiant ou le nom employé.
  */
@@ -75,7 +72,6 @@ function cleanupUploadedFiles(files?: Express.Multer.File[]) {
   }
 }
 
-/** Ajoute aux annonces le nom et l'identifiant de leur groupe et de leur album. */
 async function withKpopNames(products: any[]): Promise<any[]> {
   const [groups, albums] = await Promise.all([
     loadKpopEntities(KpopGroup, products.map((product) => product.kpopGroup)),
@@ -218,8 +214,8 @@ export async function fetchProductById(productId: string, userId?: string) {
   enrichedProduct.shippingPrice = opts.nationalCost ?? opts.shippingCost ?? null;
 
   if (userId && userId !== product.seller._id.toString()) {
-    // $inc atomique : lire / +1 / save() perdait des vues concurrentes et
-    // relançait toute la validation du document à chaque consultation.
+    // $inc atomique : aucune vue concurrente perdue, et pas de validation
+    // complète du document à chaque consultation.
     await Product.updateOne({ _id: product._id }, { $inc: { views: 1 } });
   }
 

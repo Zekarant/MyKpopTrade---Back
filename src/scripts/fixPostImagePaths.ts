@@ -3,10 +3,8 @@ import dotenv from 'dotenv';
 import Post from '../modules/posts/model';
 
 /**
- * Les images des publications sont enregistrées dans uploads/products mais
- * étaient référencées sous /uploads/posts/, dossier qui n'est pas servi : elles
- * ne s'affichaient jamais. Le code est corrigé pour les nouvelles
- * publications ; ce script répare les chemins déjà en base. Idempotent.
+ * Migration idempotente : réécrit les chemins d'images des publications de
+ * /uploads/posts/ (non servi) vers /uploads/products/, où sont les fichiers.
  *
  *   npm run fix:post-images
  */

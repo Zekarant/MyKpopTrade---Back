@@ -7,9 +7,8 @@ export const validateEmail = (email: string): boolean => {
 };
 
 /**
- * Normalise un numéro de téléphone au format E.164 (`+33612345678`), le seul
- * que Twilio accepte. Tolère les saisies courantes : espaces, points, tirets,
- * parenthèses, préfixe `00`, et numéro national français `06 12 34 56 78`.
+ * Normalise un numéro de téléphone au format E.164, le seul que Twilio accepte.
+ * Tolère espaces, points, tirets, parenthèses, préfixe `00` et numéro national français.
  * @returns le numéro E.164, ou `null` s'il est invalide
  */
 export const normalizePhoneNumber = (raw: unknown): string | null => {

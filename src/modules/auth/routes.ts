@@ -29,21 +29,20 @@ const SOCIAL_LINK_TOKEN_PURPOSE = 'social_link';
 
 /**
  * Transporte le jeton de liaison dans le state OAuth. Un objet, et non une
- * chaîne, pour que passport passe par CookieStateStore (cf. oauthStateStore).
+ * chaîne, pour que passport passe par CookieStateStore.
  */
 function linkState(linkToken: string): string {
   const state: OAuthAppState = { linkToken };
   return state as unknown as string;
 }
 
-/** Utilisateur à lier si le state porte un jeton de liaison valide. */
 function linkUserIdFromState(rawState: unknown): string | undefined {
   const linkToken = readOAuthState(rawState)?.linkToken;
   if (!linkToken) return undefined;
   try {
     const decoded = jwt.verify(linkToken, env.JWT_SECRET) as { userId?: string; purpose?: string };
     // Même secret que le défi 2FA (qui porte aussi `userId`) : sans ce
-    // contrôle, un défi 2FA servait de jeton de liaison.
+    // contrôle, un défi 2FA servirait de jeton de liaison.
     return decoded.purpose === SOCIAL_LINK_TOKEN_PURPOSE ? decoded.userId : undefined;
   } catch {
     // Jeton expiré ou falsifié : parcours de connexion normal.
@@ -55,7 +54,7 @@ function linkUserIdFromState(rawState: unknown): string | undefined {
 router.post('/register', rateLimitRegister, registerController.register);
 router.post('/login', rateLimitLogin, loginController.login);
 // Sans authenticateJWT : se déconnecter doit rester possible une fois le jeton
-// d'accès expiré, sinon le refresh token survivait 7 jours en base.
+// d'accès expiré.
 router.post('/logout', loginController.logout);
 router.post('/refresh-token', loginController.refreshToken);
 
@@ -96,8 +95,8 @@ router.post('/oauth/exchange', socialAuthController.exchangeOAuthCode);
 // Routes d'authentification sociale - LOGIN/REGISTER
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 router.get('/google/callback', (req: Request, res: Response, next: NextFunction) => {
-  // Liaison si le state porte un jeton de liaison. L'authenticité du state
-  // (nonce ↔ cookie) est vérifiée par passport, avant tout usage du code.
+  // L'authenticité du state (nonce ↔ cookie) est vérifiée par passport, avant
+  // tout usage du code.
   const linkUserId = linkUserIdFromState(req.query.state);
   if (linkUserId) (req as any).linkUserId = linkUserId;
 
@@ -155,11 +154,8 @@ router.get('/discord/callback', (req: Request, res: Response, next: NextFunction
 });
 
 // Routes de LIAISON de comptes sociaux (utilisateur déjà connecté).
-//
-// Une redirection ne peut pas porter d'en-tête Authorization : le front mettait
-// son jeton d'accès dans l'URL. Il obtient maintenant, par une requête
-// authentifiée, un ticket à usage unique valable une minute, qu'il place dans
-// l'URL à la place du jeton.
+// Une redirection ne peut pas porter d'en-tête Authorization : l'URL porte un
+// ticket à usage unique (une minute), jamais le jeton d'accès.
 const LINK_SCOPES = { google: ['profile', 'email'], discord: ['identify', 'email'] } as const;
 type LinkProvider = keyof typeof LINK_SCOPES;
 const isLinkProvider = (value: unknown): value is LinkProvider =>

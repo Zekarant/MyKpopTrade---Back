@@ -175,8 +175,7 @@ export async function listGroupFollowers(groupId: string, page: number, limit: n
   const group = await KpopGroup.findById(groupId)
     .populate({
       path: 'followers',
-      // Route publique : pas d'email. `profilePicture` est le vrai champ
-      // avatar du modèle User (`profileImage` n'existait pas).
+      // Route publique : pas d'email.
       select: 'username profilePicture createdAt',
       options: {
         sort: { createdAt: -1 },

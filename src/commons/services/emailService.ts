@@ -328,8 +328,6 @@ export const sendShipmentAutoConfirmedEmail = async (
  * Envoie un email en utilisant le transporteur configuré
  * @param options Options de l'email (destinataire, sujet, contenu HTML)
  */
-// Exportée : GdprLogger.sendSecurityAlert l'appelle pour l'alerte DPO (art. 33).
-// Non exportée, l'appel levait un TypeError avalé et l'alerte ne partait jamais.
 export async function sendEmail(options: { to: string; subject: string; html: any; }): Promise<void> {
   try {
     const transporter = await createTransporter();
@@ -343,7 +341,6 @@ export async function sendEmail(options: { to: string; subject: string; html: an
 
     await transporter.sendMail(mailOptions);
   } catch (error) {
-    // Via le logger (masquage des données personnelles), pas console.error.
     logger.error('Erreur lors de l\'envoi de l\'email', {
       error: error instanceof Error ? error.message : String(error)
     });

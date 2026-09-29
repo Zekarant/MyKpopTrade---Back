@@ -23,7 +23,7 @@ const DOCUMENT_TYPE_LABELS: Record<string, string> = {
 /**
  * Type réel d'une image d'après ses premiers octets (« magic bytes »). Le
  * `mimetype` de multer vient du client et ne prouve rien : un PDF ou un HTML
- * déclaré `image/png` passait, et le floutage échouait silencieusement.
+ * déclaré `image/png` ferait échouer le floutage en silence.
  */
 export function detectIdentityImageType(buffer: Buffer): 'image/jpeg' | 'image/png' | 'image/webp' | null {
   if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
@@ -235,8 +235,8 @@ export async function approveIdentityVerification({
   verification.processedAt = new Date();
   verification.processedBy = adminId;
   await verification.save();
-  // Supprimé tout de suite : si l'email échouait avant, le document restait
-  // sur le disque pour toujours (la demande n'étant plus « pending »).
+  // Supprimé avant l'email : la demande n'étant plus « pending », un échec
+  // d'envoi laisserait le document sur le disque pour toujours.
   safelyDeleteDocument(verification.documentReferenceId);
 
   await User.findByIdAndUpdate(verification.user, {
@@ -329,8 +329,7 @@ export async function listPendingVerifications(adminId: string, page: number, li
 
 /**
  * Document d'une demande en attente, déchiffré pour l'examen par un admin.
- * Sans cette route, l'approbation se faisait à l'aveugle. Chaque consultation
- * est tracée dans l'audit log (accès à une donnée d'identité).
+ * Chaque consultation est tracée dans l'audit log (accès à une donnée d'identité).
  */
 export async function getVerificationDocumentForAdmin(verificationId: string, adminId: string) {
   const verification = await loadPendingVerification(verificationId);
@@ -359,8 +358,7 @@ export async function getVerificationDocumentForAdmin(verificationId: string, ad
 
 /**
  * Clôt les demandes restées sans examen au-delà de `expiresAt` et supprime
- * leur document, puis purge les fichiers orphelins expirés. Sans cette tâche,
- * les pièces d'identité restaient stockées indéfiniment.
+ * leur document, puis purge les fichiers orphelins expirés.
  */
 export async function expireStaleVerifications(now = new Date()) {
   const stale = await IdentityVerification.find({ status: 'pending', expiresAt: { $lt: now } });

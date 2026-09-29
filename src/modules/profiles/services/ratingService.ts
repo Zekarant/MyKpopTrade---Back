@@ -10,7 +10,6 @@ import Payment from '../../../models/paymentModel';
 /**
  * « Achat vérifié » seulement si un paiement terminé lie les deux utilisateurs
  * pour ce produit (le front envoie l'ID du produit comme `transactionId`).
- * Avant, fournir n'importe quel identifiant suffisait à obtenir le badge.
  */
 async function isCompletedPurchaseBetween(
   transactionId: string | undefined,

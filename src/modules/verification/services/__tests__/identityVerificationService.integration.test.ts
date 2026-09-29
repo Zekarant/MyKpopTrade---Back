@@ -34,7 +34,7 @@ import { sendVerificationResultEmail } from '../../../../commons/services/emailS
 import IdentityVerification from '../../../../models/identityVerificationModel';
 import User from '../../../../models/userModel';
 
-/** En-tête JPEG valide : le service contrôle désormais le vrai type du fichier. */
+/** En-tête JPEG valide : le service contrôle le vrai type du fichier. */
 const jpegBuffer = (payload = 'x') => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from(payload)]);
 
 describe('identityVerificationService (integration)', () => {

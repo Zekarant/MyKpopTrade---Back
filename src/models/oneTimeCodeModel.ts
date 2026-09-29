@@ -1,12 +1,9 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 /**
- * Usages d'un code à usage unique. Chaque code ne vaut que pour son usage :
- * un ticket de liaison ne peut pas servir de code de connexion, et inversement.
- * - `oauth_login` : fin de connexion OAuth, échangé par le front contre les
- *   jetons de session (qui ne passent donc plus dans l'URL de retour) ;
- * - `social_link` : ticket qui lance la liaison d'un compte Google/Discord, à
- *   la place du jeton d'accès que le front mettait dans l'URL.
+ * Usages d'un code à usage unique ; chaque code ne vaut que pour son usage.
+ * - `oauth_login` : fin de connexion OAuth, échangé contre les jetons de session ;
+ * - `social_link` : ticket qui lance la liaison d'un compte Google/Discord.
  */
 export const ONE_TIME_CODE_PURPOSES = ['oauth_login', 'social_link'] as const;
 export type OneTimeCodePurpose = (typeof ONE_TIME_CODE_PURPOSES)[number];

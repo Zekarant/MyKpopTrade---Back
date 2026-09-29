@@ -7,7 +7,6 @@ import logger from '../../commons/utils/logger';
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
 
-/** Page et taille de page bornées : `limit` venait tel quel de l'URL. */
 function pagination(req: Request) {
   return {
     page: Math.max(1, parseInt(req.query.page as string) || 1),

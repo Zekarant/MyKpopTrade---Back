@@ -131,7 +131,7 @@ export async function updateProfileData(userId: string, body: any) {
   }
 
   // Un code SMS en cours a été envoyé à l'ANCIEN numéro : le garder
-  // permettait de faire valider un numéro arbitraire avec son propre code.
+  // permettrait de valider un numéro arbitraire avec ce code.
   if (phoneNumberUpdated) {
     user.phoneVerificationCode = undefined;
     user.phoneVerificationExpires = undefined;
@@ -283,8 +283,6 @@ export async function softDeleteAccount(userId: string, password?: string) {
     }
   }
 
-  // Effacement RGPD complet : l'ancienne version gardait l'email en clair
-  // (`deleted_<id>_<email>`) et laissait les sessions ouvertes.
   await eraseUserAccount(userId);
 }
 

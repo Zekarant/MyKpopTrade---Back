@@ -178,9 +178,7 @@ export async function fetchConversation(
 
 /**
  * Messages non lus et dernier message de chaque conversation d'une page, en
- * deux requêtes pour toute la page (elles étaient faites deux fois par
- * conversation). Le dernier message profite de l'index
- * `{ conversation: 1, createdAt: -1 }`.
+ * deux requêtes. Le dernier message profite de l'index `{ conversation: 1, createdAt: -1 }`.
  */
 async function loadConversationSummaries(conversationIds: unknown[], userId: string) {
   const unreadCounts = new Map<string, number>();

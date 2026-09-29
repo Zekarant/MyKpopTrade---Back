@@ -8,11 +8,7 @@ import env from '../../config/env';
 import RefreshToken from '../../models/tokenModel';
 import { generateAccessToken, generateRefreshToken } from '../../commons/services/tokenService';
 
-/**
- * Cycle de vie d'une session : renouvellement à usage unique, détection d'un
- * refresh token volé, déconnexion effective même après expiration du jeton
- * d'accès, révocation qui survit à un redémarrage de l'API.
- */
+/** Cycle de vie d'une session : rotation, vol de refresh token, déconnexion, révocation. */
 const app = createApp();
 
 const sha256 = (value: string) => crypto.createHash('sha256').update(value).digest('hex');

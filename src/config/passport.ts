@@ -319,9 +319,8 @@ export const initializePassport = (): void => {
             if (user) {
               // Ce Discord est déjà lié → connexion au compte propriétaire
             } else {
-              // Discord renvoie aussi des emails jamais vérifiés : sans ce
-              // contrôle, créer un Discord avec l'email d'une victime suffisait
-              // à se connecter sur son compte (admin compris).
+              // Discord renvoie aussi des emails non vérifiés : rattacher par
+              // email offrirait le compte existant à quiconque déclare l'adresse.
               if (profile.verified !== true) {
                 return done(null, false, { message: 'discord_email_unverified' });
               }

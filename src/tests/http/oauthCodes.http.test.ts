@@ -13,11 +13,7 @@ process.env.GOOGLE_CLIENT_SECRET = 'secret-de-test';
 process.env.API_URL = 'http://api.test';
 process.env.FRONTEND_URL = 'http://front.test';
 
-/**
- * Aucun jeton de session dans une URL : la fin de connexion OAuth remet un
- * code à échanger, et la liaison de compte part d'un ticket à usage unique au
- * lieu du jeton d'accès.
- */
+/** Aucun jeton de session dans une URL : codes et tickets OAuth à usage unique. */
 const app = createApp();
 
 describe('HTTP — codes à usage unique OAuth', () => {

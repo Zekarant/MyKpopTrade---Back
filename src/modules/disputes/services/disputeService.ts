@@ -329,9 +329,8 @@ export async function resolveDispute({
     refundAmountNum = parsed;
   }
 
-  // Clôture atomique AVANT le remboursement : deux admins tranchant en même
-  // temps passaient tous deux le contrôle ci-dessus et remboursaient deux fois.
-  // Seule la requête qui fait passer le litige de « actif » à « clos » continue.
+  // Clôture atomique AVANT le remboursement : si deux admins tranchent en même
+  // temps, seule la requête qui fait passer le litige de « actif » à « clos » continue.
   const previousStatus = dispute.status;
   const claimed = await Dispute.findOneAndUpdate(
     { _id: dispute._id, status: { $in: ACTIVE_STATUSES } },

@@ -85,7 +85,7 @@ export async function clearCart(userId: string) {
 }
 
 export async function validateCart(userId: string) {
-  // `title` sert aux messages d'erreur : sans lui, ils affichaient « "undefined" n'est plus disponible ».
+  // `title` sert aux messages d'erreur.
   const cart = await Cart.findOne({ user: userId }).populate('items.product', 'title price currency isAvailable isSold seller');
   if (!cart || cart.items.length === 0) {
     throw new HttpError(400, 'Panier vide');

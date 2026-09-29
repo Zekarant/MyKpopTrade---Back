@@ -70,7 +70,6 @@ export class FollowService {
       return { isFollowing: false };
     }
 
-    // On pouvait « suivre » un identifiant quelconque, compte supprimé compris.
     const target = await User.findById(followingId).select('accountStatus').lean<{ accountStatus?: string } | null>();
     if (!target || target.accountStatus === 'deleted') {
       throw new FollowTargetNotFoundError();

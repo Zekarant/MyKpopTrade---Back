@@ -1,9 +1,6 @@
 /**
- * Échappe les métacaractères d'une saisie utilisateur avant de l'utiliser dans
- * une RegExp ou un `$regex` Mongo : la recherche devient littérale.
- * Sans cela, `(` fait planter la requête (500), `.*` matche tout, et un motif
- * comme `(a+)+$` monopolise le CPU de MongoDB (ReDoS). Cela corrige aussi la
- * recherche exacte sur des noms réels comme « (G)I-DLE ».
+ * Échappe les métacaractères d'une saisie utilisateur pour une RegExp ou un
+ * `$regex` Mongo : la recherche devient littérale (ni erreur 500, ni ReDoS).
  */
 export function escapeRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

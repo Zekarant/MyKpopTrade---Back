@@ -3,10 +3,7 @@ import multer from 'multer';
 import request from 'supertest';
 import { sanitizedMulter } from '../sanitizedMulter';
 
-/**
- * multer interprète la notation à crochets des champs texte : sans nettoyage,
- * `username[$ne]=x` arrive au contrôleur sous la forme `{ $ne: 'x' }`.
- */
+/** multer interprète la notation à crochets : `username[$ne]=x` donne `{ $ne: 'x' }`. */
 function appWith(middleware: express.RequestHandler) {
   const app = express();
   app.post('/upload', middleware, (req, res) => {

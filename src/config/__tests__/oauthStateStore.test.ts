@@ -4,11 +4,7 @@ import request from 'supertest';
 import { Strategy as OAuth2Strategy } from 'passport-oauth2';
 import { CookieStateStore, OAUTH_STATE_COOKIE, readOAuthState } from '../oauthStateStore';
 
-/**
- * Le state OAuth doit revenir dans le navigateur qui a lancé le parcours.
- * Testé à travers passport-oauth2, sans appel réseau : l'échange du code et
- * la lecture du profil sont simulés.
- */
+/** Parcours via passport-oauth2, sans réseau : échange du code et profil simulés. */
 function buildApp() {
   const authenticator = new passport.Passport();
   const strategy = new OAuth2Strategy(
@@ -66,7 +62,6 @@ describe('CookieStateStore', () => {
     expect(setCookie).toMatch(/HttpOnly/i);
     expect(setCookie).toMatch(/SameSite=Lax/i);
     expect(setCookie).toMatch(/Path=\/api\/auth/);
-    // Le nonce du state est celui du cookie.
     expect(setCookie).toContain(`${OAUTH_STATE_COOKIE}=${readOAuthState(state)!.nonce}`);
   });
 

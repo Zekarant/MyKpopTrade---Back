@@ -44,10 +44,7 @@ const LIMITS = {
   twoFactorVerify: { points: 10, duration: 15 * 60 },
   /** Anti spam du formulaire de contact (route publique). */
   contact: { points: 5, duration: 60 * 60 },
-  /**
-   * Anti inondation des signalements : chacun déclenche une alerte admin
-   * (webhook), et un compte pouvait en émettre un par élément du site.
-   */
+  /** Anti inondation des signalements : chacun déclenche une alerte admin (webhook). */
   report: { points: 20, duration: 60 * 60 }
 } as const;
 

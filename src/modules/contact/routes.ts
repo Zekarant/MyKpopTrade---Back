@@ -6,7 +6,6 @@ import { deliverContactMessage, parseContactMessage } from './contactService';
 
 const router = Router();
 
-/** Formulaire de contact public : validé et relayé au support côté serveur. */
 router.post('/', rateLimitContact, asyncHandler(async (req: Request, res: Response) => {
   try {
     await deliverContactMessage(parseContactMessage(req.body));

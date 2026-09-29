@@ -144,8 +144,6 @@ router.post('/attachment-token', authenticateJWT, (req, res) => {
 
 router.get(
   '/messages/:messageId/attachments/:attachment',
-  // En-tête Authorization, ou jeton de lecture dédié en query param (une
-  // balise <img> ne peut pas envoyer d'en-tête). Jamais le jeton d'accès.
   authenticateAttachmentRequest,
   messageController.getMessageAttachment
 );

@@ -50,8 +50,7 @@ export async function fetchUserInventory({
 
   let inventoryStats = null;
   if (viewerId === sellerId) {
-    // aggregate() ne caste pas les types comme find() : sans ObjectId, le
-    // $match ne trouvait jamais rien et les stats restaient vides.
+    // aggregate() ne caste pas les types comme find() : ObjectId explicite.
     // sellerId === viewerId, l'identifiant du JWT, donc un ObjectId valide.
     const stats = await Product.aggregate([
       { $match: { seller: new mongoose.Types.ObjectId(sellerId) } },

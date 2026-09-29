@@ -107,10 +107,9 @@ export class PayPalPaymentService {
         }
       }
 
-      // Réservation atomique : vérifier puis réserver en deux requêtes laissait
-      // deux acheteurs (parcours direct + panier, ou deux requêtes simultanées)
-      // payer le même produit. On récupère l'état d'avant la mise à jour pour
-      // ne libérer, en cas d'échec, qu'une réservation posée ici.
+      // Réservation atomique, pour qu'un seul acheteur puisse payer le produit.
+      // L'état d'avant la mise à jour permet de ne libérer, en cas d'échec,
+      // qu'une réservation posée ici.
       const product = await Product.findOneAndUpdate(
         {
           _id: productId,

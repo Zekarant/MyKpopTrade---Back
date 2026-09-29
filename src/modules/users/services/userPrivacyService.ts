@@ -100,7 +100,7 @@ export async function buildUserDataExport(userId: string) {
 
     Conversation.find({ participants: userId }).select('title createdAt updatedAt'),
 
-    // Art. 15 : l'export omettait tout contenu produit par l'utilisateur.
+    // Art. 15 : l'export inclut tout contenu produit par l'utilisateur.
     Message.find({ sender: userId }).select('conversation content contentType attachments createdAt').lean(),
     Rating.find({ reviewer: userId }).select('recipient rating review type createdAt').lean(),
     Rating.find({ recipient: userId }).select('reviewer rating review type createdAt').lean(),
@@ -276,7 +276,7 @@ export async function anonymizeAccount(userId: string, confirmation: unknown) {
   });
 
   // Jamais l'ancien pseudo dans l'alerte : associé au nouvel identifiant (et
-  // stocké dans Discord + les notifications admin), il rendait l'anonymisation réversible.
+  // stocké dans Discord + les notifications admin), il rendrait l'anonymisation réversible.
   dispatchAdminAlert({
     event: 'gdpr.self_anonymized',
     severity: 'warning',

@@ -325,7 +325,6 @@ export const TWO_FACTOR_TOKEN_PURPOSE = 'two_factor_challenge';
 /** Durée de vie du défi 2FA. Assez pour ouvrir son téléphone, pas plus. */
 export const TWO_FACTOR_TOKEN_EXPIRES_IN = '5m';
 
-/** Émet le jeton de défi 2FA (connexion par mot de passe ou OAuth). */
 export function issueTwoFactorChallengeToken(userId: string): string {
   return jwt.sign(
     { userId, purpose: TWO_FACTOR_TOKEN_PURPOSE },

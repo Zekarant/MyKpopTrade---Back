@@ -137,7 +137,6 @@ export class NotificationService {
         query.isRead = false;
       }
       
-      // Trois lectures indépendantes : en parallèle plutôt qu'à la suite.
       const [unreadCount, notifications, total] = await Promise.all([
         Notification.countDocuments({ recipient: userId, isRead: false }),
         Notification.find(query)

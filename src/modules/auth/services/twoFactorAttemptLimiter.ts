@@ -44,8 +44,7 @@ export async function consumeTwoFactorAttempt(userId: string): Promise<void> {
         'Trop de codes erronés pour ce compte. Patientez quelques minutes avant de réessayer.'
       );
     }
-    // Même dégradation que les autres limiteurs : une panne technique ne doit
-    // pas empêcher toute connexion.
+    // Une panne technique du limiteur ne doit pas empêcher toute connexion.
     logger.error('Limiteur 2FA par compte indisponible, tentative laissée passer', {
       error: error instanceof Error ? error.message : String(error)
     });

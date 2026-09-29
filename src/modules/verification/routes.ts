@@ -3,7 +3,7 @@ import multer from 'multer';
 import * as identityVerificationController from './controllers/identityVerificationController';
 import { sanitizedMulter } from '../../commons/middlewares/sanitizedMulter';
 // requireAdmin vérifie le rôle en base : un admin rétrogradé perd l'accès tout
-// de suite, pas à l'expiration de son JWT (roleMiddleware lisait le JWT).
+// de suite, pas à l'expiration de son JWT.
 import { authenticateJWT, requireAdmin } from '../../commons/middlewares/authMiddleware';
 
 const router = express.Router();

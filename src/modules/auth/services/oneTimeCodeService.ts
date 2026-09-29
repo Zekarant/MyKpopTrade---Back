@@ -6,7 +6,6 @@ const CODE_TTL_MS = 60 * 1000;
 
 const hashCode = (code: string) => crypto.createHash('sha256').update(code).digest('hex');
 
-/** Émet un code à usage unique pour cet utilisateur et cet usage. */
 export async function issueOneTimeCode(userId: string, purpose: OneTimeCodePurpose): Promise<string> {
   const code = crypto.randomBytes(32).toString('base64url');
   await OneTimeCode.create({

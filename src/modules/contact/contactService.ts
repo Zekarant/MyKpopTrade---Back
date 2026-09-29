@@ -18,7 +18,6 @@ const MIN_MESSAGE_LENGTH = 10;
 const readText = (value: unknown, maxLength: number): string =>
   typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
 
-/** Valide et normalise un message de contact reçu du front (route publique). */
 export function parseContactMessage(body: any): ContactMessage {
   const contact: ContactMessage = {
     name: readText(body?.name, MAX_LENGTHS.name),
@@ -37,9 +36,8 @@ export function parseContactMessage(body: any): ContactMessage {
 }
 
 /**
- * Transmet le message au canal support. L'URL du webhook reste côté serveur :
- * exposée dans le bundle du front, n'importe qui pouvait spammer ou supprimer
- * le canal.
+ * L'URL du webhook reste côté serveur : exposée dans le bundle du front,
+ * n'importe qui pourrait spammer ou supprimer le canal support.
  */
 export async function deliverContactMessage(contact: ContactMessage): Promise<void> {
   const webhookUrl = env.SUPPORT_DISCORD_WEBHOOK_URL || env.ADMIN_DISCORD_WEBHOOK_URL;
