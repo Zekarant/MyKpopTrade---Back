@@ -27,7 +27,7 @@ const INLINE_ATTACHMENT_TYPES = new Map([
 ]);
 
 function setAttachmentHeaders(res: Response, fileName: string): void {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
+  // nosniff est posé sur toutes les réponses par securityHeaders.
   const inlineType = INLINE_ATTACHMENT_TYPES.get(path.extname(fileName).toLowerCase());
   if (inlineType) {
     res.type(inlineType);

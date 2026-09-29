@@ -32,6 +32,29 @@ describe('HTTP — routes publiques (via supertest)', () => {
     });
   });
 
+  describe('en-têtes de sécurité', () => {
+    it('sont posés sur toutes les réponses, sans révéler la pile technique', async () => {
+      const res = await request(app).get('/health');
+
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+      expect(res.headers['x-frame-options']).toBe('DENY');
+      expect(res.headers['referrer-policy']).toBe('no-referrer');
+      expect(res.headers['x-powered-by']).toBeUndefined();
+    });
+
+    it('n\'imposent HSTS que sur une requête HTTPS', async () => {
+      const res = await request(app).get('/health');
+
+      expect(res.headers['strict-transport-security']).toBeUndefined();
+    });
+
+    it('laissent le front, sur une autre origine, afficher les images publiques', async () => {
+      const res = await request(app).get('/uploads/products/inexistante.jpg');
+
+      expect(res.headers['cross-origin-resource-policy']).toBeUndefined();
+    });
+  });
+
   describe('sondes de supervision', () => {
     it('GET /health → 200 sans tester les dépendances', async () => {
       const res = await request(app).get('/health');

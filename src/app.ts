@@ -18,6 +18,7 @@ import searchRoutes from './modules/search/routes';
 import addressRoutes from './modules/addresses/routes';
 import { errorHandler, notFoundHandler } from './commons/middlewares/errorMiddleware';
 import { stripMongoOperatorsFromBody } from './commons/middlewares/mongoOperatorMiddleware';
+import { securityHeaders } from './commons/middlewares/securityHeaders';
 import { initializePassport } from './config/passport';
 import logger, { logAPIRequest } from './commons/utils/logger';
 import { verificationRoutes } from './modules/verification';
@@ -43,6 +44,9 @@ export function createApp(): express.Express {
   // req.ip doit refléter l'IP réelle du client : le rate limiting par IP en dépend.
   // 0 en local, 1 derrière un unique reverse proxy (nginx, Heroku, Render...).
   app.set('trust proxy', env.TRUST_PROXY);
+  // Ne pas annoncer la pile technique aux scanners.
+  app.disable('x-powered-by');
+  app.use(securityHeaders);
 
   // CORS restreint : seules les origines déclarées peuvent appeler l'API avec
   // des credentials. Les appels sans en-tête Origin (webhooks PayPal,
@@ -97,12 +101,11 @@ export function createApp(): express.Express {
   // GET /api/messaging/messages/:messageId/attachments/:attachment.
   //
   // Seuls les dossiers dont le contenu est public par nature sont servis ici.
+  // (nosniff, posé par securityHeaders, empêche d'interpréter un fichier
+  // uploadé comme du HTML ou du script.)
   const PUBLIC_UPLOAD_DIRS = ['products', 'profiles', 'banners', 'ratings'];
-  // nosniff : le navigateur respecte le Content-Type déduit de l'extension et
-  // n'interprète jamais un fichier uploadé comme du HTML ou du script.
-  const setUploadHeaders = (res: express.Response) => res.setHeader('X-Content-Type-Options', 'nosniff');
   for (const dir of PUBLIC_UPLOAD_DIRS) {
-    app.use(`/uploads/${dir}`, express.static(path.join(__dirname, '../uploads', dir), { setHeaders: setUploadHeaders }));
+    app.use(`/uploads/${dir}`, express.static(path.join(__dirname, '../uploads', dir)));
   }
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/payments', paymentRoutes);
