@@ -8,6 +8,7 @@ import {
   listFollowedGroups,
   listGroupFollowers
 } from '../services/groupFollowService';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -137,7 +138,7 @@ export const getFollowStatus = asyncHandler(async (req: AuthenticatedRequest, re
 export const getUserFollowedGroups = asyncHandler(async (req: AuthenticatedRequest, res: Response<UserFollowedGroupsResponse>) => {
   const userId = req.user?.id;
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
   if (!userId) {
     return res.status(401).json({
@@ -178,7 +179,7 @@ export const getUserFollowedGroups = asyncHandler(async (req: AuthenticatedReque
 export const getGroupFollowers = asyncHandler(async (req: Request, res: Response) => {
   const groupId = req.params.groupId as string;
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
   try {
     const result = await listGroupFollowers(groupId, page, limit);

@@ -14,6 +14,7 @@ import {
   updateUserRatingResponse,
   deleteUserRatingResponse
 } from '../services/ratingService';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
 /**
  * Récupérer les évaluations d'un utilisateur
@@ -21,7 +22,7 @@ import {
 export const getUserRatings = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.params.userId as string;
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 10;
+  const limit = clampLimit(req.query.limit, 10, MAX_PAGE_SIZE);
   const type = req.query.type as string;
 
   const result = await getUserRatingsWithStats(userId, type, page, limit);

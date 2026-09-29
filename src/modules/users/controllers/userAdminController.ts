@@ -16,13 +16,14 @@ import { eraseUserAccount } from '../services/accountErasureService';
 import { CSV_EXPORT_ROW_LIMIT, sendCsvDownload, wantsCsv } from '../../../commons/utils/csv';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { reactivateUser, suspendUser } from '../services/userSanctionService';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
 /**
  * Liste tous les utilisateurs avec pagination et filtrage (admin)
  */
 export const getUsers = asyncHandler(async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
   const search = req.query.search as string;
   const role = req.query.role as string;
   const status = req.query.status as string;

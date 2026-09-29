@@ -11,6 +11,7 @@ import {
   updateGroup,
   deleteGroup
 } from '../services/kpopGroupsService';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
 /**
  * Créer un nouveau groupe K-pop (Admin uniquement)
@@ -87,7 +88,7 @@ export const searchGroups = asyncHandler(async (req: Request, res: Response) => 
  * Récupérer les groupes K-pop les plus populaires
  */
 export const getPopularGroups = asyncHandler(async (req: Request, res: Response) => {
-  const limit = parseInt(req.query.limit as string) || 20;
+  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
   try {
     const groups = await fetchPopularGroups(limit);

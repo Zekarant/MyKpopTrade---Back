@@ -7,6 +7,7 @@ import {
   fetchQuickRecommendations,
   fetchProductStats
 } from '../services/inventoryService';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
 /**
  * Récupérer l'inventaire d'un utilisateur (produits en vente)
@@ -15,7 +16,7 @@ export const getUserInventory = asyncHandler(async (req: Request, res: Response)
   const sellerId = (req.params.userId || (req.user as any).id) as string;
   const viewerId = (req.user as any)?.id;
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
   const status = (req.query.status as string) || 'available';
 
   const result = await fetchUserInventory({ sellerId, viewerId, status, page, limit });
@@ -28,7 +29,7 @@ export const getUserInventory = asyncHandler(async (req: Request, res: Response)
 export const getUserFavorites = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
   const result = await fetchUserFavorites(userId, page, limit);
   return res.status(200).json(result);
@@ -39,7 +40,7 @@ export const getUserFavorites = asyncHandler(async (req: Request, res: Response)
  */
 export const getRecommendedProducts = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any)?.id;
-  const limit = parseInt(req.query.limit as string) || 8;
+  const limit = clampLimit(req.query.limit, 8, MAX_PAGE_SIZE);
 
   const result = await fetchRecommendedProducts(userId, limit);
   return res.status(200).json(result);
@@ -50,7 +51,7 @@ export const getRecommendedProducts = asyncHandler(async (req: Request, res: Res
  */
 export const getQuickRecommendations = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any)?.id;
-  const limit = parseInt(req.query.limit as string) || 4;
+  const limit = clampLimit(req.query.limit, 4, MAX_PAGE_SIZE);
 
   const products = await fetchQuickRecommendations(userId, limit);
   return res.status(200).json({ products });

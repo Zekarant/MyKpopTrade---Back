@@ -13,6 +13,7 @@ import {
   deleteAlbumById,
   fetchAlbumBySpotifyId
 } from '../services/albumsService';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
 /**
  * Créer un nouvel album (Admin uniquement)
@@ -115,7 +116,7 @@ export const getAlbumsByGroup = asyncHandler(async (req: Request, res: Response)
  * Récupérer les albums les plus récents
  */
 export const getRecentAlbums = asyncHandler(async (req: Request, res: Response) => {
-  const limit = parseInt(req.query.limit as string) || 50;
+  const limit = clampLimit(req.query.limit, 50, MAX_PAGE_SIZE);
 
   try {
     const albums = await fetchRecentAlbums(limit);
@@ -138,7 +139,7 @@ export const getRecentAlbums = asyncHandler(async (req: Request, res: Response) 
  */
 export const searchAlbums = asyncHandler(async (req: Request, res: Response) => {
   const { query } = req.query;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
   try {
     const result = await searchAlbumsByQuery({ query, limit });

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import TransactionProof from '../../../models/transactionProofModel';
 import User from '../../../models/userModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
 /**
  * Récupérer les preuves de transaction d'un utilisateur
@@ -9,7 +10,7 @@ import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 export const getUserProofs = asyncHandler(async (req: Request, res: Response) => {
   const { userId } = req.params;
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 10;
+  const limit = clampLimit(req.query.limit, 10, MAX_PAGE_SIZE);
   
   const filter = { 
     user: userId,

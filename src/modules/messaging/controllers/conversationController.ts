@@ -20,6 +20,7 @@ import {
   fetchConversationOffers,
   cancelOfferFlow
 } from '../services/conversationOfferService';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
 const DEFAULT_CONVERSATION_PAGE = 1;
 const DEFAULT_CONVERSATION_LIMIT = 20;
@@ -52,7 +53,7 @@ export const getConversation = asyncHandler(async (req: Request, res: Response) 
   const userId = (req.user as any).id;
   const conversationId = req.params.id as string;
   const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
-  const limit = parseInt(req.query.limit as string) || DEFAULT_CONVERSATION_LIMIT;
+  const limit = clampLimit(req.query.limit, DEFAULT_CONVERSATION_LIMIT, MAX_PAGE_SIZE);
 
   try {
     const result = await fetchConversation(conversationId, userId, page, limit);
@@ -72,7 +73,7 @@ export const getConversation = asyncHandler(async (req: Request, res: Response) 
 export const getUserConversations = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
   const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
-  const limit = parseInt(req.query.limit as string) || DEFAULT_USER_LIST_LIMIT;
+  const limit = clampLimit(req.query.limit, DEFAULT_USER_LIST_LIMIT, MAX_PAGE_SIZE);
   const filter = req.query.filter as string || 'all';
 
   const result = await listUserConversations(userId, page, limit, filter);
@@ -266,7 +267,7 @@ export const getConversationMedia = asyncHandler(async (req: Request, res: Respo
   const userId = (req.user as any).id;
   const conversationId = req.params.id as string;
   const page = parseInt(req.query.page as string) || DEFAULT_CONVERSATION_PAGE;
-  const limit = parseInt(req.query.limit as string) || DEFAULT_CONVERSATION_LIMIT;
+  const limit = clampLimit(req.query.limit, DEFAULT_CONVERSATION_LIMIT, MAX_PAGE_SIZE);
   const type = req.query.type as string;
 
   try {

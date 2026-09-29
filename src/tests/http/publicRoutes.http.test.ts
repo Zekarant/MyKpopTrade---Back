@@ -70,6 +70,17 @@ describe('HTTP — routes publiques (via supertest)', () => {
     });
   });
 
+  describe('taille de page', () => {
+    it('plafonne la page de l\'inventaire public d\'un vendeur', async () => {
+      const seller = await createTestUser();
+
+      const res = await request(app).get(`/api/products/inventory/user/${seller._id}?limit=100000`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.pagination.limit).toBe(100);
+    });
+  });
+
   describe('routes retirées', () => {
     it('n\'expose plus le changement d\'email PayPal sans mot de passe (/api/accounts)', async () => {
       const user = await createTestUser();

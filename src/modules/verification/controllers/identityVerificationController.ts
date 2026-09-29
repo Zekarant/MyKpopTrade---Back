@@ -10,6 +10,7 @@ import {
   cancelUserVerification,
   getVerificationDocumentForAdmin
 } from '../services/identityVerificationService';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
 /**
  * Soumettre une demande de vérification d'identité
@@ -99,7 +100,7 @@ export const rejectVerification = asyncHandler(async (req: Request, res: Respons
 export const getPendingVerifications = asyncHandler(async (req: Request, res: Response) => {
   const adminId = (req.user as any).id;
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
   try {
     const result = await listPendingVerifications(adminId, page, limit);

@@ -10,7 +10,7 @@ import {
   clearUserSearchHistory,
   fetchSearchSuggestions
 } from '../services/searchService';
-import { clampLimit } from '../../../commons/utils/pagination';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
 const DEFAULT_SEARCH_LIMIT = 20;
 // La page de résultats du front demande jusqu'à 500 annonces d'un coup.
@@ -80,7 +80,7 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
  */
 export const getUserSearchHistory = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
 
   try {
     const searchHistory = await fetchUserSearchHistory(userId, limit);

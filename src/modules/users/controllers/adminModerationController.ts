@@ -4,13 +4,14 @@ import AuditLog from '../../../models/auditLogModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
 /**
  * Lister tous les posts (admin) avec filtres
  */
 export const getAdminPosts = asyncHandler(async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
   const search = req.query.search as string;
   const type = req.query.type as string; // 'post' | 'reply' | 'all'
 
@@ -115,7 +116,7 @@ export const adminDeletePost = asyncHandler(async (req: Request, res: Response) 
  */
 export const getAuditLogs = asyncHandler(async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 30;
+  const limit = clampLimit(req.query.limit, 30, MAX_PAGE_SIZE);
   const targetType = req.query.targetType as string;
 
   const filter: any = {};
