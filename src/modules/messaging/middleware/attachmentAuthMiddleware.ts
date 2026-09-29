@@ -1,32 +1,72 @@
 import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import env from '../../../config/env';
+import User from '../../../models/userModel';
+import { authenticateJWT } from '../../../commons/middlewares/authMiddleware';
+
+/** `purpose` du jeton de lecture des pièces jointes. */
+const ATTACHMENT_READ_PURPOSE = 'attachment_read';
+
+/** Une heure : le temps d'une conversation, sans laisser traîner le jeton. */
+export const ATTACHMENT_TOKEN_TTL_SECONDS = 60 * 60;
 
 /**
- * Autorise le jeton d'accès à arriver en query param, UNIQUEMENT pour les
- * pièces jointes.
+ * Jeton qui ne permet QUE de lire les pièces jointes des conversations de
+ * l'utilisateur. Il porte `userId` et non `id` : `authenticateJWT` le refuse,
+ * il ne peut donc servir sur aucune autre route.
+ */
+export function issueAttachmentReadToken(userId: string): string {
+  return jwt.sign({ userId, purpose: ATTACHMENT_READ_PURPOSE }, env.JWT_SECRET, {
+    expiresIn: ATTACHMENT_TOKEN_TTL_SECONDS
+  });
+}
+
+/**
+ * Authentifie le téléchargement d'une pièce jointe.
  *
  * Une balise `<img src>` ou `<a href>` ne peut pas porter d'en-tête
- * `Authorization` : sans cette passerelle, la route authentifiée des pièces
- * jointes répond 401 à tout affichage d'image, et le front se rabattait sur le
- * dossier statique public — ce qui contournait le contrôle d'appartenance à la
- * conversation.
+ * `Authorization` : le jeton arrive donc dans l'URL. Ce n'est plus le jeton
+ * d'accès (un « copier l'adresse de l'image » partagé ouvrait le compte
+ * pendant 15 minutes) mais un jeton de lecture dédié, délivré par
+ * POST /api/messaging/attachment-token. L'appartenance à la conversation reste
+ * vérifiée pour chaque fichier par le contrôleur.
  *
- * Le compromis est assumé et volontairement circonscrit : un jeton en URL peut
- * fuir (journaux d'accès, en-tête Referer, historique du navigateur). C'est
- * pourquoi ce middleware n'est monté que sur cette route, et non ajouté à
- * `authenticateJWT`, qui protège tout le reste de l'API. La durée de vie courte
- * du jeton d'accès (15 minutes) borne l'exposition.
- *
- * Toute la validation reste faite par `authenticateJWT` en aval : ce middleware
- * ne fait que déplacer le jeton, il n'en vérifie rien.
+ * Avec un en-tête Authorization, c'est l'authentification normale.
  */
-export const allowAttachmentTokenInQuery = (
+export async function authenticateAttachmentRequest(
   req: Request,
-  _res: Response,
+  res: Response,
   next: NextFunction
-): void => {
-  if (!req.headers.authorization && typeof req.query.token === 'string' && req.query.token) {
-    req.headers.authorization = `Bearer ${req.query.token}`;
+): Promise<void> {
+  if (req.headers.authorization) {
+    await authenticateJWT(req, res, next);
+    return;
   }
 
+  const token = req.query.token;
+  if (typeof token !== 'string' || !token) {
+    res.status(401).json({ message: 'Accès non autorisé. Token manquant.' });
+    return;
+  }
+
+  let userId: string | undefined;
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET) as { userId?: string; purpose?: string };
+    userId = decoded.purpose === ATTACHMENT_READ_PURPOSE ? decoded.userId : undefined;
+  } catch {
+    userId = undefined;
+  }
+  if (!userId) {
+    res.status(401).json({ message: 'Lien de pièce jointe invalide ou expiré.' });
+    return;
+  }
+
+  const user = await User.findById(userId).select('accountStatus').lean<{ accountStatus?: string } | null>();
+  if (!user || user.accountStatus === 'suspended' || user.accountStatus === 'deleted') {
+    res.status(403).json({ message: 'Accès refusé.' });
+    return;
+  }
+
+  req.user = { id: userId };
   next();
-};
+}

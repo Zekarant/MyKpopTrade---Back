@@ -7,7 +7,11 @@ import {
   rateLimitMessages,
   verifyConversationAccess
 } from './middleware/messageSecurityMiddleware';
-import { allowAttachmentTokenInQuery } from './middleware/attachmentAuthMiddleware';
+import {
+  authenticateAttachmentRequest,
+  issueAttachmentReadToken,
+  ATTACHMENT_TOKEN_TTL_SECONDS
+} from './middleware/attachmentAuthMiddleware';
 
 const router = express.Router();
 
@@ -130,12 +134,19 @@ router.delete(
   messageController.deleteMessage
 );
 
+// Jeton de lecture des pièces jointes, à placer dans leurs URL (<img src>).
+router.post('/attachment-token', authenticateJWT, (req, res) => {
+  res.status(200).json({
+    token: issueAttachmentReadToken((req.user as any).id),
+    expiresIn: ATTACHMENT_TOKEN_TTL_SECONDS
+  });
+});
+
 router.get(
   '/messages/:messageId/attachments/:attachment',
-  // Accepte le jeton en query param : une balise <img> ne peut pas envoyer
-  // d'en-tête Authorization. Portée strictement limitée à cette route.
-  allowAttachmentTokenInQuery,
-  authenticateJWT,
+  // En-tête Authorization, ou jeton de lecture dédié en query param (une
+  // balise <img> ne peut pas envoyer d'en-tête). Jamais le jeton d'accès.
+  authenticateAttachmentRequest,
   messageController.getMessageAttachment
 );
 

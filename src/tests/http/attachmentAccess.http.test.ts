@@ -131,9 +131,17 @@ describe('HTTP — confidentialité des pièces jointes de conversation', () => 
       expect(res.body.toString()).toContain('contenu-prive-de-test');
     });
 
-    it('sert la pièce jointe à un participant via ?token= (cas de la balise <img>)', async () => {
+    /** Jeton de lecture des pièces jointes, tel que le front l'obtient. */
+    async function attachmentTokenFor(user: Awaited<ReturnType<typeof createTestUser>>) {
+      const res = await request(app)
+        .post('/api/messaging/attachment-token')
+        .set('Authorization', `Bearer ${generateAccessToken(user)}`);
+      return res.body.token as string;
+    }
+
+    it('sert la pièce jointe à un participant via son jeton de lecture (cas de la balise <img>)', async () => {
       const { alice, message } = await seedConversation();
-      const token = generateAccessToken(alice);
+      const token = await attachmentTokenFor(alice);
 
       const res = await request(app).get(
         `/api/messaging/messages/${message._id}/attachments/${ATTACHMENT_NAME}?token=${token}`
@@ -143,15 +151,34 @@ describe('HTTP — confidentialité des pièces jointes de conversation', () => 
       expect(res.body.toString()).toContain('contenu-prive-de-test');
     });
 
-    it('applique le contrôle d\'appartenance aussi avec ?token=', async () => {
+    it('applique le contrôle d\'appartenance aussi avec le jeton de lecture', async () => {
       const { intrus, message } = await seedConversation();
-      const token = generateAccessToken(intrus);
+      const token = await attachmentTokenFor(intrus);
 
       const res = await request(app).get(
         `/api/messaging/messages/${message._id}/attachments/${ATTACHMENT_NAME}?token=${token}`
       );
 
       expect(res.status).toBe(403);
+    });
+
+    it('refuse le jeton d\'accès dans l\'URL : copier l\'adresse d\'une image ne doit pas ouvrir le compte', async () => {
+      const { alice, message } = await seedConversation();
+
+      const res = await request(app).get(
+        `/api/messaging/messages/${message._id}/attachments/${ATTACHMENT_NAME}?token=${generateAccessToken(alice)}`
+      );
+
+      expect(res.status).toBe(401);
+    });
+
+    it('le jeton de lecture ne sert sur aucune autre route', async () => {
+      const { alice } = await seedConversation();
+      const token = await attachmentTokenFor(alice);
+
+      const res = await request(app).get('/api/auth/profile').set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).toBe(401);
     });
 
     it('sert une image avec son type et interdit au navigateur de le deviner', async () => {
