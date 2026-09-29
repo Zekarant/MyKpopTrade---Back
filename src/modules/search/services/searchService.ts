@@ -169,61 +169,45 @@ export async function clearUserSearchHistory(userId: string) {
   await SearchHistory.deleteMany({ userId });
 }
 
+const SUGGESTION_LIMIT = 5;
+/** Au-delà, ce n'est plus une saisie en cours : inutile de lancer trois regex. */
+const MAX_SUGGESTION_QUERY_LENGTH = 100;
+
+/**
+ * Suggestions de la barre de recherche : groupes, albums et membres.
+ *
+ * Cette fonction interrogeait des champs qui n'existent dans aucun schéma
+ * (`koreanName`, `members` sur les groupes ; `title`, `group` sur les albums) :
+ * le `populate('group')` levait une erreur et la route répondait 500 à chaque
+ * frappe. Les membres ne sont pas modélisés sur les groupes ; ils sont tirés
+ * des annonces en ligne, seule source où ils figurent.
+ */
 export async function fetchSearchSuggestions(query: unknown) {
-  if (!query || typeof query !== 'string' || query.length < 2) {
+  if (!query || typeof query !== 'string' || query.trim().length < 2) {
     throw new HttpError(400, 'Requête trop courte pour les suggestions');
   }
-  const pattern = escapeRegex(query);
+  const pattern = escapeRegex(query.trim().slice(0, MAX_SUGGESTION_QUERY_LENGTH));
+  const matches = { $regex: pattern, $options: 'i' };
 
-  const [groupSuggestions, albumSuggestions, memberSuggestions] = await Promise.all([
-    KpopGroup.find({
-      $or: [
-        { name: { $regex: pattern, $options: 'i' } },
-        { koreanName: { $regex: pattern, $options: 'i' } }
-      ],
-      isActive: true
-    })
-      .select('name koreanName profileImage')
-      .limit(5)
+  const [groups, albums, members] = await Promise.all([
+    KpopGroup.find({ name: matches, isActive: true })
+      .select('name profileImage')
+      .limit(SUGGESTION_LIMIT)
       .lean(),
 
-    Album.find({
-      $or: [
-        { title: { $regex: pattern, $options: 'i' } },
-        { koreanTitle: { $regex: pattern, $options: 'i' } }
-      ]
-    })
-      .populate('group', 'name')
-      .select('title koreanTitle coverImage group')
-      .limit(5)
+    Album.find({ name: matches })
+      .select('name coverImage artistName')
+      .limit(SUGGESTION_LIMIT)
       .lean(),
 
-    KpopGroup.aggregate([
-      { $unwind: '$members' },
-      {
-        $match: {
-          $or: [
-            { 'members.name': { $regex: pattern, $options: 'i' } },
-            { 'members.stageName': { $regex: pattern, $options: 'i' } }
-          ],
-          'members.isActive': true
-        }
-      },
-      {
-        $project: {
-          memberName: '$members.name',
-          memberStageName: '$members.stageName',
-          memberImage: '$members.profileImage',
-          groupName: '$name'
-        }
-      },
-      { $limit: 5 }
+    Product.aggregate<{ name: string; groupName: string }>([
+      { $match: { isAvailable: true, kpopMember: matches } },
+      { $group: { _id: '$kpopMember', groupName: { $first: '$kpopGroup' } } },
+      { $sort: { _id: 1 } },
+      { $limit: SUGGESTION_LIMIT },
+      { $project: { _id: 0, name: '$_id', groupName: 1 } }
     ])
   ]);
 
-  return {
-    groups: groupSuggestions,
-    albums: albumSuggestions,
-    members: memberSuggestions
-  };
+  return { groups, albums, members };
 }

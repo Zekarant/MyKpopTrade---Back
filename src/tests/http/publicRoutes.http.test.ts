@@ -5,7 +5,7 @@ import {
   stopInMemoryMongo,
   clearAllCollections
 } from '../helpers/mongoMemory';
-import { createTestUser } from '../helpers/fixtures';
+import { createTestUser, createTestProduct } from '../helpers/fixtures';
 import KpopGroup from '../../models/kpopGroupModel';
 import Album from '../../models/albumModel';
 
@@ -29,6 +29,43 @@ describe('HTTP — routes publiques (via supertest)', () => {
       const res = await request(app).get('/');
       expect(res.status).toBe(200);
       expect(res.text).toContain('MyKpopTrade');
+    });
+  });
+
+  describe('GET /api/search/suggestions', () => {
+    it('suggère groupes, albums et membres (répondait 500 à chaque frappe)', async () => {
+      const bts = await KpopGroup.create({ name: 'BTS', isActive: true });
+      await KpopGroup.create({ name: 'BTOB', isActive: false });
+      await Album.create({ name: 'BTS World', artistId: bts._id, artistName: 'BTS', totalTracks: 14 });
+      const seller = await createTestUser();
+      await createTestProduct(seller._id, { kpopMember: 'Btsi' });
+      await createTestProduct(seller._id, { kpopMember: 'Btsi' });
+      await createTestProduct(seller._id, { kpopMember: 'Btsu', isAvailable: false });
+
+      const res = await request(app).get('/api/search/suggestions').query({ query: 'bt' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.suggestions.groups.map((g: { name: string }) => g.name)).toEqual(['BTS']);
+      expect(res.body.suggestions.albums).toEqual([
+        expect.objectContaining({ name: 'BTS World', artistName: 'BTS' })
+      ]);
+      // Un membre par nom, et seulement depuis les annonces en ligne.
+      expect(res.body.suggestions.members).toEqual([{ name: 'Btsi', groupName: 'BTS' }]);
+    });
+
+    it('traite la saisie comme du texte, pas comme une expression régulière', async () => {
+      await KpopGroup.create({ name: 'BTS', isActive: true });
+
+      const res = await request(app).get('/api/search/suggestions').query({ query: '.*' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.suggestions.groups).toEqual([]);
+    });
+
+    it('refuse une saisie trop courte', async () => {
+      const res = await request(app).get('/api/search/suggestions').query({ query: 'b' });
+
+      expect(res.status).toBe(400);
     });
   });
 
