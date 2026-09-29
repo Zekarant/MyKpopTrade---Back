@@ -213,15 +213,23 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
  */
 export const initiatePayWhatYouWant = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const { productId, minimumPrice, maximumPrice } = req.body;
+  const { productId, minimumPrice, maximumPrice, enabled } = req.body;
 
   try {
     const payWhatYouWant = await initiatePayWhatYouWantFlow({
       userId,
       productId,
       minimumPrice,
-      maximumPrice
+      maximumPrice,
+      enabled
     });
+
+    if (!payWhatYouWant.enabled) {
+      return res.status(200).json({
+        message: 'Option Pay What You Want désactivée avec succès',
+        payWhatYouWant
+      });
+    }
 
     return res.status(201).json({
       message: 'Option Pay What You Want activée avec succès',
@@ -231,7 +239,7 @@ export const initiatePayWhatYouWant = asyncHandler(async (req: Request, res: Res
     if (error instanceof HttpError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
-    logger.error('Erreur lors de l\'activation de Pay What You Want', {
+    logger.error('Erreur lors de la configuration de Pay What You Want', {
       error: error instanceof Error ? error.message : String(error),
       productId,
       userId

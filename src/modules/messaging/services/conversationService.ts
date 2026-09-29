@@ -33,6 +33,14 @@ const CONVERSATION_FILTER = {
 
 const DEFAULT_CURRENCY = 'EUR';
 
+/**
+ * Champs publics des participants dans le détail d'une conversation : ceux du
+ * profil public (badges, ancienneté, statistiques), jamais email, téléphone,
+ * adresse ni données de paiement.
+ */
+const DETAIL_PARTICIPANT_FIELDS =
+  'username profilePicture location bio preferences socialLinks statistics createdAt isIdentityVerified isSellerVerified';
+
 type LastMessageSummary = {
   _id: mongoose.Types.ObjectId;
   content: string;
@@ -99,10 +107,10 @@ export async function fetchConversation(
   await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
 
   const conversationRaw = await Conversation.findById(conversationId)
-    .populate('participants', 'username profilePicture location bio preferences socialLinks statistics')
+    .populate('participants', DETAIL_PARTICIPANT_FIELDS)
     .populate({
       path: 'productId',
-      select: 'title description price images seller category condition kpopGroup kpopMember albumName currency isAvailable allowOffers minOfferPercentage shippingOptions createdAt'
+      select: 'title description price images seller category condition kpopGroup kpopMember albumName currency isAvailable allowOffers minOfferPercentage isPayWhatYouWant pwywMinPrice pwywMaxPrice shippingOptions createdAt'
     })
     .populate('offerHistory.offeredBy', 'username profilePicture')
     .lean();
@@ -113,9 +121,16 @@ export async function fetchConversation(
 
   const conversation = conversationRaw as LeanConversation & {
     isOwner?: boolean;
+    otherParticipant?: unknown;
     userMetadata?: { isArchived: boolean; isFavorited: boolean };
     formattedOfferHistory?: ReturnType<typeof formatOfferHistory>;
   };
+
+  // Même règle que la liste : l'interlocuteur n'est défini qu'à deux participants.
+  const participants = conversation.participants as unknown as { _id: mongoose.Types.ObjectId }[];
+  conversation.otherParticipant = Array.isArray(participants) && participants.length === 2
+    ? participants.find(p => p?._id?.toString() !== userId) ?? null
+    : null;
 
   if (conversation.productId) {
     conversation.isOwner = conversation.productId.seller.toString() === userId;

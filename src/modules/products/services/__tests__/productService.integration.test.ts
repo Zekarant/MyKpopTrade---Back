@@ -4,7 +4,14 @@ import {
   clearAllCollections
 } from '../../../../tests/helpers/mongoMemory';
 import { createTestUser, createTestProduct } from '../../../../tests/helpers/fixtures';
-import { toggleFavoriteForUser, removeProduct } from '../productService';
+import {
+  toggleFavoriteForUser,
+  removeProduct,
+  updateProductForOwner,
+  fetchProductById,
+  listProducts,
+  markAsSold
+} from '../productService';
 import { HttpError } from '../../../../commons/utils/httpError';
 import User from '../../../../models/userModel';
 import Product from '../../../../models/productModel';
@@ -132,6 +139,97 @@ describe('productService (integration)', () => {
           soft: false
         })
       ).rejects.toMatchObject({ statusCode: 403 });
+    });
+  });
+
+  describe('updateProductForOwner', () => {
+    it('met à jour le type et l\'acceptation des offres depuis le formulaire de modification', async () => {
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id, { type: 'photocard', allowOffers: false });
+
+      const updated = await updateProductForOwner({
+        productId: product._id.toString(),
+        userId: seller._id.toString(),
+        body: { type: 'album', allowOffers: true }
+      });
+
+      expect(updated?.type).toBe('album');
+      expect(updated?.allowOffers).toBe(true);
+    });
+
+    it('ignore les images et le prix libre envoyés dans le corps', async () => {
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id);
+
+      const updated = await updateProductForOwner({
+        productId: product._id.toString(),
+        userId: seller._id.toString(),
+        body: {
+          title: 'Nouveau titre',
+          images: ['/etc/passwd'],
+          isPayWhatYouWant: true,
+          pwywMinPrice: 1
+        }
+      });
+
+      expect(updated?.title).toBe('Nouveau titre');
+      expect(updated?.images).toEqual(['/uploads/products/test.jpg']);
+      expect(updated?.isPayWhatYouWant).toBe(false);
+      expect(updated?.pwywMinPrice).toBeUndefined();
+    });
+  });
+
+  describe('markAsSold', () => {
+    it('n\'ajoute pas d\'achat au vendeur quand son propre identifiant est transmis comme acheteur', async () => {
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id);
+
+      await markAsSold({
+        productId: product._id.toString(),
+        userId: seller._id.toString(),
+        buyerId: seller._id.toString()
+      });
+
+      const refreshedSeller = await User.findById(seller._id);
+      expect(refreshedSeller?.statistics?.totalSales).toBe(1);
+      expect(refreshedSeller?.statistics?.totalPurchases ?? 0).toBe(0);
+      const refreshed = await Product.findById(product._id);
+      expect(refreshed?.isAvailable).toBe(false);
+      expect(refreshed?.isSold).toBe(true);
+      expect(refreshed?.soldAt).toBeInstanceOf(Date);
+      expect(refreshed?.soldTo).toBeUndefined();
+    });
+
+    it('compte l\'achat de l\'acheteur désigné', async () => {
+      const seller = await createTestUser();
+      const buyer = await createTestUser();
+      const product = await createTestProduct(seller._id);
+
+      await markAsSold({
+        productId: product._id.toString(),
+        userId: seller._id.toString(),
+        buyerId: buyer._id.toString()
+      });
+
+      expect((await User.findById(buyer._id))?.statistics?.totalPurchases).toBe(1);
+      expect(String((await Product.findById(product._id))?.soldTo)).toBe(buyer._id.toString());
+    });
+  });
+
+  describe('prix libre dans les réponses', () => {
+    it('le détail et la liste exposent isPayWhatYouWant et la fourchette', async () => {
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id, {
+        isPayWhatYouWant: true,
+        pwywMinPrice: 5,
+        pwywMaxPrice: 30
+      });
+
+      const { product: detail } = await fetchProductById(product._id.toString());
+      expect(detail).toMatchObject({ isPayWhatYouWant: true, pwywMinPrice: 5, pwywMaxPrice: 30 });
+
+      const { products } = await listProducts({});
+      expect(products[0]).toMatchObject({ isPayWhatYouWant: true, pwywMinPrice: 5, pwywMaxPrice: 30 });
     });
   });
 });

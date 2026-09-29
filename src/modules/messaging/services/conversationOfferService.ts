@@ -452,7 +452,7 @@ export async function respondToNegotiationFlow({
 
   const conversation = await Conversation.findById(conversationId).populate<{ productId: NegotiatedProduct | null }>({
     path: 'productId',
-    select: 'title price images seller negotiations currency'
+    select: 'title price images seller currency'
   });
 
   if (!conversation) {
@@ -482,7 +482,7 @@ export async function respondToNegotiationFlow({
   }
   const responder = product.seller.toString() === userId ? 'Le vendeur' : 'L\'acheteur';
 
-  const productDoc = await Product.findById(product._id);
+  const productDoc = await Product.findById(product._id).select('+negotiations');
   const negotiations = productDoc?.negotiations ?? [];
   const negotiationIndex = negotiations.findIndex(
     n => n.conversationId.toString() === conversationId
@@ -550,24 +550,49 @@ export async function respondToNegotiationFlow({
   };
 }
 
+/** `enabled: false` (ou "false") désactive le prix libre ; absent, il est activé. */
+function isDisableRequest(enabled: unknown): boolean {
+  return enabled === false || enabled === 'false';
+}
+
 /**
  * Active (ou met à jour) le prix libre d'un produit. Les acheteurs proposent
  * ensuite leur prix par la négociation habituelle, bornée par cette fourchette ;
  * le prix accepté par le vendeur est celui facturé au paiement.
+ * Avec `enabled: false`, le prix libre est retiré et la fourchette effacée.
  */
 export async function initiatePayWhatYouWantFlow({
   userId,
   productId,
   minimumPrice,
-  maximumPrice
+  maximumPrice,
+  enabled
 }: {
   userId: string;
   productId: string;
-  minimumPrice: unknown;
+  minimumPrice?: unknown;
   maximumPrice?: unknown;
+  enabled?: unknown;
 }) {
   if (!productId || !Types.ObjectId.isValid(productId)) {
     throw new HttpError(400, 'ID du produit requis');
+  }
+
+  if (isDisableRequest(enabled)) {
+    const product = await Product.findOneAndUpdate(
+      { _id: productId, seller: userId },
+      { $set: { isPayWhatYouWant: false }, $unset: { pwywMinPrice: '', pwywMaxPrice: '' } },
+      { new: true }
+    );
+    if (!product) {
+      throw new HttpError(404, 'Produit non trouvé ou vous n\'êtes pas le vendeur');
+    }
+    return {
+      productId: product._id,
+      enabled: false,
+      minimumPrice: null,
+      maximumPrice: null
+    };
   }
 
   const min = parseFloat(minimumPrice as string);
@@ -591,6 +616,7 @@ export async function initiatePayWhatYouWantFlow({
 
   return {
     productId: product._id,
+    enabled: true,
     minimumPrice: min,
     maximumPrice: max ?? null
   };

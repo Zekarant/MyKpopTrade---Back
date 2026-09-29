@@ -57,7 +57,7 @@ describe('conversationOfferService (integration)', () => {
       expect(conv?.negotiation?.initialPrice).toBe(100);
       expect(conv?.negotiation?.status).toBe('pending');
 
-      const refreshedProduct = await Product.findById(product._id);
+      const refreshedProduct = await Product.findById(product._id).select('+negotiations');
       expect(refreshedProduct?.negotiations?.length).toBe(1);
       expect(refreshedProduct?.negotiations?.[0].currentOffer).toBe(70);
     });
@@ -180,7 +180,7 @@ describe('conversationOfferService (integration)', () => {
       expect(conv?.negotiation?.status).toBe('accepted');
       expect(conv?.offerHistory[0].status).toBe('accepted');
 
-      const refreshedProduct = await Product.findById(product._id);
+      const refreshedProduct = await Product.findById(product._id).select('+negotiations');
       expect(refreshedProduct?.negotiations?.[0].status).toBe('accepted');
     });
 
@@ -237,7 +237,7 @@ describe('conversationOfferService (integration)', () => {
         action: 'accept'
       });
 
-      const negotiation = (await Product.findById(product._id))?.negotiations?.[0];
+      const negotiation = (await Product.findById(product._id).select('+negotiations'))?.negotiations?.[0];
       expect(negotiation?.status).toBe('accepted');
       expect(negotiation?.currentOffer).toBe(85);
       expect(negotiation?.counterOffer).toBeUndefined();
@@ -265,7 +265,7 @@ describe('conversationOfferService (integration)', () => {
 
       const conv = await Conversation.findById(conversationId);
       expect(conv?.offerHistory.map(offer => offer.status)).toEqual(['rejected', 'expired', 'accepted']);
-      const negotiation = (await Product.findById(product._id))?.negotiations?.[0];
+      const negotiation = (await Product.findById(product._id).select('+negotiations'))?.negotiations?.[0];
       expect(negotiation?.currentOffer).toBe(80);
       expect(negotiation?.counterOffer).toBeUndefined();
     });
@@ -460,7 +460,7 @@ describe('conversationOfferService (integration)', () => {
     it('active le prix libre sur le produit du vendeur', async () => {
       const { product } = await createPwywProduct();
 
-      const refreshed = await Product.findById(product._id);
+      const refreshed = await Product.findById(product._id).select('+negotiations');
       expect(refreshed?.isPayWhatYouWant).toBe(true);
       expect(refreshed?.pwywMinPrice).toBe(10);
       expect(refreshed?.pwywMaxPrice).toBe(60);
@@ -539,10 +539,78 @@ describe('conversationOfferService (integration)', () => {
         action: 'accept'
       });
 
-      const refreshed = await Product.findById(product._id);
+      const refreshed = await Product.findById(product._id).select('+negotiations');
       const negotiation = refreshed?.negotiations?.find(n => n.buyer.toString() === buyer._id.toString());
       expect(negotiation?.status).toBe('accepted');
       expect(negotiation?.currentOffer).toBe(35);
+    });
+
+    it('désactive le prix libre avec enabled: false et efface la fourchette', async () => {
+      const { seller, buyer, product } = await createPwywProduct();
+
+      const result = await initiatePayWhatYouWantFlow({
+        userId: seller._id.toString(),
+        productId: product._id.toString(),
+        enabled: false
+      });
+
+      expect(result).toMatchObject({ enabled: false, minimumPrice: null, maximumPrice: null });
+      const refreshed = await Product.findById(product._id).select('+negotiations');
+      expect(refreshed?.isPayWhatYouWant).toBe(false);
+      expect(refreshed?.pwywMinPrice).toBeUndefined();
+      expect(refreshed?.pwywMaxPrice).toBeUndefined();
+
+      // Sans prix libre ni offres classiques, le produit n'accepte plus d'offre.
+      await expect(initiateNegotiationFlow({
+        userId: buyer._id.toString(),
+        productId: product._id.toString(),
+        initialOffer: 15
+      })).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('accepte enabled "false" tel qu\'envoyé par un formulaire', async () => {
+      const { seller, product } = await createPwywProduct();
+
+      await initiatePayWhatYouWantFlow({
+        userId: seller._id.toString(),
+        productId: product._id.toString(),
+        enabled: 'false'
+      });
+
+      expect((await Product.findById(product._id).select('+negotiations'))?.isPayWhatYouWant).toBe(false);
+    });
+
+    it('refuse de désactiver le prix libre du produit d\'un autre vendeur', async () => {
+      const { buyer, product } = await createPwywProduct();
+
+      await expect(initiatePayWhatYouWantFlow({
+        userId: buyer._id.toString(),
+        productId: product._id.toString(),
+        enabled: false
+      })).rejects.toMatchObject({ statusCode: 404 });
+      expect((await Product.findById(product._id).select('+negotiations'))?.isPayWhatYouWant).toBe(true);
+    });
+
+    it('réactive le prix libre avec une nouvelle fourchette, sans maximum', async () => {
+      const { seller, product } = await createPwywProduct();
+      await initiatePayWhatYouWantFlow({
+        userId: seller._id.toString(),
+        productId: product._id.toString(),
+        enabled: false
+      });
+
+      const result = await initiatePayWhatYouWantFlow({
+        userId: seller._id.toString(),
+        productId: product._id.toString(),
+        minimumPrice: 12,
+        enabled: true
+      });
+
+      expect(result).toMatchObject({ enabled: true, minimumPrice: 12, maximumPrice: null });
+      const refreshed = await Product.findById(product._id).select('+negotiations');
+      expect(refreshed?.isPayWhatYouWant).toBe(true);
+      expect(refreshed?.pwywMinPrice).toBe(12);
+      expect(refreshed?.pwywMaxPrice ?? null).toBeNull();
     });
 
     it('refuse une proposition de prix libre sur un produit qui n\'est pas à prix libre', async () => {

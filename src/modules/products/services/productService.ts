@@ -19,9 +19,11 @@ const DEFAULT_LIST_SORT = '-createdAt';
 
 const ALLOWED_PRODUCT_UPDATES = [
   'title', 'description', 'price', 'currency', 'condition',
-  'category', 'kpopGroup', 'kpopMember', 'albumName',
-  'isAvailable', 'isReserved', 'reservedFor', 'shippingOptions'
+  'category', 'type', 'kpopGroup', 'kpopMember', 'albumName',
+  'isAvailable', 'isReserved', 'reservedFor', 'shippingOptions', 'allowOffers'
 ];
+// Le prix libre (isPayWhatYouWant, pwywMinPrice, pwywMaxPrice) passe par
+// POST /api/messaging/pwyw, qui valide la fourchette.
 // `images` est volontairement absent : un chemin fourni par le client permettrait
 // de faire supprimer n'importe quel fichier du serveur via DELETE /:id/images.
 
@@ -409,9 +411,16 @@ export async function markAsSold({
     throw new HttpError(400, 'ID d\'acheteur invalide');
   }
 
+  // Comme une vente payée : isSold distingue une annonce vendue d'une annonce
+  // simplement retirée ou mise en pause par la modération.
   product.isAvailable = false;
+  product.isSold = true;
+  product.soldAt = new Date();
 
-  if (buyerId) {
+  // Le front transmet parfois l'identifiant du vendeur : un vendeur n'est
+  // jamais son propre acheteur, ses achats ne doivent pas en être gonflés.
+  if (buyerId && buyerId !== userId) {
+    product.soldTo = new mongoose.Types.ObjectId(buyerId);
     await User.findByIdAndUpdate(buyerId, {
       $inc: { 'statistics.totalPurchases': 1 }
     });

@@ -21,6 +21,9 @@ export type LeanProduct = {
   isAvailable: boolean;
   allowOffers?: boolean;
   minOfferPercentage?: number;
+  isPayWhatYouWant?: boolean;
+  pwywMinPrice?: number | null;
+  pwywMaxPrice?: number | null;
   shippingOptions?: IProduct['shippingOptions'];
   createdAt: Date;
   categoryLabel?: string;
