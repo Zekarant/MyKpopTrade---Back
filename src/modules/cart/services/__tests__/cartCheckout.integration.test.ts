@@ -5,8 +5,9 @@ import {
 } from '../../../../tests/helpers/mongoMemory';
 import { createTestUser, createTestProduct } from '../../../../tests/helpers/fixtures';
 import * as cartService from '../cartService';
-import { checkoutCart } from '../cartCheckoutService';
+import { checkoutCart, finalizeCartCheckout } from '../cartCheckoutService';
 import { PayPalService } from '../../../payments/services/paypalService';
+import { cancelDirectPayment } from '../../../payments/services/paymentService';
 import Product from '../../../../models/productModel';
 import Payment from '../../../../models/paymentModel';
 
@@ -62,6 +63,51 @@ describe('checkoutCart (integration)', () => {
     const results = await checkoutCart(buyer._id.toString(), { shippingMethod: 'national' });
 
     expect(results.map((r) => r.productIds[0]).sort()).toEqual([a._id.toString(), b._id.toString()].sort());
+  });
+
+  it('renvoie l\'ordre PayPal de chaque paiement, qui permet à la page d\'annulation de tout libérer', async () => {
+    const buyer = await createTestUser();
+    const sellerA = await connectedSeller();
+    const sellerB = await connectedSeller();
+    const a = await createTestProduct(sellerA._id, { title: 'A' });
+    const b = await createTestProduct(sellerB._id, { title: 'B' });
+    const buyerId = buyer._id.toString();
+    await cartService.addItem(buyerId, a._id.toString());
+    await cartService.addItem(buyerId, b._id.toString());
+    fakePayPal();
+
+    const results = await checkoutCart(buyerId, { shippingMethod: 'national' });
+
+    for (const result of results) {
+      const payment = await Payment.findById(result.paymentId);
+      expect(result.paypalOrderId).toBe(payment!.paymentIntentId);
+    }
+    // Ce que fait cancel.vue : POST /payments/paypal/cancel avec chaque paypalOrderId.
+    for (const result of results) {
+      await expect(cancelDirectPayment(buyerId, result.paypalOrderId)).resolves.toEqual({ cancelled: true });
+    }
+    expect((await Product.find({ _id: { $in: [a._id, b._id] } })).map((p) => p.isReserved)).toEqual([false, false]);
+    expect((await Payment.find({ buyer: buyer._id })).map((p) => p.status)).toEqual(['cancelled', 'cancelled']);
+  });
+
+  it('finalizeCartCheckout ne retire que les articles payés par l\'acheteur', async () => {
+    const buyer = await createTestUser();
+    const otherBuyer = await createTestUser();
+    const seller = await connectedSeller();
+    const paid = await createTestProduct(seller._id, { title: 'Payé' });
+    const cancelled = await createTestProduct(seller._id, { title: 'Annulé' });
+    const soldToOther = await createTestProduct(seller._id, { title: 'Vendu à un autre' });
+    const buyerId = buyer._id.toString();
+    for (const product of [paid, cancelled, soldToOther]) {
+      await cartService.addItem(buyerId, product._id.toString());
+    }
+    await Product.updateOne({ _id: paid._id }, { isSold: true, isAvailable: false, soldTo: buyer._id });
+    await Product.updateOne({ _id: soldToOther._id }, { isSold: true, isAvailable: false, soldTo: otherBuyer._id });
+
+    await finalizeCartCheckout(buyerId);
+
+    const cart = await cartService.getCart(buyerId);
+    expect(cart.items.map((item) => item.product?.title).sort()).toEqual(['Annulé', 'Vendu à un autre']);
   });
 
   it('libère les produits déjà réservés si un paiement suivant échoue', async () => {

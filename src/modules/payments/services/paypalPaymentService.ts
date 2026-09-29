@@ -2,7 +2,7 @@ import axios from 'axios';
 import { Types } from 'mongoose';
 import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
-import Payment from '../../../models/paymentModel';
+import Payment, { IPayment } from '../../../models/paymentModel';
 import {
   PayPalClient,
   PayPalLink,
@@ -18,7 +18,8 @@ import { PayPalPartnerService, SELLER_BLOCK_MESSAGES } from './paypalPartnerServ
 import { paymentConfig } from '../../../config/paymentConfig';
 import logger from '../../../commons/utils/logger';
 import { formatForPayPal } from '../../../commons/utils/moneyMath';
-import { resolveCheckout, ShippingAddress, ShippingMethod } from './checkoutService';
+import { CheckoutBreakdown, resolveCheckout, ShippingAddress, ShippingMethod } from './checkoutService';
+import { resolveBuyerPrice } from './buyerPrice';
 import { HttpError } from '../../../commons/utils/httpError';
 
 /** Durée pendant laquelle un produit reste réservé à l'acheteur qui paie. */
@@ -100,6 +101,22 @@ function buildPayPalShipping(address: ShippingAddress) {
  * Calcule la commission plateforme prélevée via `platform_fees`.
  * Renvoie 0 si aucune commission n'est configurée (cas de la beta).
  */
+const ADDRESS_KEYS = ['recipientName', 'streetLine1', 'streetLine2', 'postalCode', 'city', 'country', 'phone'] as const;
+
+/** Même montant, même livraison, même adresse : l'ordre en attente correspond à la commande demandée. */
+function isSameOrder(
+  payment: IPayment,
+  expected: { method: ShippingMethod; breakdown: CheckoutBreakdown; address?: ShippingAddress }
+): boolean {
+  const stored = payment.shippingAddress;
+  const sameAddress = ADDRESS_KEYS.every(
+    (key) => (stored?.[key] || undefined) === (expected.address?.[key] || undefined)
+  );
+  return payment.amount === expected.breakdown.total &&
+    payment.shippingMethod === expected.method &&
+    sameAddress;
+}
+
 function computePlatformFee(productAmount: number): number {
   const percent = paymentConfig.paypal.platformFeePercent;
   if (!Number.isFinite(percent) || percent <= 0) {
@@ -136,7 +153,22 @@ export class PayPalPaymentService {
       if (existingPayment &&
         new Date().getTime() - new Date(existingPayment.createdAt).getTime() < 24 * 60 * 60 * 1000) {
 
-        const paymentStatus = await PayPalClient.checkPaymentStatus(existingPayment.paymentIntentId);
+        // Une négociation acceptée entre-temps, une autre livraison ou une autre
+        // adresse changent la commande : l'ancien ordre ne doit pas être repris.
+        const current = await Product.findById(productId).select('+negotiations');
+        const expected = current && resolveCheckout(
+          current,
+          resolveBuyerPrice(current, buyerId),
+          checkout.shippingMethod,
+          checkout.shippingAddress
+        );
+        const paymentStatus = expected && isSameOrder(existingPayment, expected)
+          ? await PayPalClient.checkPaymentStatus(existingPayment.paymentIntentId)
+          : null;
+        if (!paymentStatus) {
+          existingPayment.status = 'cancelled';
+          await existingPayment.save();
+        }
 
         if (paymentStatus === 'CREATED' || paymentStatus === 'APPROVED') {
           const accessToken = await PayPalClient.getAccessToken();
@@ -183,7 +215,7 @@ export class PayPalPaymentService {
           }
         },
         { new: false }
-      );
+      ).select('+negotiations');
       if (!product) {
         throw new HttpError(409, 'Produit non disponible : il est déjà réservé ou vendu.');
       }
@@ -204,18 +236,7 @@ export class PayPalPaymentService {
 
       const buyer = await User.findById(buyerId).select('email');
 
-      let priceToPay = product.price;
-
-      if (product.negotiations && product.negotiations.length > 0) {
-        const acceptedNegotiation = product.negotiations.find(
-          (neg) => neg.buyer.toString() === buyerId && neg.status === 'accepted'
-        );
-
-        if (acceptedNegotiation) {
-          // Montant accepté ; counterOffer n'est qu'une étape de la négociation.
-          priceToPay = acceptedNegotiation.currentOffer;
-        }
-      }
+      const priceToPay = resolveBuyerPrice(product, buyerId);
 
       const { method, breakdown, address } = resolveCheckout(
         product,

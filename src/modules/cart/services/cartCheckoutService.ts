@@ -1,6 +1,5 @@
 import { Types } from 'mongoose';
-import { validateCart } from './cartService';
-import { clearCart } from './cartService';
+import { removePurchasedItems, validateCart } from './cartService';
 import User from '../../../models/userModel';
 import { PayPalService } from '../../payments/services/paypalService';
 import { cancelDirectPayment } from '../../payments/services/paymentService';
@@ -24,6 +23,8 @@ interface SellerPaymentResult {
   sellerId: string;
   sellerUsername: string;
   paymentId: Types.ObjectId;
+  /** Ordre PayPal : l'identifiant qu'attendent /payments/paypal/capture et /cancel. */
+  paypalOrderId: string;
   approvalUrl?: string;
   amount: number;
   currency: string;
@@ -76,7 +77,9 @@ export async function checkoutCart(
   }
 
   // 4. Un paiement par produit (PayPal ne répartit pas simplement un ordre
-  // multi-produits vers un même vendeur).
+  // multi-produits vers un même vendeur). Le montant, négociation acceptée
+  // comprise, vient de createDirectPayment (resolveBuyerPrice), comme le
+  // `buyerPrice` affiché par le panier.
   const results: SellerPaymentResult[] = [];
   const createdOrderIds: string[] = [];
 
@@ -95,6 +98,7 @@ export async function checkoutCart(
           sellerId,
           sellerUsername: seller.username,
           paymentId: paymentResult.paymentId,
+          paypalOrderId: paymentResult.orderId,
           approvalUrl: paymentResult.approvalUrl,
           amount: paymentResult.amount,
           currency: paymentResult.currency,
@@ -135,8 +139,10 @@ async function cancelCreatedPayments(userId: string, orderIds: string[]): Promis
 }
 
 /**
- * Après que tous les paiements ont été approuvés et capturés, vider le panier.
+ * Appelé après chaque paiement capturé : retire du panier les articles payés.
+ * Ne vide pas tout le panier, sinon annuler le 2e paiement d'un checkout
+ * multi-vendeurs ferait perdre les articles non payés.
  */
 export async function finalizeCartCheckout(userId: string): Promise<void> {
-  await clearCart(userId);
+  await removePurchasedItems(userId);
 }

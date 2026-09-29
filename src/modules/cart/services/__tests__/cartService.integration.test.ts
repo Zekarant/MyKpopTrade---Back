@@ -44,6 +44,66 @@ describe('cartService (integration)', () => {
     });
   });
 
+  describe('buyerPrice', () => {
+    const negotiation = (buyer: mongoose.Types.ObjectId, status: 'pending' | 'accepted', currentOffer: number) => ({
+      buyer,
+      initialOffer: currentOffer,
+      currentOffer,
+      status,
+      conversationId: new mongoose.Types.ObjectId(),
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    it('vaut le prix catalogue sans négociation acceptée', async () => {
+      const buyer = await createTestUser();
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id, {
+        price: 20,
+        negotiations: [negotiation(buyer._id, 'pending', 12)]
+      });
+
+      const cart = await cartService.addItem(buyer._id.toString(), product._id.toString());
+
+      expect(cart.items[0].buyerPrice).toBe(20);
+    });
+
+    it('vaut le montant négocié accepté par le vendeur, sur toutes les réponses du panier', async () => {
+      const buyer = await createTestUser();
+      const other = await createTestUser();
+      const seller = await createTestUser();
+      const negotiated = await createTestProduct(seller._id, {
+        price: 20,
+        negotiations: [negotiation(other._id, 'accepted', 9), negotiation(buyer._id, 'accepted', 15)]
+      });
+      const catalogue = await createTestProduct(seller._id, { title: 'Catalogue', price: 8 });
+      const buyerId = buyer._id.toString();
+
+      const added = await cartService.addItem(buyerId, negotiated._id.toString());
+      await cartService.addItem(buyerId, catalogue._id.toString());
+      const cart = await cartService.getCart(buyerId);
+      const afterRemove = await cartService.removeItem(buyerId, catalogue._id.toString());
+
+      expect(added.items[0].buyerPrice).toBe(15);
+      expect(cart.items.map((item) => item.buyerPrice)).toEqual([15, 8]);
+      expect(afterRemove.items.map((item) => item.buyerPrice)).toEqual([15]);
+      // Le snapshot reste le prix catalogue : il sert à détecter un changement de prix.
+      expect(cart.items[0].priceSnapshot).toBe(20);
+    });
+
+    it('ne renvoie pas les négociations (offres des autres acheteurs)', async () => {
+      const buyer = await createTestUser();
+      const other = await createTestUser();
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id, { negotiations: [negotiation(other._id, 'pending', 5)] });
+
+      await cartService.addItem(buyer._id.toString(), product._id.toString());
+      const cart = await cartService.getCart(buyer._id.toString());
+
+      expect(JSON.parse(JSON.stringify(cart)).items[0].product).not.toHaveProperty('negotiations');
+    });
+  });
+
   describe('addItem', () => {
     it('ajoute un produit au panier avec snapshot du prix', async () => {
       const buyer = await createTestUser();
@@ -238,6 +298,31 @@ describe('cartService (integration)', () => {
 
       expect(result.valid).toBe(false);
       expect(result.issues.some(i => i.includes('prix'))).toBe(true);
+    });
+
+    it('ne bloque pas un article au prix négocié accepté quand le prix catalogue change', async () => {
+      const buyer = await createTestUser();
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id, {
+        price: 10,
+        negotiations: [{
+          buyer: buyer._id,
+          initialOffer: 8,
+          currentOffer: 8,
+          status: 'accepted',
+          conversationId: new mongoose.Types.ObjectId(),
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }]
+      });
+      await cartService.addItem(buyer._id.toString(), product._id.toString());
+
+      const Product = (await import('../../../../models/productModel')).default;
+      await Product.findByIdAndUpdate(product._id, { price: 25 });
+
+      const result = await cartService.validateCart(buyer._id.toString());
+
+      expect(result.valid).toBe(true);
     });
 
     it('refuse un panier vide', async () => {
