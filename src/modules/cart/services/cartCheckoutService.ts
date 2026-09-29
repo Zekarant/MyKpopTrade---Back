@@ -1,8 +1,8 @@
 import { validateCart } from './cartService';
 import { clearCart } from './cartService';
-import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
 import { PayPalService } from '../../payments/services/paypalService';
+import { cancelDirectPayment } from '../../payments/services/paymentService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 
@@ -29,9 +29,17 @@ interface SellerPaymentResult {
   productIds: string[];
 }
 
+type CartProduct = { _id: { toString(): string }; title?: string; seller: { toString(): string } };
+
 /**
  * Checkout multi-seller : groupe les items du panier par vendeur,
- * crée un paiement PayPal par vendeur, et renvoie les URLs d'approbation.
+ * crée un paiement PayPal par produit, et renvoie les URLs d'approbation.
+ *
+ * Tout ou rien : chaque paiement réserve son produit. Un échec au milieu
+ * laissait les produits précédents réservés sans que l'acheteur reçoive leurs
+ * liens de paiement — bloqués pour tout le monde. Les vendeurs sont donc tous
+ * vérifiés avant de créer le moindre paiement, et un échec annule ceux déjà
+ * créés pendant ce passage.
  */
 export async function checkoutCart(
   userId: string,
@@ -43,47 +51,46 @@ export async function checkoutCart(
     throw new HttpError(400, `Panier invalide : ${validation.issues.join(', ')}`);
   }
 
-  const { validItems } = validation;
-
-  // 2. Grouper les items par vendeur
-  const sellerGroups = new Map<string, typeof validItems>();
-  for (const item of validItems) {
-    const product = item.product as any;
+  // 2. Grouper les produits par vendeur
+  const sellerGroups = new Map<string, CartProduct[]>();
+  for (const item of validation.validItems) {
+    const product = item.product as unknown as CartProduct;
     const sellerId = product.seller.toString();
-    if (!sellerGroups.has(sellerId)) {
-      sellerGroups.set(sellerId, []);
-    }
-    sellerGroups.get(sellerId)!.push(item);
+    sellerGroups.set(sellerId, [...(sellerGroups.get(sellerId) ?? []), product]);
   }
 
-  // 3. Pour chaque vendeur, vérifier qu'il est connecté à PayPal et créer le paiement
+  // 3. Tous les vendeurs doivent être reliés à PayPal, avant tout paiement.
+  const sellers = await User.find({ _id: { $in: [...sellerGroups.keys()] } })
+    .select('username paypalConnected paypalMerchantId');
+  const sellerById = new Map(sellers.map((seller) => [seller._id.toString(), seller]));
+  const unpayable = [...sellerGroups]
+    .filter(([sellerId]) => {
+      const seller = sellerById.get(sellerId);
+      return !seller?.paypalMerchantId || !seller.paypalConnected;
+    })
+    .flatMap(([, products]) => products.map((product) => product.title || 'Produit inconnu'));
+  if (unpayable.length) {
+    throw new HttpError(
+      400,
+      `Le vendeur de "${unpayable.join(', ')}" n'est pas connecté à PayPal. Retirez ces articles du panier.`
+    );
+  }
+
+  // 4. Un paiement par produit (PayPal ne répartit pas simplement un ordre
+  // multi-produits vers un même vendeur).
   const results: SellerPaymentResult[] = [];
+  const createdOrderIds: string[] = [];
 
-  for (const [sellerId, items] of sellerGroups) {
-    const seller = await User.findById(sellerId).select('username paypalConnected paypalMerchantId');
-    if (!seller?.paypalMerchantId || !seller.paypalConnected) {
-      const productTitles = await Promise.all(
-        items.map(async (item) => {
-          const p = await Product.findById(item.product).select('title');
-          return p?.title || 'Produit inconnu';
-        })
-      );
-      throw new HttpError(
-        400,
-        `Le vendeur de "${productTitles.join(', ')}" n'est pas connecté à PayPal. Retirez ces articles du panier.`
-      );
-    }
-
-    // On utilise le premier produit pour le paiement direct mais on passe tous les items
-    // Pour simplifier, on fait un paiement par produit (PayPal ne supporte pas facilement le split dans un seul ordre pour multi-produits vers un même seller)
-    for (const item of items) {
-      const productId = (item.product as any)._id?.toString() || item.product.toString();
-
+  for (const [sellerId, products] of sellerGroups) {
+    const seller = sellerById.get(sellerId)!;
+    for (const product of products) {
+      const productId = product._id.toString();
       try {
         const paymentResult = await PayPalService.createDirectPayment(productId, userId, {
           shippingMethod: checkout.shippingMethod,
           shippingAddress: checkout.shippingAddress
         });
+        if (!paymentResult.resumed) createdOrderIds.push(paymentResult.orderId);
 
         results.push({
           sellerId,
@@ -101,6 +108,7 @@ export async function checkoutCart(
           productId,
           userId
         });
+        await cancelCreatedPayments(userId, createdOrderIds);
         throw new HttpError(
           400,
           error.message || `Erreur lors de la création du paiement pour le vendeur ${seller.username}`
@@ -110,6 +118,20 @@ export async function checkoutCart(
   }
 
   return results;
+}
+
+/** Annule les paiements créés par un checkout interrompu et libère leurs produits. */
+async function cancelCreatedPayments(userId: string, orderIds: string[]): Promise<void> {
+  for (const orderId of orderIds) {
+    try {
+      await cancelDirectPayment(userId, orderId);
+    } catch (error) {
+      logger.error('Annulation impossible après un checkout panier interrompu', {
+        orderId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
 }
 
 /**
