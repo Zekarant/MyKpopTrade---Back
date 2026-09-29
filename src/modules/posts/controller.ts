@@ -1,32 +1,60 @@
+import mongoose from 'mongoose';
 import { Request, Response } from 'express';
 import Post from './model';
 import { asyncHandler } from '../../commons/middlewares/errorMiddleware';
+import { clampLimit } from '../../commons/utils/pagination';
+
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 50;
+const MAX_CONTENT_LENGTH = 1000;
+const AUTHOR_FIELDS = 'username profilePicture isIdentityVerified';
+
+/** Page et taille de page bornées : `limit` venait tel quel de l'URL. */
+function pagination(req: Request) {
+  return {
+    page: Math.max(1, parseInt(req.query.page as string) || 1),
+    limit: clampLimit(req.query.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
+  };
+}
+
+/** Contenu d'un post ou d'une réponse, ou null s'il est absent ou invalide. */
+function readContent(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const content = value.trim();
+  return content && content.length <= MAX_CONTENT_LENGTH ? content : null;
+}
+
+const isObjectId = (value: unknown): value is string =>
+  typeof value === 'string' && mongoose.Types.ObjectId.isValid(value);
 
 /**
  * Créer un post
  */
 export const createPost = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user.id;
-  const { content } = req.body;
+  const content = readContent(req.body.content);
 
-  if (!content || !content.trim()) {
-    return res.status(400).json({ message: 'Le contenu est requis' });
+  if (!content) {
+    return res.status(400).json({ message: `Le contenu est requis (${MAX_CONTENT_LENGTH} caractères maximum)` });
   }
 
+  // Les images passent par le stockage des annonces, qui les range dans
+  // uploads/products : elles étaient référencées sous /uploads/posts/, dossier
+  // qui n'est pas servi, et ne s'affichaient jamais.
   const images: string[] = [];
   if (req.files && Array.isArray(req.files)) {
     for (const file of req.files) {
-      images.push(`/uploads/posts/${file.filename}`);
+      images.push(`/uploads/products/${file.filename}`);
     }
   }
 
   const post = await Post.create({
     author: userId,
-    content: content.trim(),
+    content,
     images
   });
 
-  const populated = await Post.findById(post._id).populate('author', 'username profilePicture isIdentityVerified');
+  const populated = await Post.findById(post._id).populate('author', AUTHOR_FIELDS);
 
   return res.status(201).json({ post: populated });
 });
@@ -36,12 +64,14 @@ export const createPost = asyncHandler(async (req: Request, res: Response) => {
  */
 export const getUserPosts = asyncHandler(async (req: Request, res: Response) => {
   const { userId } = req.params;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  if (!isObjectId(userId)) {
+    return res.status(400).json({ message: 'Identifiant utilisateur invalide' });
+  }
+  const { page, limit } = pagination(req);
 
   const [posts, count] = await Promise.all([
     Post.find({ author: userId, isReply: false })
-      .populate('author', 'username profilePicture isIdentityVerified')
+      .populate('author', AUTHOR_FIELDS)
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit),
@@ -59,8 +89,7 @@ export const getUserPosts = asyncHandler(async (req: Request, res: Response) => 
  */
 export const getFeed = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user?.id;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const { page, limit } = pagination(req);
 
   // Import Follow model dynamically to avoid circular deps
   const Follow = (await import('../follows/model')).default;
@@ -75,7 +104,7 @@ export const getFeed = asyncHandler(async (req: Request, res: Response) => {
 
   const [posts, count] = await Promise.all([
     Post.find(authorFilter)
-      .populate('author', 'username profilePicture isIdentityVerified')
+      .populate('author', AUTHOR_FIELDS)
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit),
@@ -93,11 +122,13 @@ export const getFeed = asyncHandler(async (req: Request, res: Response) => {
  */
 export const getPost = asyncHandler(async (req: Request, res: Response) => {
   const { postId } = req.params;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  if (!isObjectId(postId)) {
+    return res.status(404).json({ message: 'Post introuvable' });
+  }
+  const { page, limit } = pagination(req);
 
   const post = await Post.findById(postId)
-    .populate('author', 'username profilePicture isIdentityVerified');
+    .populate('author', AUTHOR_FIELDS);
 
   if (!post) {
     return res.status(404).json({ message: 'Post introuvable' });
@@ -105,7 +136,7 @@ export const getPost = asyncHandler(async (req: Request, res: Response) => {
 
   const [replies, repliesCount] = await Promise.all([
     Post.find({ parentPost: postId })
-      .populate('author', 'username profilePicture isIdentityVerified')
+      .populate('author', AUTHOR_FIELDS)
       .sort({ createdAt: 1 })
       .skip((page - 1) * limit)
       .limit(limit),
@@ -125,57 +156,66 @@ export const getPost = asyncHandler(async (req: Request, res: Response) => {
 export const replyToPost = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user.id;
   const { postId } = req.params;
-  const { content } = req.body;
+  const content = readContent(req.body.content);
 
-  if (!content || !content.trim()) {
-    return res.status(400).json({ message: 'Le contenu est requis' });
+  if (!content) {
+    return res.status(400).json({ message: `Le contenu est requis (${MAX_CONTENT_LENGTH} caractères maximum)` });
   }
 
-  const parentPost = await Post.findById(postId);
+  // $inc atomique : lire, incrémenter puis sauver perdait des réponses
+  // concurrentes dans le compteur.
+  const parentPost = isObjectId(postId)
+    ? await Post.findByIdAndUpdate(postId, { $inc: { repliesCount: 1 } })
+    : null;
   if (!parentPost) {
     return res.status(404).json({ message: 'Post introuvable' });
   }
 
   const reply = await Post.create({
     author: userId,
-    content: content.trim(),
+    content,
     parentPost: postId,
     isReply: true
   });
 
-  parentPost.repliesCount += 1;
-  await parentPost.save();
-
-  const populated = await Post.findById(reply._id).populate('author', 'username profilePicture isIdentityVerified');
+  const populated = await Post.findById(reply._id).populate('author', AUTHOR_FIELDS);
 
   return res.status(201).json({ post: populated });
 });
 
 /**
  * Liker/Unliker un post
+ *
+ * Mises à jour conditionnelles et atomiques : la version lire-modifier-sauver
+ * perdait des « j'aime » simultanés, et un double clic pouvait compter deux
+ * fois le même utilisateur.
  */
 export const toggleLike = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const userId = String((req as any).user.id);
   const { postId } = req.params;
-
-  const post = await Post.findById(postId);
-  if (!post) {
+  if (!isObjectId(postId)) {
     return res.status(404).json({ message: 'Post introuvable' });
   }
+  const likerId = new mongoose.Types.ObjectId(userId);
 
-  const alreadyLiked = post.likes.some((id: any) => id.toString() === userId.toString());
-
-  if (alreadyLiked) {
-    post.likes = post.likes.filter((id: any) => id.toString() !== userId.toString()) as any;
-    post.likesCount = Math.max(0, post.likesCount - 1);
-  } else {
-    post.likes.push(userId);
-    post.likesCount += 1;
+  const liked = await Post.findOneAndUpdate(
+    { _id: postId, likes: { $ne: likerId } },
+    { $push: { likes: likerId }, $inc: { likesCount: 1 } },
+    { new: true }
+  );
+  if (liked) {
+    return res.status(200).json({ liked: true, likesCount: liked.likesCount });
   }
 
-  await post.save();
-
-  return res.status(200).json({ liked: !alreadyLiked, likesCount: post.likesCount });
+  const unliked = await Post.findOneAndUpdate(
+    { _id: postId, likes: likerId },
+    { $pull: { likes: likerId }, $inc: { likesCount: -1 } },
+    { new: true }
+  );
+  if (!unliked) {
+    return res.status(404).json({ message: 'Post introuvable' });
+  }
+  return res.status(200).json({ liked: false, likesCount: Math.max(0, unliked.likesCount) });
 });
 
 /**
@@ -185,7 +225,7 @@ export const deletePost = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user.id;
   const { postId } = req.params;
 
-  const post = await Post.findById(postId);
+  const post = isObjectId(postId) ? await Post.findById(postId) : null;
   if (!post) {
     return res.status(404).json({ message: 'Post introuvable' });
   }
