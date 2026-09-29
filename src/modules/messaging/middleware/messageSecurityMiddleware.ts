@@ -3,6 +3,7 @@ import { RateLimiterMongo } from 'rate-limiter-flexible';
 import mongoose from 'mongoose';
 import Conversation from '../../../models/conversationModel';
 import logger from '../../../commons/utils/logger';
+import { isRateLimiterRes } from '../../../commons/utils/rateLimiterRes';
 
 let messageLimiterInstance: RateLimiterMongo | null = null;
 
@@ -27,8 +28,8 @@ export const rateLimitMessages = async (req: Request, res: Response, next: NextF
     const userId = req.user!.id;
     await getMessageLimiter().consume(userId);
     next();
-  } catch (error: any) {
-    if (error && error.remainingPoints !== undefined) {
+  } catch (error) {
+    if (isRateLimiterRes(error)) {
       logger.warn(`Limite de messages dépassée par l'utilisateur ${req.user!.id}`);
       res.status(429).json({ 
         message: 'Vous envoyez trop de messages. Veuillez attendre avant d\'en envoyer d\'autres.' 

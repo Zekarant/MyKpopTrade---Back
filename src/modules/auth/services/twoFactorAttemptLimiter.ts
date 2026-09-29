@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { RateLimiterMongo } from 'rate-limiter-flexible';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import { isRateLimiterRes } from '../../../commons/utils/rateLimiterRes';
 
 /**
  * Plafond de vérifications de code 2FA par compte, toutes adresses IP
@@ -33,9 +34,9 @@ function getLimiter(): RateLimiterMongo {
 export async function consumeTwoFactorAttempt(userId: string): Promise<void> {
   try {
     await getLimiter().consume(userId);
-  } catch (error: any) {
+  } catch (error) {
     // Un dépassement arrive sous forme de RateLimiterRes (`remainingPoints`).
-    if (error && error.remainingPoints !== undefined) {
+    if (isRateLimiterRes(error)) {
       logger.warn('Plafond de vérifications 2FA atteint pour un compte', {
         userId: userId.substring(0, 5) + '...'
       });

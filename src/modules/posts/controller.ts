@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { Request, Response } from 'express';
-import Post from './model';
+import Post, { IPost } from './model';
 import { asyncHandler } from '../../commons/middlewares/errorMiddleware';
 import { clampLimit } from '../../commons/utils/pagination';
 
@@ -91,10 +91,10 @@ export const getFeed = asyncHandler(async (req: Request, res: Response) => {
   // Import Follow model dynamically to avoid circular deps
   const Follow = (await import('../follows/model')).default;
 
-  let authorFilter: any = { isReply: false };
+  const authorFilter: mongoose.QueryFilter<IPost> = { isReply: false };
   if (userId) {
     const followDocs = await Follow.find({ follower: userId }).select('following').lean();
-    const followingIds = followDocs.map((f: any) => f.following);
+    const followingIds: Array<mongoose.Types.ObjectId | string> = followDocs.map((f) => f.following);
     followingIds.push(userId);
     authorFilter.author = { $in: followingIds };
   }

@@ -1,4 +1,5 @@
-import Payment from '../../../models/paymentModel';
+import mongoose from 'mongoose';
+import Payment, { IPayment } from '../../../models/paymentModel';
 import { NotificationService } from '../../notifications/services/notificationService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
@@ -8,7 +9,7 @@ import {
   sendShipmentReminderEmail,
   sendShipmentAutoConfirmedEmail
 } from '../../../commons/services/emailService';
-import User from '../../../models/userModel';
+import User, { IUser } from '../../../models/userModel';
 import { getTrackingProvider } from './tracking';
 import { TrackingEventStatus } from './tracking/types';
 
@@ -94,7 +95,7 @@ async function loadPayment(paymentId: string) {
   return payment;
 }
 
-function assertSeller(payment: any, userId: string): void {
+function assertSeller(payment: Pick<IPayment, 'seller'>, userId: string): void {
   if (payment.seller.toString() !== userId) {
     throw new HttpError(
       403,
@@ -104,7 +105,7 @@ function assertSeller(payment: any, userId: string): void {
   }
 }
 
-function assertBuyer(payment: any, userId: string): void {
+function assertBuyer(payment: Pick<IPayment, 'buyer'>, userId: string): void {
   if (payment.buyer.toString() !== userId) {
     throw new HttpError(
       403,
@@ -114,7 +115,7 @@ function assertBuyer(payment: any, userId: string): void {
   }
 }
 
-function assertParticipant(payment: any, userId: string): void {
+function assertParticipant(payment: Pick<IPayment, 'buyer' | 'seller'>, userId: string): void {
   const buyerId = payment.buyer.toString();
   const sellerId = payment.seller.toString();
   if (buyerId !== userId && sellerId !== userId) {
@@ -134,7 +135,7 @@ interface ShipmentEventInput {
   source: 'system' | 'seller' | 'buyer' | 'carrier';
 }
 
-function appendEvent(payment: any, event: ShipmentEventInput): void {
+function appendEvent(payment: Pick<IPayment, 'shipment'>, event: ShipmentEventInput): void {
   if (!payment.shipment) return;
   if (!Array.isArray(payment.shipment.events)) {
     payment.shipment.events = [];
@@ -236,14 +237,16 @@ export async function markShipped({
  * ou d'un signal carrier — utile pour la timeline et les emails.
  */
 async function applyDelivery(
-  payment: any,
+  payment: IPayment,
   source: 'buyer' | 'system' | 'carrier',
   occurredAt: Date = new Date()
 ) {
-  payment.shipment.status = SHIPMENT_STATUS.DELIVERED;
-  payment.shipment.deliveredAt = occurredAt;
+  // Les appelants ne passent que des paiements dont l'expédition est enregistrée.
+  const shipment = payment.shipment!;
+  shipment.status = SHIPMENT_STATUS.DELIVERED;
+  shipment.deliveredAt = occurredAt;
   if (source === 'system') {
-    payment.shipment.autoConfirmedAt = occurredAt;
+    shipment.autoConfirmedAt = occurredAt;
   }
   appendEvent(payment, {
     status: 'delivered',
@@ -329,7 +332,7 @@ const CARRIER_TO_INTERNAL: Record<TrackingEventStatus, string> = {
  *
  * Renvoie true si l'expédition a été marquée delivered par cette passe.
  */
-export async function pollShipment(payment: any): Promise<boolean> {
+export async function pollShipment(payment: IPayment): Promise<boolean> {
   if (!payment.shipment) return false;
   if (payment.shipment.status === SHIPMENT_STATUS.DELIVERED) return false;
 
@@ -346,7 +349,7 @@ export async function pollShipment(payment: any): Promise<boolean> {
 
   const existing = payment.shipment.events ?? [];
   const lastKnown = existing.length > 0
-    ? Math.max(...existing.map((e: any) => new Date(e.occurredAt).getTime()))
+    ? Math.max(...existing.map((e) => new Date(e.occurredAt).getTime()))
     : 0;
 
   for (const ev of result.events) {
@@ -520,8 +523,8 @@ export async function sendStuckShipmentReminders(): Promise<{ sent: number }> {
  * un email qui plante ne doit jamais casser le flux de paiement/cron.
  */
 async function safeSendEmail(
-  userId: any,
-  send: (user: any) => Promise<void>
+  userId: mongoose.Types.ObjectId,
+  send: (user: IUser) => Promise<void>
 ): Promise<void> {
   try {
     const user = await User.findById(userId);

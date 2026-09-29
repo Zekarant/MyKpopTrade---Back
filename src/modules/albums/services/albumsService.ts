@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
-import Album from '../../../models/albumModel';
+import type { Request } from 'express';
+import Album, { IKpopAlbum } from '../../../models/albumModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import Product from '../../../models/productModel';
 import { HttpError } from '../../../commons/utils/httpError';
@@ -9,13 +10,16 @@ import { clampLimit } from '../../../commons/utils/pagination';
 
 const CATALOG_MAX_LIMIT = 2000;
 
+/** Corps libre d'une requête admin, validé par le schéma Mongoose à l'écriture. */
+type AlbumInput = Record<string, unknown>;
+
 function assertValidId(id: string, message: string) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new HttpError(400, message);
   }
 }
 
-export async function createAlbumForGroup(albumData: any) {
+export async function createAlbumForGroup(albumData: AlbumInput) {
   const group = await KpopGroup.findById(albumData.artistId);
   if (!group) {
     throw new HttpError(400, 'Groupe non trouvé');
@@ -40,17 +44,18 @@ export async function createAlbumForGroup(albumData: any) {
   return album;
 }
 
-export async function listAlbums(query: any) {
+export async function listAlbums(query: Request['query']) {
   const page = parseInt(query.page as string) || 1;
   // Le panneau admin K-pop charge jusqu'à 2000 albums d'un coup.
   const limit = clampLimit(query.limit, 20, CATALOG_MAX_LIMIT);
   const sortBy = query.sortBy as string || 'releaseDate';
   const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
 
-  const filters: any = {};
+  const filters: mongoose.QueryFilter<IKpopAlbum> = {};
 
   if (query.artistId) {
-    filters.artistId = query.artistId;
+    // Transmis tel quel : Mongoose caste la valeur de la query en ObjectId.
+    filters.artistId = query.artistId as string;
   }
 
   if (query.artistName) {
@@ -203,7 +208,7 @@ export async function searchAlbumsByQuery({
   };
 }
 
-export async function updateAlbumById(albumId: string, updates: any) {
+export async function updateAlbumById(albumId: string, updates: AlbumInput) {
   assertValidId(albumId, 'ID d\'album invalide');
 
   if (updates.artistId) {

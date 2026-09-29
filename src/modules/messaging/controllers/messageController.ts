@@ -131,12 +131,12 @@ export const deleteMessage = asyncHandler(async (req: Request, res: Response) =>
     return res.status(200).json({
       message: 'Message supprimé avec succès'
     });
-  } catch (error: any) {
+  } catch (error) {
     const mapped = mapHttpError(res, error);
     if (mapped) return mapped;
 
     logger.error('Erreur lors de la suppression d\'un message', { error });
-    return res.status(500).json({ message: error.message });
+    return res.status(500).json({ message: error instanceof Error ? error.message : undefined });
   }
 });
 
@@ -157,11 +157,11 @@ export const getMessageAttachment = asyncHandler(async (req: Request, res: Respo
 
     setAttachmentHeaders(res, filePath);
     return res.sendFile(filePath);
-  } catch (error: any) {
+  } catch (error) {
     const mapped = mapHttpError(res, error);
     if (mapped) return mapped;
 
     logger.error('Erreur lors de la récupération d\'une pièce jointe', { error });
-    return res.status(500).json({ message: error.message });
+    return res.status(500).json({ message: error instanceof Error ? error.message : undefined });
   }
 });

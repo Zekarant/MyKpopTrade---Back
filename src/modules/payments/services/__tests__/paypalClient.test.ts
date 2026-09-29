@@ -8,7 +8,7 @@ import axios from 'axios';
 import { buildAuthAssertion, partnerHeaders, PayPalClient } from '../paypalClient';
 
 jest.mock('axios');
-const mockedAxios = axios as jest.Mocked<typeof axios>;
+const mockedAxios = jest.mocked(axios);
 
 function decodeSegment(segment: string) {
   return JSON.parse(Buffer.from(segment, 'base64url').toString('utf8'));
@@ -69,7 +69,7 @@ describe('PayPalClient.getAccessToken', () => {
   });
 
   it('réutilise le token en cache au lieu de le redemander', async () => {
-    (mockedAxios as any).mockResolvedValue({
+    mockedAxios.mockResolvedValue({
       data: { access_token: 'cached-token', expires_in: 3600 }
     });
 
@@ -83,7 +83,7 @@ describe('PayPalClient.getAccessToken', () => {
 
   it('redemande un token quand la marge d\'expiration est dépassée', async () => {
     // expires_in de 60s : sous la marge de 5 minutes, donc jamais mis en cache.
-    (mockedAxios as any).mockResolvedValue({
+    mockedAxios.mockResolvedValue({
       data: { access_token: 'short-lived', expires_in: 60 }
     });
 
@@ -94,7 +94,7 @@ describe('PayPalClient.getAccessToken', () => {
   });
 
   it('ne lance qu\'une requête pour des appels concurrents', async () => {
-    (mockedAxios as any).mockResolvedValue({
+    mockedAxios.mockResolvedValue({
       data: { access_token: 'shared-token', expires_in: 3600 }
     });
 
@@ -121,13 +121,13 @@ describe('PayPalClient.verifyWebhookSignature', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     PayPalClient.resetTokenCache();
-    (mockedAxios as any).mockResolvedValue({
+    mockedAxios.mockResolvedValue({
       data: { access_token: 'token', expires_in: 3600 }
     });
   });
 
   it('accepte un événement dont PayPal confirme la signature', async () => {
-    mockedAxios.post.mockResolvedValue({ data: { verification_status: 'SUCCESS' } } as any);
+    mockedAxios.post.mockResolvedValue({ data: { verification_status: 'SUCCESS' } });
 
     await expect(
       PayPalClient.verifyWebhookSignature(SIGNED_HEADERS, { event_type: 'PAYMENT.CAPTURE.COMPLETED' })
@@ -135,7 +135,7 @@ describe('PayPalClient.verifyWebhookSignature', () => {
   });
 
   it('rejette un événement dont la signature est invalide', async () => {
-    mockedAxios.post.mockResolvedValue({ data: { verification_status: 'FAILURE' } } as any);
+    mockedAxios.post.mockResolvedValue({ data: { verification_status: 'FAILURE' } });
 
     await expect(
       PayPalClient.verifyWebhookSignature(SIGNED_HEADERS, { event_type: 'PAYMENT.CAPTURE.COMPLETED' })

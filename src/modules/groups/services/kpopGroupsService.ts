@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import KpopGroup from '../../../models/kpopGroupModel';
+import KpopGroup, { IKpopGroup } from '../../../models/kpopGroupModel';
 import Album from '../../../models/albumModel';
 import Product from '../../../models/productModel';
 import { HttpError } from '../../../commons/utils/httpError';
@@ -15,7 +15,7 @@ function assertValidGroupId(groupId: string) {
   }
 }
 
-export async function createGroup(groupData: any) {
+export async function createGroup(groupData: Record<string, unknown>) {
   const existingGroup = await KpopGroup.findOne({
     name: { $regex: new RegExp(`^${escapeRegex(String(groupData.name))}$`, 'i') }
   });
@@ -38,21 +38,22 @@ export async function createGroup(groupData: any) {
   return group;
 }
 
-export async function listGroups(query: any) {
-  const page = parseInt(query.page || '1');
+export async function listGroups(query: Record<string, unknown>) {
+  const page = parseInt((query.page as string) || '1');
   // Le panneau admin K-pop charge jusqu'à 2000 groupes d'un coup.
   const limit = clampLimit(query.limit, 20, CATALOG_MAX_LIMIT);
-  const sortBy = query.sortBy || 'name';
+  const sortBy = (query.sortBy as string) || 'name';
   const sortOrder = query.sortOrder === 'desc' ? -1 : 1;
 
-  const filters: any = {};
+  // Le modèle n'a pas de champ `description` : la condition de recherche sur ce champ ne trouve rien, conservée telle quelle.
+  const filters: mongoose.QueryFilter<IKpopGroup & { description?: string }> = {};
 
   if (query.genre) {
-    filters.genres = { $in: [query.genre] };
+    filters.genres = { $in: [query.genre as string] };
   }
 
   if (query.tag) {
-    filters.tags = { $in: [query.tag] };
+    filters.tags = { $in: [query.tag as string] };
   }
 
   if (query.search) {
@@ -98,7 +99,7 @@ export async function searchGroupsByQuery({
 
   const searchRegex = new RegExp(escapeRegex(query.trim()), 'i');
 
-  const filters: any = {
+  const filters: mongoose.QueryFilter<IKpopGroup> = {
     $or: [
       { name: { $regex: searchRegex } },
       { tags: { $elemMatch: { $regex: searchRegex } } },
@@ -215,7 +216,7 @@ export async function fetchGroupWithStats(groupId: string) {
     }
   ]);
 
-  const totalTracks = albums.reduce((sum: number, album: any) => sum + (album.totalTracks || 0), 0);
+  const totalTracks = albums.reduce((sum: number, album) => sum + (album.totalTracks || 0), 0);
 
   const albumStats = {
     totalAlbums: albums.length,
@@ -226,8 +227,8 @@ export async function fetchGroupWithStats(groupId: string) {
     latestAlbum: albums.length > 0 ? albums[0] : null,
     oldestAlbum: albums.length > 0 ? albums[albums.length - 1] : null,
     releaseYears: albums
-      .filter((album: any) => album.releaseDate)
-      .map((album: any) => new Date(album.releaseDate!).getFullYear())
+      .filter((album) => album.releaseDate)
+      .map((album) => new Date(album.releaseDate!).getFullYear())
       .filter((year: number, index: number, arr: number[]) => arr.indexOf(year) === index)
       .sort((a: number, b: number) => b - a)
   };
@@ -247,7 +248,7 @@ export async function fetchGroupWithStats(groupId: string) {
   };
 }
 
-export async function updateGroup(groupId: string, updates: any) {
+export async function updateGroup(groupId: string, updates: Record<string, unknown>) {
   assertValidGroupId(groupId);
 
   const oldGroup = await KpopGroup.findById(groupId);
@@ -266,7 +267,7 @@ export async function updateGroup(groupId: string, updates: any) {
   if (updates.name && updates.name !== oldGroup.name) {
     const updateResult = await Album.updateMany(
       { artistId: groupId },
-      { $set: { artistName: updates.name } }
+      { $set: { artistName: updates.name as string } }
     );
 
     logger.info('Nom du groupe mis à jour dans les albums', {

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { RateLimiterMongo } from 'rate-limiter-flexible';
 import mongoose from 'mongoose';
 import logger from '../../../commons/utils/logger';
+import { isRateLimiterRes } from '../../../commons/utils/rateLimiterRes';
 
 /**
  * Rate limiting des endpoints d'authentification, par adresse IP.
@@ -78,10 +79,10 @@ function createIpRateLimiter(name: LimitName, message: string) {
     try {
       await getLimiter(name).consume(key);
       next();
-    } catch (error: any) {
+    } catch (error) {
       // rate-limiter-flexible signale un dépassement via un RateLimiterRes, qui
       // porte `remainingPoints`. Toute autre erreur est technique.
-      if (error && error.remainingPoints !== undefined) {
+      if (isRateLimiterRes(error)) {
         const retryAfterSeconds = Math.ceil((error.msBeforeNext ?? 0) / 1000) || 60;
         logger.warn('Rate limit authentification dépassé', { limit: name, path: req.path });
         res.setHeader('Retry-After', String(retryAfterSeconds));
@@ -117,8 +118,8 @@ function createUserRateLimiter(name: LimitName, message: string) {
     try {
       await getLimiter(name).consume(key);
       next();
-    } catch (error: any) {
-      if (error && error.remainingPoints !== undefined) {
+    } catch (error) {
+      if (isRateLimiterRes(error)) {
         const retryAfterSeconds = Math.ceil((error.msBeforeNext ?? 0) / 1000) || 60;
         logger.warn('Rate limit utilisateur dépassé', { limit: name, path: req.path });
         res.setHeader('Retry-After', String(retryAfterSeconds));

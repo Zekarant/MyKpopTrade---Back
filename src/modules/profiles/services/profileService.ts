@@ -26,10 +26,10 @@ export const calculateProfileCompleteness = (user: IUser): number => {
 
   fields.forEach(field => {
     const segments = field.name.split('.');
-    let value: any = user;
+    let value: unknown = user;
 
     for (const key of segments) {
-      value = value?.[key as keyof typeof value];
+      value = (value as Record<string, unknown> | null | undefined)?.[key];
       if (value === undefined) break;
     }
 
@@ -182,17 +182,17 @@ export async function fetchMyProfile(userId: string) {
   };
 }
 
-export async function updateMyProfile(userId: string, body: Record<string, any>) {
+export async function updateMyProfile(userId: string, body: Record<string, unknown>) {
   const allowedUpdates = ['bio', 'location', 'socialLinks', 'preferences'];
 
-  const updates: Record<string, any> = {};
+  const updates: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
     if (allowedUpdates.includes(key)) {
       updates[key] = value;
     }
   }
 
-  if (updates.bio && updates.bio.length > 500) {
+  if (updates.bio && (updates.bio as string).length > 500) {
     throw new HttpError(400, 'La bio ne peut pas dépasser 500 caractères');
   }
 

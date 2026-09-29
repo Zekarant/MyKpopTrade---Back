@@ -1,7 +1,15 @@
 import axios from 'axios';
 import { randomUUID } from 'crypto';
 import User, { IUser } from '../../../models/userModel';
-import { paypalApiBaseUrl, PayPalClient, partnerHeaders, extractDebugId } from './paypalClient';
+import {
+  paypalApiBaseUrl,
+  PayPalClient,
+  PayPalLink,
+  partnerHeaders,
+  extractDebugId,
+  paypalErrorMessage,
+  paypalErrorStatus
+} from './paypalClient';
 import { paymentConfig } from '../../../config/paymentConfig';
 import env from '../../../config/env';
 import logger from '../../../commons/utils/logger';
@@ -80,6 +88,19 @@ export interface SellerStatus {
   primaryEmail: string | null;
   /** `tracking_id` de la partner referral à laquelle PayPal rattache ce marchand. */
   trackingId: string | null;
+}
+
+/** Réponse de « show seller status » (champs exploités uniquement). */
+interface PayPalMerchantIntegration {
+  merchant_id?: string;
+  tracking_id?: string;
+  legal_name?: string;
+  primary_email?: string;
+  payments_receivable?: boolean;
+  primary_email_confirmed?: boolean;
+  oauth_integrations?: Array<{
+    oauth_third_party?: Array<{ scopes?: string[] }>;
+  }>;
 }
 
 /**
@@ -240,14 +261,14 @@ export class PayPalPartnerService {
     }
 
     try {
-      const response = await axios.post(
+      const response = await axios.post<{ links?: PayPalLink[] }>(
         `${paypalApiBaseUrl}/v2/customer/partner-referrals`,
         body,
         { headers: partnerHeaders({ accessToken }) }
       );
 
       const actionUrl = response.data.links?.find(
-        (link: any) => link.rel === 'action_url'
+        (link) => link.rel === 'action_url'
       )?.href;
 
       if (!actionUrl) {
@@ -264,11 +285,11 @@ export class PayPalPartnerService {
       });
 
       return actionUrl;
-    } catch (error: any) {
+    } catch (error) {
       logger.error('Échec de la création du partner referral PayPal', {
         sellerId: sellerId.substring(0, 5) + '...',
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
+        status: paypalErrorStatus(error),
+        message: paypalErrorMessage(error),
         debugId: extractDebugId(error)
       });
       throw new Error('Impossible de générer le lien d\'inscription PayPal');
@@ -288,7 +309,7 @@ export class PayPalPartnerService {
     const accessToken = await PayPalClient.getAccessToken();
 
     try {
-      const response = await axios.get(
+      const response = await axios.get<PayPalMerchantIntegration>(
         `${paypalApiBaseUrl}/v1/customer/partners/${partnerId}/merchant-integrations/${merchantId}`,
         { headers: partnerHeaders({ accessToken }) }
       );
@@ -298,8 +319,8 @@ export class PayPalPartnerService {
       // Les permissions accordées à la plateforme vivent dans
       // oauth_integrations[].oauth_third_party[].scopes. Un tableau vide
       // signifie que le vendeur n'a pas validé l'étape de consentement.
-      const scopes: string[] = (data.oauth_integrations || []).flatMap((integration: any) =>
-        (integration.oauth_third_party || []).flatMap((party: any) => party.scopes || [])
+      const scopes: string[] = (data.oauth_integrations || []).flatMap((integration) =>
+        (integration.oauth_third_party || []).flatMap((party) => party.scopes || [])
       );
 
       return {
@@ -312,8 +333,8 @@ export class PayPalPartnerService {
         primaryEmail: data.primary_email || null,
         trackingId: data.tracking_id || null
       };
-    } catch (error: any) {
-      if (error.response?.status === 404) {
+    } catch (error) {
+      if (paypalErrorStatus(error) === 404) {
         logger.warn('Vendeur inconnu de PayPal', {
           merchantId: merchantId.substring(0, 5) + '...'
         });
@@ -321,8 +342,8 @@ export class PayPalPartnerService {
       }
       logger.error('Échec de « show seller status »', {
         merchantId: merchantId.substring(0, 5) + '...',
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
+        status: paypalErrorStatus(error),
+        message: paypalErrorMessage(error),
         debugId: extractDebugId(error)
       });
       throw new Error('Impossible de récupérer le statut PayPal du vendeur');
@@ -472,7 +493,7 @@ export class PayPalPartnerService {
 
     if (Date.now() - checkedAt > SELLER_STATUS_STALE_MS) {
       const refreshed = await PayPalPartnerService.refreshSellerStatus(
-        (seller._id as any).toString()
+        seller._id.toString()
       );
       if (!refreshed) {
         return 'NOT_ONBOARDED';

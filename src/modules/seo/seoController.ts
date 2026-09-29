@@ -70,14 +70,14 @@ export const sitemapXml = asyncHandler(async (_req: Request, res: Response) => {
       .lean()
   ]);
 
-  const productEntries: SitemapEntry[] = products.map((p: any) => ({
+  const productEntries: SitemapEntry[] = products.map((p) => ({
     loc: `${FRONTEND_URL}/products/${p._id}`,
     lastmod: p.updatedAt,
     changefreq: 'daily',
     priority: 0.7
   }));
 
-  const groupEntries: SitemapEntry[] = groups.map((g: any) => ({
+  const groupEntries: SitemapEntry[] = groups.map((g) => ({
     loc: `${FRONTEND_URL}/groups/${g._id}`,
     lastmod: g.updatedAt,
     changefreq: 'weekly',

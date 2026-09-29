@@ -1,9 +1,18 @@
 import passport from 'passport';
 import { Strategy as JwtStrategy, ExtractJwt } from 'passport-jwt';
-import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
-import { Strategy as FacebookStrategy } from 'passport-facebook';
-import { Strategy as DiscordStrategy } from 'passport-discord';
-import User from '../models/userModel';
+import { Request } from 'express';
+import {
+  Strategy as GoogleStrategy,
+  Profile as GoogleProfile,
+  VerifyCallback
+} from 'passport-google-oauth20';
+import {
+  Strategy as FacebookStrategy,
+  Profile as FacebookProfile
+} from 'passport-facebook';
+import { Strategy as DiscordStrategy, Profile as DiscordProfile } from 'passport-discord';
+import type { StateStore } from 'passport-oauth2';
+import User, { IUser } from '../models/userModel';
 import crypto from 'crypto';
 import env from './env';
 import { CookieStateStore } from './oauthStateStore';
@@ -31,7 +40,7 @@ const DEFAULT_PROFILE_PICTURE = 'https://mykpoptrade.com/images/avatar-default.p
 
 /** Complète prénom / nom et photo sans écraser une valeur déjà saisie. */
 function fillMissingIdentity(
-  user: any,
+  user: IUser,
   identity: { firstName?: string; lastName?: string; picture?: string }
 ): void {
   if (!user.firstName && identity.firstName) user.firstName = identity.firstName;
@@ -42,6 +51,15 @@ function fillMissingIdentity(
   if (!hasCustomPicture && identity.picture) {
     user.profilePicture = identity.picture;
   }
+}
+
+/**
+ * Les types de passport-oauth2 ne déclarent que les signatures `store(req, cb)`
+ * et `store(req, meta, cb)`, alors qu'à l'exécution passport-oauth2 appelle
+ * `store(req, state, meta, cb)` pour un magasin d'arité 4 : d'où l'assertion.
+ */
+function createStateStore(): StateStore {
+  return new CookieStateStore() as StateStore;
 }
 
 export const initializePassport = (): void => {
@@ -75,9 +93,15 @@ export const initializePassport = (): void => {
           clientSecret: process.env.GOOGLE_CLIENT_SECRET,
           callbackURL: `${process.env.API_URL}/api/auth/google/callback`,
           passReqToCallback: true,
-          store: new CookieStateStore()
-        } as any,
-        async (req: any, accessToken: string, refreshToken: string, profile: any, done: any) => {
+          store: createStateStore()
+        },
+        async (
+          req: Request,
+          accessToken: string,
+          refreshToken: string,
+          profile: GoogleProfile,
+          done: VerifyCallback
+        ) => {
           try {
             const linkUserId = req.linkUserId;
             const email = profile.emails?.[0]?.value;
@@ -196,9 +220,14 @@ export const initializePassport = (): void => {
           clientSecret: process.env.FACEBOOK_APP_SECRET,
           callbackURL: `${process.env.API_URL}/api/auth/facebook/callback`,
           profileFields: ['id', 'emails', 'name', 'displayName'],
-          store: new CookieStateStore()
-        } as any,
-        async (accessToken: string, refreshToken: string, profile: any, done: any) => {
+          store: createStateStore()
+        },
+        async (
+          accessToken: string,
+          refreshToken: string,
+          profile: FacebookProfile,
+          done: VerifyCallback
+        ) => {
           try {
             const email = profile.emails?.[0]?.value;
             
@@ -218,8 +247,8 @@ export const initializePassport = (): void => {
                 };
                 user.isEmailVerified = true;
                 fillMissingIdentity(user, {
-                  firstName: (profile.name as any)?.givenName,
-                  lastName: (profile.name as any)?.familyName,
+                  firstName: profile.name?.givenName,
+                  lastName: profile.name?.familyName,
                   picture: profile.photos?.[0]?.value
                 });
                 await user.save({ validateBeforeSave: false });
@@ -230,12 +259,12 @@ export const initializePassport = (): void => {
               user = new User({
                 username: await generateUniqueUsername({
                   displayName: profile.displayName,
-                  givenName: (profile.name as any)?.givenName,
-                  familyName: (profile.name as any)?.familyName,
+                  givenName: profile.name?.givenName,
+                  familyName: profile.name?.familyName,
                   email
                 }),
-                firstName: (profile.name as any)?.givenName || firstName,
-                lastName: (profile.name as any)?.familyName || lastName,
+                firstName: profile.name?.givenName || firstName,
+                lastName: profile.name?.familyName || lastName,
                 profilePicture: profile.photos?.[0]?.value || undefined,
                 email,
                 password: generateUnusablePassword(),
@@ -273,9 +302,15 @@ export const initializePassport = (): void => {
           callbackURL: `${process.env.API_URL}/api/auth/discord/callback`,
           scope: ['identify', 'email'],
           passReqToCallback: true,
-          store: new CookieStateStore()
-        } as any,
-        async (req: any, accessToken: string, refreshToken: string, profile: any, done: any) => {
+          store: createStateStore()
+        },
+        async (
+          req: Request,
+          accessToken: string,
+          refreshToken: string,
+          profile: DiscordProfile,
+          done: VerifyCallback
+        ) => {
           try {
             const linkUserId = req.linkUserId;
             const email = profile.email;
@@ -385,7 +420,7 @@ export const initializePassport = (): void => {
     );
   }
 
-  passport.serializeUser((user: any, done) => {
+  passport.serializeUser((user: Express.User, done) => {
     done(null, user.id);
   });
 

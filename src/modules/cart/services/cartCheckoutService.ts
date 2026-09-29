@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import { validateCart } from './cartService';
 import { clearCart } from './cartService';
 import User from '../../../models/userModel';
@@ -22,8 +23,8 @@ export interface CartCheckoutInput {
 interface SellerPaymentResult {
   sellerId: string;
   sellerUsername: string;
-  paymentId: string;
-  approvalUrl: string;
+  paymentId: Types.ObjectId;
+  approvalUrl?: string;
   amount: number;
   currency: string;
   productIds: string[];
@@ -51,7 +52,8 @@ export async function checkoutCart(
   // 2. Grouper les produits par vendeur
   const sellerGroups = new Map<string, CartProduct[]>();
   for (const item of validation.validItems) {
-    const product = item.product as unknown as CartProduct;
+    // validateCart n'a retenu que des articles dont le produit existe encore.
+    const product: CartProduct = item.product!;
     const sellerId = product.seller.toString();
     sellerGroups.set(sellerId, [...(sellerGroups.get(sellerId) ?? []), product]);
   }
@@ -98,9 +100,10 @@ export async function checkoutCart(
           currency: paymentResult.currency,
           productIds: [productId]
         });
-      } catch (error: any) {
+      } catch (error) {
+        const message = error instanceof Error ? error.message : undefined;
         logger.error('Erreur lors de la création du paiement multi-seller', {
-          error: error.message,
+          error: message ?? String(error),
           sellerId,
           productId,
           userId
@@ -108,7 +111,7 @@ export async function checkoutCart(
         await cancelCreatedPayments(userId, createdOrderIds);
         throw new HttpError(
           400,
-          error.message || `Erreur lors de la création du paiement pour le vendeur ${seller.username}`
+          message || `Erreur lors de la création du paiement pour le vendeur ${seller.username}`
         );
       }
     }

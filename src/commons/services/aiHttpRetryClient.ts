@@ -1,6 +1,6 @@
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-export interface FetchJsonWithRetryOptions {
+export interface FetchJsonWithRetryOptions<TPayload, TErrorPayload = unknown> {
   url: string;
   headers: Record<string, string>;
   body: string;
@@ -8,9 +8,9 @@ export interface FetchJsonWithRetryOptions {
   maxAttempts: number;
   backoffMs: number;
   /** Extrait le contenu texte d'une réponse HTTP 2xx ; undefined si vide/inattendu (déclenche un retry). */
-  extractContent: (payload: any) => string | undefined;
+  extractContent: (payload: TPayload) => string | undefined;
   /** Extrait un message d'erreur du corps d'une réponse HTTP non-2xx (best-effort). */
-  extractErrorMessage?: (payload: any) => string | undefined;
+  extractErrorMessage?: (payload: TErrorPayload) => string | undefined;
 }
 
 /**
@@ -20,7 +20,7 @@ export interface FetchJsonWithRetryOptions {
  * pas la disponibilité du service. Retourne le contenu extrait par `extractContent`,
  * ou lève une erreur avec le dernier message d'échec rencontré.
  */
-export const fetchJsonWithRetry = async ({
+export const fetchJsonWithRetry = async <TPayload, TErrorPayload = unknown>({
   url,
   headers,
   body,
@@ -29,7 +29,7 @@ export const fetchJsonWithRetry = async ({
   backoffMs,
   extractContent,
   extractErrorMessage
-}: FetchJsonWithRetryOptions): Promise<string> => {
+}: FetchJsonWithRetryOptions<TPayload, TErrorPayload>): Promise<string> => {
   let lastError = 'échec inconnu';
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {

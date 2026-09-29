@@ -6,7 +6,7 @@ export interface IAuditLog extends Document {
   targetType: 'user' | 'product' | 'post' | 'report' | 'verification' | 'system' | 'dispute' | 'payment';
   targetId?: mongoose.Types.ObjectId;
   details?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   createdAt: Date;
 }
 

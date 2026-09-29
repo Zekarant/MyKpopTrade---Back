@@ -37,7 +37,19 @@ function clampLimit(value: unknown): number {
   return Math.min(n, MAX_LIMIT);
 }
 
-function mapFeature(feature: any): AddressResult | null {
+/** Feature GeoJSON renvoyée par la BAN (propriétés exploitées uniquement). */
+interface BanFeature {
+  properties?: {
+    label?: string;
+    name?: string;
+    postcode?: string;
+    city?: string;
+    context?: string;
+    score?: number;
+  };
+}
+
+function mapFeature(feature: BanFeature | null | undefined): AddressResult | null {
   const props = feature?.properties;
   if (!props) return null;
 
@@ -88,7 +100,7 @@ export async function lookupAddress(query: LookupQuery): Promise<AddressResult[]
   if (city) params.city = city;
 
   try {
-    const response = await axios.get(BAN_URL, {
+    const response = await axios.get<{ features?: BanFeature[] } | undefined>(BAN_URL, {
       params,
       timeout: REQUEST_TIMEOUT_MS,
       headers: { Accept: 'application/json' }
@@ -97,8 +109,8 @@ export async function lookupAddress(query: LookupQuery): Promise<AddressResult[]
     const features = Array.isArray(response.data?.features) ? response.data.features : [];
     return features
       .map(mapFeature)
-      .filter((r: AddressResult | null): r is AddressResult => r !== null);
-  } catch (error: any) {
+      .filter((r): r is AddressResult => r !== null);
+  } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
       logger.warn('BAN a renvoyé une erreur', {
         status: error.response.status,

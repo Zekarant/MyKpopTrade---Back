@@ -1,13 +1,21 @@
+import mongoose from 'mongoose';
 import { add, gt } from '../../../commons/utils/moneyMath';
 import { NotificationService } from '../../notifications/services/notificationService';
+import type { IPayment } from '../../../models/paymentModel';
 
 export interface RefundEntryInput {
   refundId: string;
   amount: number;
   currency: string;
   reason?: string;
-  initiatedBy?: any;
+  initiatedBy?: mongoose.Types.ObjectId;
 }
+
+/** Champs d'un paiement lus et mis à jour par le registre des remboursements. */
+export type RefundablePayment = Pick<
+  IPayment,
+  'amount' | 'status' | 'refunds' | 'totalRefunded' | 'refundAmount' | 'refundId' | 'refundedAt'
+>;
 
 export interface RefundLedgerResult {
   /** `false` si ce remboursement était déjà enregistré (webhook redélivré). */
@@ -29,12 +37,12 @@ export interface RefundLedgerResult {
  * Ne sauvegarde pas : l'appelant décide quand persister.
  */
 export function applyRefundToPayment(
-  payment: any,
+  payment: RefundablePayment,
   entry: RefundEntryInput
 ): RefundLedgerResult {
   payment.refunds = payment.refunds || [];
 
-  const existing = payment.refunds.find((r: any) => r.refundId === entry.refundId);
+  const existing = payment.refunds.find((r) => r.refundId === entry.refundId);
   let changed = false;
 
   if (!existing) {
@@ -57,8 +65,8 @@ export function applyRefundToPayment(
   }
 
   const totalRefunded = payment.refunds
-    .filter((r: any) => r.status === 'completed')
-    .reduce((sum: number, r: any) => add(sum, r.amount), 0);
+    .filter((r) => r.status === 'completed')
+    .reduce((sum, r) => add(sum, r.amount), 0);
 
   const isFullyRefunded = !gt(payment.amount, totalRefunded);
 
@@ -74,10 +82,12 @@ export function applyRefundToPayment(
 /**
  * Montant encore remboursable sur un paiement, d'après l'historique local.
  */
-export function remainingRefundable(payment: any): number {
+export function remainingRefundable(
+  payment: Pick<IPayment, 'amount' | 'refunds' | 'totalRefunded'>
+): number {
   const completed = (payment.refunds || [])
-    .filter((r: any) => r.status === 'completed')
-    .reduce((sum: number, r: any) => add(sum, r.amount), 0);
+    .filter((r) => r.status === 'completed')
+    .reduce((sum, r) => add(sum, r.amount), 0);
 
   // `totalRefunded` peut avoir été renseigné par un webhook sans que l'entrée
   // détaillée existe : on retient la valeur la plus prudente des deux.
@@ -92,7 +102,7 @@ export function remainingRefundable(payment: any): number {
  * renotifier l'acheteur.
  */
 export async function notifyRefund(
-  payment: any,
+  payment: Pick<IPayment, '_id' | 'buyer' | 'seller' | 'product' | 'currency'>,
   refundAmount: number,
   ledger: { changed: boolean; totalRefunded: number; isFullyRefunded: boolean }
 ): Promise<void> {

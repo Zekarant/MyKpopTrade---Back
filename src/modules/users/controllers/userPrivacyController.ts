@@ -12,7 +12,7 @@ import {
 
 function mapHttpError(res: Response, error: unknown, successFalse = true): Response | null {
   if (error instanceof HttpError) {
-    const body: any = { message: error.message };
+    const body: { message: string; success?: boolean } = { message: error.message };
     if (successFalse) body.success = false;
     return res.status(error.statusCode).json(body);
   }

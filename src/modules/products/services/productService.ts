@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import path from 'path';
 import fs from 'fs';
-import Product from '../../../models/productModel';
+import Product, { IProduct } from '../../../models/productModel';
 import User from '../../../models/userModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import KpopAlbum from '../../../models/albumModel';
@@ -31,6 +31,16 @@ function assertValidObjectId(productId: string) {
 }
 
 type KpopEntity = { _id: mongoose.Types.ObjectId; name: string };
+
+interface KpopNames {
+  kpopGroupName?: string;
+  kpopGroupId?: string;
+  albumNameStr?: string;
+  albumId?: string;
+}
+
+type EnrichedProduct = Omit<IProduct, keyof mongoose.Document> &
+  KpopNames & { _id: mongoose.Types.ObjectId; shippingPrice?: number | null };
 
 /**
  * Groupes (ou albums) désignés par les annonces, en une requête pour toute la
@@ -72,20 +82,20 @@ function cleanupUploadedFiles(files?: Express.Multer.File[]) {
   }
 }
 
-async function withKpopNames(products: any[]): Promise<any[]> {
+async function withKpopNames(products: IProduct[]): Promise<EnrichedProduct[]> {
   const [groups, albums] = await Promise.all([
     loadKpopEntities(KpopGroup, products.map((product) => product.kpopGroup)),
     loadKpopEntities(KpopAlbum, products.map((product) => product.albumName))
   ]);
 
   return products.map((product) => {
-    const enriched: any = product.toObject();
+    const enriched: EnrichedProduct = product.toObject();
     const group = groups.get(product.kpopGroup);
     if (group) {
       enriched.kpopGroupName = group.name;
       enriched.kpopGroupId = group._id.toString();
     }
-    const album = albums.get(product.albumName);
+    const album = product.albumName ? albums.get(product.albumName) : undefined;
     if (album) {
       enriched.albumNameStr = album.name;
       enriched.albumId = album._id.toString();
@@ -102,7 +112,7 @@ async function findProductOr404(productId: string) {
   return product;
 }
 
-function assertOwnership(product: any, userId: string, message: string) {
+function assertOwnership(product: Pick<IProduct, 'seller'>, userId: string, message: string) {
   if (product.seller.toString() !== userId) {
     throw new HttpError(403, message);
   }
@@ -112,7 +122,7 @@ function assertOwnership(product: any, userId: string, message: string) {
  * Chemins publics des images reçues par multer. `req.body.images` est ignoré :
  * un chemin fourni par le client finirait dans fs.unlinkSync à la suppression.
  */
-export function resolveProductImages(req: { files?: any }): string[] {
+export function resolveProductImages(req: Pick<Express.Request, 'files'>): string[] {
   if (!req.files || !Array.isArray(req.files)) return [];
   return (req.files as Express.Multer.File[]).map(file =>
     `/uploads/products/${path.basename(file.path)}`
@@ -126,7 +136,7 @@ export async function createProductForSeller({
   uploadedFiles
 }: {
   sellerId: string;
-  productData: any;
+  productData: Record<string, unknown>;
   imageUrls: string[];
   uploadedFiles?: Express.Multer.File[];
 }) {
@@ -210,7 +220,7 @@ export async function fetchProductById(productId: string, userId?: string) {
 
   const [enrichedProduct] = await withKpopNames([product]);
 
-  const opts = enrichedProduct.shippingOptions || {};
+  const opts: Partial<IProduct['shippingOptions']> = enrichedProduct.shippingOptions || {};
   enrichedProduct.shippingPrice = opts.nationalCost ?? opts.shippingCost ?? null;
 
   if (userId && userId !== product.seller._id.toString()) {
@@ -230,28 +240,29 @@ export async function fetchProductById(productId: string, userId?: string) {
   return { product: enrichedProduct, isFavorite };
 }
 
-export async function listProducts(query: any) {
+export async function listProducts(query: Record<string, unknown>) {
   const page = parseInt(query.page as string) || DEFAULT_LIST_PAGE;
   const limit = clampLimit(query.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
   const sort = query.sort || DEFAULT_LIST_SORT;
 
-  const filter: any = { isAvailable: true };
+  const filter: mongoose.QueryFilter<IProduct> = { isAvailable: true };
 
-  if (query.seller) filter.seller = query.seller;
-  if (query.type) filter.type = query.type;
-  if (query.kpopGroup) filter.kpopGroup = query.kpopGroup;
-  if (query.kpopMember) filter.kpopMember = query.kpopMember;
+  if (query.seller) filter.seller = query.seller as string;
+  if (query.type) filter.type = query.type as IProduct['type'];
+  if (query.kpopGroup) filter.kpopGroup = query.kpopGroup as string;
+  if (query.kpopMember) filter.kpopMember = query.kpopMember as string;
 
   if (query.minPrice || query.maxPrice) {
-    filter.price = {};
-    if (query.minPrice) filter.price.$gte = parseFloat(query.minPrice as string);
-    if (query.maxPrice) filter.price.$lte = parseFloat(query.maxPrice as string);
+    const price: { $gte?: number; $lte?: number } = {};
+    filter.price = price;
+    if (query.minPrice) price.$gte = parseFloat(query.minPrice as string);
+    if (query.maxPrice) price.$lte = parseFloat(query.maxPrice as string);
   }
 
   if (query.condition) {
     const conditions = (query.condition as string).split(',');
     if (conditions.length > 0) {
-      filter.condition = { $in: conditions };
+      filter.condition = { $in: conditions as IProduct['condition'][] };
     }
   }
 
@@ -286,14 +297,14 @@ export async function updateProductForOwner({
 }: {
   productId: string;
   userId: string;
-  body: Record<string, any>;
+  body: Record<string, unknown>;
 }) {
   assertValidObjectId(productId);
 
   const product = await findProductOr404(productId);
   assertOwnership(product, userId, 'Vous n\'êtes pas autorisé à modifier ce produit');
 
-  const updates: Record<string, any> = {};
+  const updates: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
     if (ALLOWED_PRODUCT_UPDATES.includes(key)) {
       updates[key] = value;

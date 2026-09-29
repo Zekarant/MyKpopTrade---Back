@@ -1,5 +1,5 @@
-import { SortOrder } from 'mongoose';
-import Product from '../../../models/productModel';
+import mongoose, { SortOrder } from 'mongoose';
+import Product, { IProduct } from '../../../models/productModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import Album from '../../../models/albumModel';
 import SearchHistory from '../../../models/historicSearchModel';
@@ -31,8 +31,8 @@ function buildProductFilters({
   filters: SearchFilters;
   userId?: string;
   includeOwnProducts: boolean;
-}): any {
-  const searchFilters: any = { isAvailable: true };
+}): mongoose.QueryFilter<IProduct> {
+  const searchFilters: mongoose.QueryFilter<IProduct> = { isAvailable: true };
 
   if (userId && !includeOwnProducts) {
     searchFilters.seller = { $ne: userId };
@@ -55,14 +55,15 @@ function buildProductFilters({
   if (Array.isArray(groups) && groups.length) searchFilters.kpopGroup = { $in: groups.map(exactMatch) };
   if (Array.isArray(members) && members.length) searchFilters.kpopMember = { $in: members.map(exactMatch) };
   if (Array.isArray(albums) && albums.length) searchFilters.albumName = { $in: albums.map(exactMatch) };
-  if (type) searchFilters.type = type;
-  if (condition?.length) searchFilters.condition = { $in: condition };
+  if (type) searchFilters.type = type as IProduct['type'];
+  if (condition?.length) searchFilters.condition = { $in: condition as IProduct['condition'][] };
   if (currency) searchFilters.currency = currency;
 
   if (priceRange) {
-    searchFilters.price = {};
-    if (priceRange.min !== undefined) searchFilters.price.$gte = priceRange.min;
-    if (priceRange.max !== undefined) searchFilters.price.$lte = priceRange.max;
+    const price: { $gte?: number; $lte?: number } = {};
+    searchFilters.price = price;
+    if (priceRange.min !== undefined) price.$gte = priceRange.min;
+    if (priceRange.max !== undefined) price.$lte = priceRange.max;
   }
 
   return searchFilters;

@@ -81,6 +81,6 @@ export const productSchema = Joi.object({
 /**
  * Valide les données d'un produit
  */
-export const validateProductData = (data: any) => {
+export const validateProductData = (data: unknown) => {
   return productSchema.validate(data, { abortEarly: false });
 };

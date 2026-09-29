@@ -28,6 +28,26 @@ let cachedPartnerToken: CachedToken | null = null;
 /** Requête d'obtention en vol, pour éviter N appels concurrents au démarrage. */
 let inFlightTokenRequest: Promise<string> | null = null;
 
+/** Corps d'erreur standard de l'API REST PayPal. */
+export interface PayPalErrorBody {
+  name?: string;
+  message?: string;
+  debug_id?: string;
+  details?: Array<{ issue?: string; description?: string } | null>;
+}
+
+/** Lien HATEOAS renvoyé par l'API PayPal (`approve`, `payer-action`, `up`...). */
+export interface PayPalLink {
+  href: string;
+  rel: string;
+  method?: string;
+}
+
+export interface PayPalMoney {
+  value: string;
+  currency_code: string;
+}
+
 /**
  * Extrait le debug ID renvoyé par PayPal. Le guide d'intégration demande de le
  * journaliser systématiquement : c'est la clé qui permet à PayPal de retrouver
@@ -35,12 +55,28 @@ let inFlightTokenRequest: Promise<string> | null = null;
  * `correlation-id` portent la même valeur.
  */
 export function extractDebugId(error: unknown): string | undefined {
-  const axiosError = error as AxiosError<any>;
+  const response = (error as AxiosError<PayPalErrorBody> | null | undefined)?.response;
+  const headerDebugId = response?.headers?.['paypal-debug-id'];
   return (
-    axiosError?.response?.headers?.['paypal-debug-id'] ||
-    axiosError?.response?.data?.debug_id ||
+    (typeof headerDebugId === 'string' ? headerDebugId : undefined) ||
+    response?.data?.debug_id ||
     undefined
   );
+}
+
+/** Statut HTTP de la réponse PayPal portée par une erreur axios, s'il y en a une. */
+export function paypalErrorStatus(error: unknown): number | undefined {
+  return (error as AxiosError | null | undefined)?.response?.status;
+}
+
+/** Corps d'erreur PayPal porté par une erreur axios, s'il y en a un. */
+export function paypalErrorBody(error: unknown): PayPalErrorBody | undefined {
+  return (error as AxiosError<PayPalErrorBody> | null | undefined)?.response?.data;
+}
+
+/** Message renvoyé par PayPal, ou à défaut celui de l'erreur elle-même. */
+export function paypalErrorMessage(error: unknown): string {
+  return paypalErrorBody(error)?.message || (error instanceof Error ? error.message : String(error));
 }
 
 /**
@@ -133,7 +169,7 @@ export class PayPalClient {
     const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
     try {
-      const response = await axios({
+      const response = await axios<{ access_token: string; expires_in?: number }>({
         method: 'post',
         url: `${paypalApiBaseUrl}/v1/oauth2/token`,
         headers: {
@@ -173,7 +209,7 @@ export class PayPalClient {
     try {
       const accessToken = await PayPalClient.getAccessToken();
 
-      const response = await axios.get(
+      const response = await axios.get<{ status: string }>(
         `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}`,
         { headers: partnerHeaders({ accessToken }) }
       );
@@ -202,7 +238,7 @@ export class PayPalClient {
     try {
       const accessToken = await PayPalClient.getAccessToken();
 
-      const response = await axios.get(
+      const response = await axios.get<{ amount: PayPalMoney; status: string }>(
         `${paypalApiBaseUrl}/v2/payments/captures/${captureId}`,
         { headers: partnerHeaders({ accessToken, sellerMerchantId }) }
       );
@@ -214,11 +250,11 @@ export class PayPalClient {
         currency: captureData.amount.currency_code,
         status: captureData.status
       };
-    } catch (error: any) {
+    } catch (error) {
       logger.error('Erreur lors de la récupération des détails de la capture', {
         captureId: captureId.substring(0, 5) + '...',
-        error: error.message,
-        statusCode: error.response?.status,
+        error: error instanceof Error ? error.message : String(error),
+        statusCode: paypalErrorStatus(error),
         debugId: extractDebugId(error)
       });
       throw new Error('Impossible de récupérer les détails de la capture PayPal');
@@ -232,7 +268,7 @@ export class PayPalClient {
    * forger un `PAYMENT.CAPTURE.COMPLETED` et faire passer une commande en payée.
    */
   static async verifyWebhookSignature(
-    headers: Record<string, any>,
+    headers: Record<string, string | string[] | undefined>,
     event: unknown
   ): Promise<boolean> {
     const webhookId = paymentConfig.paypal.webhookId;
@@ -266,7 +302,7 @@ export class PayPalClient {
     try {
       const accessToken = await PayPalClient.getAccessToken();
 
-      const response = await axios.post(
+      const response = await axios.post<{ verification_status: string }>(
         `${paypalApiBaseUrl}/v1/notifications/verify-webhook-signature`,
         { ...requiredHeaders, webhook_id: webhookId, webhook_event: event },
         { headers: partnerHeaders({ accessToken }) }

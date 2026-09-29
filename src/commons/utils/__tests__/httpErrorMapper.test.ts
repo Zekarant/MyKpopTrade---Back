@@ -2,8 +2,10 @@ import { mapHttpError } from '../httpErrorMapper';
 import { HttpError } from '../httpError';
 import type { Response } from 'express';
 
-function createResMock(): Response & { _status?: number; _body?: unknown } {
-  const res: any = {};
+type ResMock = Response & { _status?: number; _body?: unknown };
+
+function createResMock(): ResMock {
+  const res = {} as ResMock;
   res.status = jest.fn((code: number) => {
     res._status = code;
     return res;

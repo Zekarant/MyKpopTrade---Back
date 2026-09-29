@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import User from '../../../models/userModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
@@ -25,7 +26,7 @@ const resolveSuspensionEnd = (durationDays: unknown): Date | undefined => {
   if (durationDays === null || durationDays === undefined) return undefined;
 
   const days = Number(durationDays);
-  if (!SUSPENSION_DURATIONS_DAYS.includes(days as any)) {
+  if (!(SUSPENSION_DURATIONS_DAYS as readonly number[]).includes(days)) {
     throw new HttpError(
       400,
       `Durée invalide. Valeurs acceptées : ${SUSPENSION_DURATIONS_DAYS.join(', ')} jours, ou aucune pour une suspension définitive`
@@ -65,10 +66,11 @@ export async function suspendUser({
   const suspendedAt = new Date();
 
   user.accountStatus = 'suspended';
-  user.suspension = { reason: motive, until, suspendedAt, suspendedBy: adminId as any };
+  const adminObjectId = new mongoose.Types.ObjectId(adminId);
+  user.suspension = { reason: motive, until, suspendedAt, suspendedBy: adminObjectId };
   user.sanctions = [
     ...(user.sanctions ?? []),
-    { action: 'suspend', reason: motive, until, at: suspendedAt, by: adminId as any }
+    { action: 'suspend', reason: motive, until, at: suspendedAt, by: adminObjectId }
   ];
   await user.save({ validateBeforeSave: false });
 
@@ -127,7 +129,7 @@ export async function reactivateUser({
   user.suspension = undefined;
   user.sanctions = [
     ...(user.sanctions ?? []),
-    { action: 'unsuspend', reason: motive, at: new Date(), by: adminId as any }
+    { action: 'unsuspend', reason: motive, at: new Date(), by: new mongoose.Types.ObjectId(adminId) }
   ];
   await user.save({ validateBeforeSave: false });
 
@@ -171,7 +173,7 @@ export async function liftExpiredSuspensions(): Promise<number> {
     await user.save({ validateBeforeSave: false });
 
     await NotificationService.createNotification({
-      recipientId: user._id as any,
+      recipientId: user._id,
       type: 'system',
       title: 'Votre compte a été réactivé',
       content: 'Votre période de suspension est terminée, votre compte est de nouveau actif.',

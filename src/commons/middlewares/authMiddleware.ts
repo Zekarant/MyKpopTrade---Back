@@ -9,7 +9,7 @@ import logger from '../utils/logger';
 interface JwtPayload {
   id: string;
   role?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 declare global {

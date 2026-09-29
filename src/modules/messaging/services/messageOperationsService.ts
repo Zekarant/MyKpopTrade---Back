@@ -54,7 +54,7 @@ export async function sendMessageToConversation({
   await MessagingUtilsService.updateConversationLastMessage(conversationId, newMessage._id.toString());
 
   const otherParticipants = conversation.participants.filter(
-    (p: any) => p.toString() !== userId
+    (p) => p.toString() !== userId
   );
 
   const senderName = username || 'Utilisateur';

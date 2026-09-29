@@ -52,7 +52,7 @@ export class EncryptionService {
    * @param data Données à chiffrer
    * @returns Données chiffrées sous forme de chaîne
    */
-  static encrypt(data: any): string {
+  static encrypt(data: unknown): string {
     try {
       // Convertir les données en chaîne JSON si nécessaire
       const dataString = typeof data === 'object' ? JSON.stringify(data) : String(data);
@@ -76,7 +76,7 @@ export class EncryptionService {
    * @param encryptedData Données chiffrées
    * @returns Données déchiffrées
    */
-  static decrypt(encryptedData: string): any {
+  static decrypt(encryptedData: string): unknown {
     try {
       const parts = encryptedData.split(':');
       let iv: Buffer;

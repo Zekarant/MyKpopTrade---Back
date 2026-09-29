@@ -46,6 +46,11 @@ function handleControllerError(
   });
 }
 
+/** `path` du champ fautif, porté par les CastError / ValidatorError Mongoose. */
+function errorPath(error: unknown): unknown {
+  return typeof error === 'object' && error !== null && 'path' in error ? error.path : undefined;
+}
+
 /**
  * Récupère une conversation spécifique avec ses messages
  */
@@ -109,7 +114,7 @@ export const startConversation = asyncHandler(async (req: Request, res: Response
       logger.error('Erreur lors de la création de la conversation', {
         error: error.message,
         stack: error.stack,
-        path: (error as any).path
+        path: errorPath(error)
       });
     } else {
       logger.error('Erreur inconnue lors de la création de la conversation', { error });
@@ -119,7 +124,7 @@ export const startConversation = asyncHandler(async (req: Request, res: Response
       message: 'Une erreur est survenue lors de la création de la conversation',
       error: process.env.NODE_ENV === 'development' ? {
         message: error instanceof Error ? error.message : 'Erreur inconnue',
-        path: (error as any).path
+        path: errorPath(error)
       } : undefined
     });
   }
@@ -222,12 +227,12 @@ export const initiatePayWhatYouWant = asyncHandler(async (req: Request, res: Res
       message: 'Option Pay What You Want activée avec succès',
       payWhatYouWant
     });
-  } catch (error: any) {
+  } catch (error) {
     if (error instanceof HttpError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
     logger.error('Erreur lors de l\'activation de Pay What You Want', { error });
-    return res.status(400).json({ message: error.message });
+    return res.status(400).json({ message: error instanceof Error ? error.message : undefined });
   }
 });
 
@@ -251,12 +256,12 @@ export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res:
       message: 'Proposition de prix envoyée avec succès',
       result
     });
-  } catch (error: any) {
+  } catch (error) {
     if (error instanceof HttpError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
     logger.error('Erreur lors de la proposition d\'un prix PWYW', { error });
-    return res.status(400).json({ message: error.message });
+    return res.status(400).json({ message: error instanceof Error ? error.message : undefined });
   }
 });
 

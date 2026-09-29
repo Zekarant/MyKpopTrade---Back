@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 
 dotenv.config({ quiet: true });
 
-import User from '../models/userModel';
+import User, { IUser } from '../models/userModel';
 import { PayPalPartnerService, SELLER_BLOCK_MESSAGES } from '../modules/payments/services/paypalPartnerService';
 import { paymentConfig } from '../config/paymentConfig';
 
@@ -29,7 +29,7 @@ async function main(email?: string) {
 
   await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/mykpoptrade');
 
-  const filter: any = email
+  const filter: mongoose.QueryFilter<IUser> = email
     ? { email }
     : { $or: [{ paypalMerchantId: { $ne: null } }, { paypalTrackingId: { $ne: null } }] };
 

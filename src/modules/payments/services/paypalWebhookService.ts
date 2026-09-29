@@ -8,6 +8,27 @@ import { applyRefundToPayment, notifyRefund } from './refundLedger';
 import { NotificationService } from '../../notifications/services/notificationService';
 import logger from '../../../commons/utils/logger';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
+import { PayPalLink, PayPalMoney } from './paypalClient';
+
+/**
+ * Ressource d'un webhook PayPal. Sa forme dépend de `event_type` (capture,
+ * remboursement ou marchand) : seuls les champs exploités sont décrits.
+ */
+interface PayPalWebhookResource {
+  id?: string;
+  invoice_id?: string;
+  custom_id?: string;
+  supplementary_data?: { related_ids?: { order_id?: string } };
+  links?: PayPalLink[];
+  amount?: PayPalMoney;
+  merchant_id?: string;
+  tracking_id?: string;
+}
+
+export interface PayPalWebhookEvent {
+  event_type: string;
+  resource: PayPalWebhookResource;
+}
 
 /**
  * Dispatcher + handlers des webhooks PayPal.
@@ -17,7 +38,7 @@ export class PayPalWebhookService {
   /**
    * Traite le webhook PayPal pour gérer les événements de paiement
    */
-  static async handleWebhook(event: any): Promise<void> {
+  static async handleWebhook(event: PayPalWebhookEvent): Promise<void> {
     try {
       switch (event.event_type) {
         // L'acheteur a approuvé sur PayPal, mais aucun fonds n'a bougé : la
@@ -73,7 +94,7 @@ export class PayPalWebhookService {
   /**
    * Traite `PAYMENT.CAPTURE.COMPLETED` — les fonds sont effectivement encaissés.
    */
-  private static async handlePaymentCompleted(event: any): Promise<void> {
+  private static async handlePaymentCompleted(event: PayPalWebhookEvent): Promise<void> {
     try {
       const resource = event.resource;
       // Sur un événement de capture, `resource.id` est l'ID de la CAPTURE.
@@ -172,10 +193,11 @@ export class PayPalWebhookService {
    * Idempotent : si le refundId est déjà marqué « completed » dans
    * l'historique, on ne refait rien (PayPal peut redélivrer le webhook).
    */
-  private static async handleRefund(event: any): Promise<void> {
+  private static async handleRefund(event: PayPalWebhookEvent): Promise<void> {
     try {
       const resource = event.resource;
-      const captureId = resource.links.find((link: any) => link.rel === 'up')?.href.split('/').pop();
+      // PAYMENT.CAPTURE.REFUNDED porte toujours l'id, les liens et le montant du remboursement.
+      const captureId = resource.links!.find((link) => link.rel === 'up')?.href.split('/').pop();
 
       if (!captureId) {
         logger.warn('Impossible de déterminer le captureId dans l\'événement de remboursement', {
@@ -191,9 +213,9 @@ export class PayPalWebhookService {
         return;
       }
 
-      const refundAmount = parseFloat(resource.amount.value);
-      const refundCurrency = resource.amount.currency_code;
-      const refundId = resource.id;
+      const refundAmount = parseFloat(resource.amount!.value);
+      const refundCurrency = resource.amount!.currency_code;
+      const refundId = resource.id!;
 
       // Même registre que le remboursement synchrone : idempotent par refundId,
       // donc un webhook redélivré ne double ni le montant ni les notifications.
@@ -232,7 +254,7 @@ export class PayPalWebhookService {
    * synchronise le statut réel : le webhook signale la fin du parcours, pas
    * forcément qu'il peut encaisser (email non confirmé, compte restreint…).
    */
-  private static async handleOnboardingCompleted(event: any): Promise<void> {
+  private static async handleOnboardingCompleted(event: PayPalWebhookEvent): Promise<void> {
     const { merchant_id: merchantId, tracking_id: trackingId } = event.resource || {};
 
     if (!merchantId) {
@@ -250,13 +272,13 @@ export class PayPalWebhookService {
     }
 
     const status = await PayPalPartnerService.completeOnboarding(
-      (seller._id as any).toString(),
+      seller._id.toString(),
       merchantId
     );
 
     if (status && PayPalPartnerService.isReady(status)) {
       await NotificationService.createNotification({
-        recipientId: seller._id as any,
+        recipientId: seller._id,
         type: 'system',
         title: 'Compte PayPal connecté',
         content: 'Votre compte PayPal est configuré : vous pouvez désormais recevoir des paiements sur MyKpopTrade.',
@@ -271,7 +293,7 @@ export class PayPalWebhookService {
    * son statut : c'est ce qui fait passer un vendeur de « en cours de validation »
    * à « peut encaisser » sans qu'il ait à revenir cliquer lui-même.
    */
-  private static async handleMerchantIntegrationUpdated(event: any): Promise<void> {
+  private static async handleMerchantIntegrationUpdated(event: PayPalWebhookEvent): Promise<void> {
     const merchantId = event.resource?.merchant_id;
 
     if (!merchantId) {
@@ -292,11 +314,11 @@ export class PayPalWebhookService {
     }
 
     const status = await PayPalPartnerService.refreshSellerStatus(
-      (seller._id as any).toString()
+      seller._id.toString()
     );
 
     logger.info('Statut vendeur resynchronisé après mise à jour PayPal', {
-      sellerId: (seller._id as any).toString().substring(0, 5) + '...',
+      sellerId: seller._id.toString().substring(0, 5) + '...',
       eventType: event.event_type,
       ready: status ? PayPalPartnerService.isReady(status) : false
     });
@@ -307,7 +329,7 @@ export class PayPalWebhookService {
    * espace PayPal. Plus aucune capture ni remboursement n'est possible en son
    * nom : on coupe immédiatement PayPal pour ce vendeur.
    */
-  private static async handleConsentRevoked(event: any): Promise<void> {
+  private static async handleConsentRevoked(event: PayPalWebhookEvent): Promise<void> {
     const { merchant_id: merchantId } = event.resource || {};
 
     if (!merchantId) {
@@ -332,11 +354,11 @@ export class PayPalWebhookService {
     await seller.save();
 
     logger.info('Consentement PayPal révoqué par le vendeur', {
-      sellerId: (seller._id as any).toString().substring(0, 5) + '...'
+      sellerId: seller._id.toString().substring(0, 5) + '...'
     });
 
     await NotificationService.createNotification({
-      recipientId: seller._id as any,
+      recipientId: seller._id,
       type: 'system',
       title: 'Connexion PayPal révoquée',
       content: 'Vous avez retiré les autorisations PayPal accordées à MyKpopTrade. Vos annonces ne peuvent plus être payées tant que vous n\'avez pas reconnecté votre compte.',
@@ -348,7 +370,7 @@ export class PayPalWebhookService {
   /**
    * Traite les événements de capture refusée
    */
-  private static async handleCaptureDenied(event: any): Promise<void> {
+  private static async handleCaptureDenied(event: PayPalWebhookEvent): Promise<void> {
     try {
       const resource = event.resource;
       const orderId = resource.supplementary_data?.related_ids?.order_id ||

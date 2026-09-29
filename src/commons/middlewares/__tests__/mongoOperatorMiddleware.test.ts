@@ -2,7 +2,7 @@ import { stripMongoOperators } from '../mongoOperatorMiddleware';
 
 describe('stripMongoOperators', () => {
   it('retire un opérateur passé à la place d\'une valeur', () => {
-    const body: any = { refreshToken: { $ne: null } };
+    const body = { refreshToken: { $ne: null } };
 
     stripMongoOperators(body);
 
@@ -10,7 +10,7 @@ describe('stripMongoOperators', () => {
   });
 
   it('retire les opérateurs imbriqués dans des objets et des tableaux', () => {
-    const body: any = {
+    const body = {
       filters: { email: { $regex: '^a', exact: 'x' } },
       items: [{ id: { $gt: '' } }, 'plain']
     };

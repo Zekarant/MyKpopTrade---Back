@@ -45,7 +45,7 @@ function replyHttpError(
   error: HttpError,
   options: { withSuccess?: boolean } = {}
 ) {
-  const body: any = {};
+  const body: { success?: boolean; message?: string; code?: string } = {};
   if (options.withSuccess) body.success = false;
   body.message = error.message;
   if (error.code) body.code = error.code;
@@ -113,7 +113,7 @@ export const handleOnboardingReturn = asyncHandler(async (req: Request, res: Res
     // Le merchant ID est enregistré même si la vérification de statut échoue —
     // la page de paramètres affichera l'état réel et proposera de rafraîchir.
     await PayPalService.completeOnboarding(
-      (seller._id as any).toString(),
+      seller._id.toString(),
       merchantIdInPayPal,
       trackingId
     );

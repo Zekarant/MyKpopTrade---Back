@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import User from '../../../models/userModel';
+import User, { IUser } from '../../../models/userModel';
 import Product from '../../../models/productModel';
 import AuditLog from '../../../models/auditLogModel';
 import Report from '../../../models/reportModel';
@@ -28,7 +28,7 @@ export const getUsers = asyncHandler(async (req: Request, res: Response) => {
   const role = req.query.role as string;
   const status = req.query.status as string;
 
-  const filter: any = {};
+  const filter: mongoose.QueryFilter<IUser> = {};
 
   if (search) {
     const pattern = escapeRegex(String(search));
@@ -39,11 +39,11 @@ export const getUsers = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (role && ['user', 'moderator', 'admin'].includes(role)) {
-    filter.role = role;
+    filter.role = role as IUser['role'];
   }
 
   if (status && ['active', 'suspended', 'deleted'].includes(status)) {
-    filter.accountStatus = status;
+    filter.accountStatus = status as IUser['accountStatus'];
   }
 
   const listFields =
@@ -56,16 +56,16 @@ export const getUsers = asyncHandler(async (req: Request, res: Response) => {
       .limit(CSV_EXPORT_ROW_LIMIT);
 
     return sendCsvDownload(res, 'utilisateurs', rows, [
-      { header: 'Pseudo', value: (u: any) => u.username },
-      { header: 'Email', value: (u: any) => u.email },
-      { header: 'Rôle', value: (u: any) => u.role },
-      { header: 'Statut', value: (u: any) => u.accountStatus },
-      { header: 'Motif suspension', value: (u: any) => u.suspension?.reason },
-      { header: 'Suspension jusqu\'au', value: (u: any) => u.suspension?.until },
-      { header: 'Email vérifié', value: (u: any) => (u.isEmailVerified ? 'oui' : 'non') },
-      { header: 'Identité vérifiée', value: (u: any) => (u.isIdentityVerified ? 'oui' : 'non') },
-      { header: 'Inscrit le', value: (u: any) => u.createdAt },
-      { header: 'Dernière connexion', value: (u: any) => u.lastLogin }
+      { header: 'Pseudo', value: (u) => u.username },
+      { header: 'Email', value: (u) => u.email },
+      { header: 'Rôle', value: (u) => u.role },
+      { header: 'Statut', value: (u) => u.accountStatus },
+      { header: 'Motif suspension', value: (u) => u.suspension?.reason },
+      { header: 'Suspension jusqu\'au', value: (u) => u.suspension?.until },
+      { header: 'Email vérifié', value: (u) => (u.isEmailVerified ? 'oui' : 'non') },
+      { header: 'Identité vérifiée', value: (u) => (u.isIdentityVerified ? 'oui' : 'non') },
+      { header: 'Inscrit le', value: (u) => u.createdAt },
+      { header: 'Dernière connexion', value: (u) => u.lastLogin }
     ]);
   }
 
@@ -233,12 +233,12 @@ export const adminGlobalSearch = asyncHandler(async (req: Request, res: Response
       .limit(GLOBAL_SEARCH_LIMIT),
     Post.find({ content: pattern })
       .select('content isReply author')
-      .populate('author', 'username')
+      .populate<{ author: Pick<IUser, 'username'> | null }>('author', 'username')
       .limit(GLOBAL_SEARCH_LIMIT)
   ]);
 
   const results = [
-    ...users.map((user: any) => ({
+    ...users.map((user) => ({
       kind: 'user',
       id: String(user._id),
       label: user.username,
@@ -246,7 +246,7 @@ export const adminGlobalSearch = asyncHandler(async (req: Request, res: Response
       tab: 'users',
       search: user.username
     })),
-    ...products.map((product: any) => ({
+    ...products.map((product) => ({
       kind: 'product',
       id: String(product._id),
       label: product.title,
@@ -254,7 +254,7 @@ export const adminGlobalSearch = asyncHandler(async (req: Request, res: Response
       tab: 'products',
       search: product.title
     })),
-    ...posts.map((post: any) => ({
+    ...posts.map((post) => ({
       kind: 'post',
       id: String(post._id),
       label: post.content.slice(0, 80),
@@ -306,6 +306,8 @@ const MODERATION_CATEGORY_LABELS: Record<string, string> = {
   other: 'Autre'
 };
 
+type PopulatedUsername = Pick<IUser, 'username'> | null;
+
 interface QueueItem {
   kind: 'report' | 'dispute' | 'verification' | 'deletion' | 'product_flagged';
   id: string;
@@ -319,18 +321,18 @@ interface QueueItem {
 export const getAdminQueue = asyncHandler(async (_req: Request, res: Response) => {
   const [reports, disputes, verifications, deletions, flaggedProducts] = await Promise.all([
     Report.find({ status: 'pending' })
-      .populate('reporter', 'username')
+      .populate<{ reporter: PopulatedUsername }>('reporter', 'username')
       .select('reason targetType createdAt reporter')
       .sort({ createdAt: 1 })
       .limit(QUEUE_ITEMS_PER_SOURCE),
     Dispute.find({ status: { $in: DISPUTE_PENDING_STATUSES } })
-      .populate('buyer', 'username')
-      .populate('seller', 'username')
+      .populate<{ buyer: PopulatedUsername }>('buyer', 'username')
+      .populate<{ seller: PopulatedUsername }>('seller', 'username')
       .select('reason status createdAt buyer seller')
       .sort({ createdAt: 1 })
       .limit(QUEUE_ITEMS_PER_SOURCE),
     IdentityVerification.find({ status: 'pending' })
-      .populate('user', 'username')
+      .populate<{ user: PopulatedUsername }>('user', 'username')
       .select('documentType submittedAt user')
       .sort({ submittedAt: 1 })
       .limit(QUEUE_ITEMS_PER_SOURCE),
@@ -343,14 +345,14 @@ export const getAdminQueue = asyncHandler(async (_req: Request, res: Response) =
       'moderationFlag.suspect': true,
       'moderationFlag.reviewDecision': { $exists: false }
     })
-      .populate('seller', 'username')
+      .populate<{ seller: PopulatedUsername }>('seller', 'username')
       .select('title moderationFlag seller')
       .sort({ 'moderationFlag.analyzedAt': 1 })
       .limit(QUEUE_ITEMS_PER_SOURCE)
   ]);
 
   const items: QueueItem[] = [
-    ...reports.map((report: any) => ({
+    ...reports.map((report) => ({
       kind: 'report' as const,
       id: String(report._id),
       label: 'Signalement',
@@ -359,7 +361,7 @@ export const getAdminQueue = asyncHandler(async (_req: Request, res: Response) =
       waitingSince: report.createdAt,
       tab: 'reports'
     })),
-    ...disputes.map((dispute: any) => ({
+    ...disputes.map((dispute) => ({
       kind: 'dispute' as const,
       id: String(dispute._id),
       label: dispute.status === 'under_review' ? 'Litige en arbitrage' : 'Litige ouvert',
@@ -368,7 +370,7 @@ export const getAdminQueue = asyncHandler(async (_req: Request, res: Response) =
       waitingSince: dispute.createdAt,
       tab: 'disputes'
     })),
-    ...verifications.map((verification: any) => ({
+    ...verifications.map((verification) => ({
       kind: 'verification' as const,
       id: String(verification._id),
       label: 'Vérification d\'identité',
@@ -377,7 +379,7 @@ export const getAdminQueue = asyncHandler(async (_req: Request, res: Response) =
       waitingSince: verification.submittedAt,
       tab: 'verifications'
     })),
-    ...deletions.map((user: any) => ({
+    ...deletions.map((user) => ({
       kind: 'deletion' as const,
       id: String(user._id),
       label: 'Suppression de compte',
@@ -388,7 +390,7 @@ export const getAdminQueue = asyncHandler(async (_req: Request, res: Response) =
       waitingSince: user.updatedAt,
       tab: 'rgpd'
     })),
-    ...flaggedProducts.map((product: any) => ({
+    ...flaggedProducts.map((product) => ({
       kind: 'product_flagged' as const,
       id: String(product._id),
       label: 'Annonce suspendue',
@@ -396,7 +398,7 @@ export const getAdminQueue = asyncHandler(async (_req: Request, res: Response) =
         .map((category: string) => MODERATION_CATEGORY_LABELS[category] || category)
         .join(', ') || 'Modération IA',
       subject: `${product.title} — ${product.seller?.username || 'inconnu'}`,
-      waitingSince: product.moderationFlag?.analyzedAt,
+      waitingSince: product.moderationFlag?.analyzedAt as Date,
       tab: 'suspended'
     }))
   ].sort((a, b) => new Date(a.waitingSince).getTime() - new Date(b.waitingSince).getTime());
@@ -433,13 +435,19 @@ const TIMESERIES_DAYS = 30;
 
 const toDayKey = (date: Date): string => date.toISOString().slice(0, 10);
 
-const indexDailyBuckets = (buckets: any[], field = 'count'): Record<string, number> =>
-  buckets.reduce((acc: Record<string, number>, bucket: any) => {
+interface DailyBucket {
+  _id: string;
+  count: number;
+  amount: number;
+}
+
+const indexDailyBuckets = (buckets: DailyBucket[], field: 'count' | 'amount' = 'count'): Record<string, number> =>
+  buckets.reduce((acc: Record<string, number>, bucket) => {
     acc[bucket._id] = bucket[field] ?? 0;
     return acc;
   }, {});
 
-const dailyCountPipeline = (dateField: string, since: Date, match: Record<string, any> = {}) => [
+const dailyCountPipeline = (dateField: string, since: Date, match: Record<string, unknown> = {}) => [
   { $match: { ...match, [dateField]: { $gte: since } } },
   {
     $group: {
@@ -456,10 +464,10 @@ export const getStatsTimeseries = asyncHandler(async (_req: Request, res: Respon
   since.setUTCDate(since.getUTCDate() - (TIMESERIES_DAYS - 1));
 
   const [signups, listings, sales, reports] = await Promise.all([
-    User.aggregate(dailyCountPipeline('createdAt', since)),
-    Product.aggregate(dailyCountPipeline('createdAt', since)),
-    Payment.aggregate(dailyCountPipeline('completedAt', since, { status: 'completed' })),
-    Report.aggregate(dailyCountPipeline('createdAt', since))
+    User.aggregate<DailyBucket>(dailyCountPipeline('createdAt', since)),
+    Product.aggregate<DailyBucket>(dailyCountPipeline('createdAt', since)),
+    Payment.aggregate<DailyBucket>(dailyCountPipeline('completedAt', since, { status: 'completed' })),
+    Report.aggregate<DailyBucket>(dailyCountPipeline('createdAt', since))
   ]);
 
   const signupsByDay = indexDailyBuckets(signups);

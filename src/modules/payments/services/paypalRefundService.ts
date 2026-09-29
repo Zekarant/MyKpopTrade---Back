@@ -1,5 +1,10 @@
 import axios, { AxiosError } from 'axios';
-import { PayPalClient, paypalApiBaseUrl, partnerHeaders } from './paypalClient';
+import {
+  PayPalClient,
+  PayPalErrorBody,
+  paypalApiBaseUrl,
+  partnerHeaders
+} from './paypalClient';
 import User from '../../../models/userModel';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
 import logger from '../../../commons/utils/logger';
@@ -43,18 +48,19 @@ export class PayPalRefundError extends Error {
   }
 }
 
-function describePayPalError(error: AxiosError): PayPalErrorDescription {
+function describePayPalError(error: AxiosError<unknown>): PayPalErrorDescription {
   const status = error.response?.status ?? 0;
-  const data = (error.response?.data ?? {}) as any;
-  const debugId = typeof data?.debug_id === 'string' ? data.debug_id : undefined;
+  const data: unknown = error.response?.data ?? {};
+  const body: PayPalErrorBody = typeof data === 'object' && data !== null ? data : {};
+  const debugId = typeof body.debug_id === 'string' ? body.debug_id : undefined;
 
-  const issues: string[] = Array.isArray(data?.details)
-    ? data.details.map((d: any) => d?.issue).filter(Boolean)
+  const issues: string[] = Array.isArray(body.details)
+    ? body.details.map((d) => d?.issue).filter((issue): issue is string => Boolean(issue))
     : [];
 
-  if (data?.message) {
+  if (body.message) {
     const detail = issues.length ? ` (${issues.join(', ')})` : '';
-    return { message: `${data.message}${detail}`, status, issues, debugId };
+    return { message: `${body.message}${detail}`, status, issues, debugId };
   }
 
   if (typeof data === 'string' && data.length > 0) {
@@ -87,13 +93,24 @@ function classifyError(desc: PayPalErrorDescription): 'business' | 'auth' | 'unk
   return 'unknown';
 }
 
+interface PayPalRefundRequest {
+  amount?: { value: string; currency_code: string };
+  note_to_payer?: string;
+}
+
+interface PayPalRefundResponse {
+  id: string;
+  status: string;
+  amount?: { value: string; currency_code: string };
+}
+
 async function callPayPalRefund(
   captureId: string,
-  requestBody: any,
+  requestBody: PayPalRefundRequest,
   accessToken: string,
   sellerMerchantId: string
 ): Promise<{ id: string; status: string; amount: number | null; currency: string | null }> {
-  const response = await axios.post(REFUND_ENDPOINT(captureId), requestBody, {
+  const response = await axios.post<PayPalRefundResponse>(REFUND_ENDPOINT(captureId), requestBody, {
     headers: {
       ...partnerHeaders({
         accessToken,
@@ -162,7 +179,7 @@ export class PayPalRefundService {
     const accessToken = await PayPalClient.getAccessToken();
     const captureDetails = await PayPalClient.getCaptureDetails(captureId, sellerMerchantId);
 
-    const requestBody: any = {};
+    const requestBody: PayPalRefundRequest = {};
     if (amount !== null) {
       if (!Number.isFinite(amount) || amount <= 0) {
         throw new PayPalRefundError(
@@ -222,8 +239,8 @@ export class PayPalRefundService {
         currency: result.currency ?? captureDetails.currency,
         createdAt: new Date()
       };
-    } catch (error: any) {
-      const desc = describePayPalError(error as AxiosError);
+    } catch (error) {
+      const desc = describePayPalError(error as AxiosError<unknown>);
       const kind = classifyError(desc);
 
       logger.warn('Refund PayPal rejeté', {

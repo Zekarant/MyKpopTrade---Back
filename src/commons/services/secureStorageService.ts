@@ -18,6 +18,16 @@ const IV_LENGTH = 16;
 const SECURE_STORAGE_PATH = process.env.SECURE_STORAGE_PATH || path.join(process.cwd(), 'secure_storage');
 const DOCUMENT_RETENTION_DAYS = parseInt(process.env.DOCUMENT_RETENTION_DAYS || '30');
 
+export interface SecureDocumentMetadata {
+  id: string;
+  type: string;
+  documentType: string;
+  iv: string;
+  blurred: boolean;
+  createdAt: string;
+  expiresAt: string;
+}
+
 /**
  * Vérifie et crée si nécessaire le répertoire de stockage sécurisé
  */
@@ -183,7 +193,7 @@ export const secureStoreDocument = async (
   const fileId = crypto.randomUUID();
   
   // Stocker les métadonnées
-  const metadata = {
+  const metadata: SecureDocumentMetadata = {
     id: fileId,
     type: fileType,
     documentType,
@@ -213,7 +223,7 @@ export const secureStoreDocument = async (
  * @param fileId Identifiant du document
  * @returns Le document déchiffré et ses métadonnées
  */
-export const retrieveSecureDocument = (fileId: string): { buffer: Buffer, metadata: any } => {
+export const retrieveSecureDocument = (fileId: string): { buffer: Buffer, metadata: SecureDocumentMetadata } => {
   if (!rawKey) {
     throw new Error('Clé de chiffrement non configurée');
   }
@@ -227,8 +237,8 @@ export const retrieveSecureDocument = (fileId: string): { buffer: Buffer, metada
   
   // Lire les métadonnées
   const metadataRaw = fs.readFileSync(metadataPath, 'utf8');
-  const metadata = JSON.parse(metadataRaw);
-  
+  const metadata: SecureDocumentMetadata = JSON.parse(metadataRaw);
+
   // Vérifier si le document a expiré
   const expiryDate = new Date(metadata.expiresAt);
   if (expiryDate < new Date()) {
@@ -286,8 +296,8 @@ export const cleanExpiredDocuments = (): void => {
   files.forEach(file => {
     const metadataPath = path.join(SECURE_STORAGE_PATH, file);
     const metadataRaw = fs.readFileSync(metadataPath, 'utf8');
-    const metadata = JSON.parse(metadataRaw);
-    
+    const metadata: SecureDocumentMetadata = JSON.parse(metadataRaw);
+
     // Vérifier si le document a expiré
     const expiryDate = new Date(metadata.expiresAt);
     if (expiryDate < now) {

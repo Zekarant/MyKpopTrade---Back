@@ -36,7 +36,7 @@ describe('productService (integration)', () => {
       expect(isFavorite).toBe(true);
 
       const refreshedUser = await User.findById(buyer._id);
-      expect(refreshedUser?.favorites?.map((id: any) => id.toString())).toContain(product._id.toString());
+      expect(refreshedUser?.favorites?.map((id) => id.toString())).toContain(product._id.toString());
 
       const refreshedProduct = await Product.findById(product._id);
       expect(refreshedProduct?.favorites).toBe(1);
@@ -56,7 +56,7 @@ describe('productService (integration)', () => {
       expect(isFavorite).toBe(false);
 
       const refreshedUser = await User.findById(buyer._id);
-      expect(refreshedUser?.favorites?.map((id: any) => id.toString())).not.toContain(product._id.toString());
+      expect(refreshedUser?.favorites?.map((id) => id.toString())).not.toContain(product._id.toString());
 
       const refreshedProduct = await Product.findById(product._id);
       expect(refreshedProduct?.favorites).toBe(0);

@@ -33,7 +33,7 @@ describe('shipmentService (integration)', () => {
     jest.clearAllMocks();
   });
 
-  async function createTestPayment(overrides: any = {}) {
+  async function createTestPayment(overrides: Record<string, unknown> = {}) {
     const seller = await createTestUser();
     const buyer = await createTestUser();
     const product = await createTestProduct(seller._id);

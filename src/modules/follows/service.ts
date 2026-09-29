@@ -77,9 +77,11 @@ export class FollowService {
 
     try {
       await Follow.create({ follower: followerId, following: followingId });
-    } catch (error: any) {
+    } catch (error) {
       // Double clic simultané : l'index unique a refusé le second abonnement.
-      if (error?.code === DUPLICATE_KEY_ERROR) return { isFollowing: true };
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === DUPLICATE_KEY_ERROR) {
+        return { isFollowing: true };
+      }
       throw error;
     }
     await this.notifyNewFollower(followerId, followingId);
@@ -172,7 +174,10 @@ export class FollowService {
     const skip = (page - 1) * limit;
     const objectId = new mongoose.Types.ObjectId(userId);
 
-    const result = await Follow.aggregate([
+    const result = await Follow.aggregate<{
+      data: Array<{ following: mongoose.Types.ObjectId }>;
+      count: Array<{ total: number }>;
+    }>([
       { $match: { follower: objectId } },
       {
         $lookup: {
@@ -203,7 +208,7 @@ export class FollowService {
       }
     ]);
 
-    const mutualIds = result[0]?.data?.map((f: any) => f.following) || [];
+    const mutualIds = result[0]?.data?.map((f) => f.following) || [];
     const total = result[0]?.count?.[0]?.total || 0;
 
     // Populate user info

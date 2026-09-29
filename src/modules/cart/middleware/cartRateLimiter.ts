@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { RateLimiterMongo } from 'rate-limiter-flexible';
 import mongoose from 'mongoose';
 import logger from '../../../commons/utils/logger';
+import { isRateLimiterRes } from '../../../commons/utils/rateLimiterRes';
 
 let cartAddLimiter: RateLimiterMongo | null = null;
 let checkoutLimiterInstance: RateLimiterMongo | null = null;
@@ -38,9 +39,9 @@ export const rateLimitCartAdd = async (req: Request, res: Response, next: NextFu
     if (!userId) { next(); return; }
     await getCartAddLimiter().consume(userId);
     next();
-  } catch (error: any) {
+  } catch (error) {
     // Si c'est une erreur de connexion/init, on laisse passer
-    if (error && error.remainingPoints !== undefined) {
+    if (isRateLimiterRes(error)) {
       logger.warn('Rate limit panier dépassé', { userId: req.user?.id });
       res.status(429).json({
         success: false,
@@ -59,8 +60,8 @@ export const rateLimitCheckout = async (req: Request, res: Response, next: NextF
     if (!userId) { next(); return; }
     await getCheckoutLimiter().consume(userId);
     next();
-  } catch (error: any) {
-    if (error && error.remainingPoints !== undefined) {
+  } catch (error) {
+    if (isRateLimiterRes(error)) {
       logger.warn('Rate limit checkout dépassé', { userId: req.user?.id });
       res.status(429).json({
         success: false,

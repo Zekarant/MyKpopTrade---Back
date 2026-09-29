@@ -6,7 +6,9 @@ import {
   toggleFollow,
   getFollowStatusForUser,
   listFollowedGroups,
-  listGroupFollowers
+  listGroupFollowers,
+  FollowStatusUserNotFoundError,
+  type FollowedGroupSummary
 } from '../services/groupFollowService';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
@@ -25,6 +27,7 @@ interface FollowResponse {
 }
 
 interface FollowStatusResponse {
+  message?: string;
   groupId: string;
   groupName: string;
   isFollowing: boolean;
@@ -32,7 +35,8 @@ interface FollowStatusResponse {
 }
 
 interface UserFollowedGroupsResponse {
-  groups: any[];
+  message?: string;
+  groups: FollowedGroupSummary[];
   pagination: {
     page: number;
     limit: number;
@@ -97,7 +101,7 @@ export const getFollowStatus = asyncHandler(async (req: AuthenticatedRequest, re
       groupName: '',
       isFollowing: false,
       followersCount: 0
-    } as any);
+    });
   }
 
   try {
@@ -105,15 +109,15 @@ export const getFollowStatus = asyncHandler(async (req: AuthenticatedRequest, re
     return res.status(200).json(result);
   } catch (error) {
     if (error instanceof HttpError) {
-      const groupName = (error as any).groupName ?? '';
-      const followersCount = (error as any).followersCount ?? 0;
+      const groupName = error instanceof FollowStatusUserNotFoundError ? error.groupName : '';
+      const followersCount = error instanceof FollowStatusUserNotFoundError ? error.followersCount : 0;
       return res.status(error.statusCode).json({
         message: error.message,
         groupId,
         groupName,
         isFollowing: false,
         followersCount
-      } as any);
+      });
     }
 
     logger.error('Erreur lors de la vérification du statut de suivi', {
@@ -128,7 +132,7 @@ export const getFollowStatus = asyncHandler(async (req: AuthenticatedRequest, re
       groupName: '',
       isFollowing: false,
       followersCount: 0
-    } as any);
+    });
   }
 });
 
@@ -145,7 +149,7 @@ export const getUserFollowedGroups = asyncHandler(async (req: AuthenticatedReque
       message: 'Authentification requise',
       groups: [],
       pagination: { page, limit, total: 0, pages: 0 }
-    } as any);
+    });
   }
 
   try {
@@ -157,7 +161,7 @@ export const getUserFollowedGroups = asyncHandler(async (req: AuthenticatedReque
         message: error.message,
         groups: [],
         pagination: { page, limit, total: 0, pages: 0 }
-      } as any);
+      });
     }
 
     logger.error('Erreur lors de la récupération des groupes suivis', {
@@ -169,7 +173,7 @@ export const getUserFollowedGroups = asyncHandler(async (req: AuthenticatedReque
       message: 'Une erreur est survenue',
       groups: [],
       pagination: { page, limit, total: 0, pages: 0 }
-    } as any);
+    });
   }
 });
 

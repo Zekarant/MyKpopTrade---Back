@@ -36,6 +36,12 @@ function linkState(linkToken: string): string {
   return state as unknown as string;
 }
 
+interface OAuthCallbackInfo {
+  message?: string;
+  isLink?: boolean;
+  isNew?: boolean;
+}
+
 function linkUserIdFromState(rawState: unknown): string | undefined {
   const linkToken = readOAuthState(rawState)?.linkToken;
   if (!linkToken) return undefined;
@@ -100,7 +106,7 @@ router.get('/google/callback', (req: Request, res: Response, next: NextFunction)
   const linkUserId = linkUserIdFromState(req.query.state);
   if (linkUserId) req.linkUserId = linkUserId;
 
-  passport.authenticate('google', { session: false }, (err: any, user: any, info: any) => {
+  passport.authenticate('google', { session: false }, (err: Error | null, user?: Express.User | false, info?: OAuthCallbackInfo) => {
     if (err || !user) {
       if (req.linkUserId) {
         const code = info?.message || 'google_link_failed';
@@ -133,7 +139,7 @@ router.get('/discord/callback', (req: Request, res: Response, next: NextFunction
   const isLinkFlow = Boolean(linkUserId);
   if (linkUserId) req.linkUserId = linkUserId;
 
-  passport.authenticate('discord', { session: false, failWithError: true } as any, (err: any, user: any, info: any) => {
+  passport.authenticate('discord', { session: false, failWithError: true }, (err: Error | null, user?: Express.User | false, info?: OAuthCallbackInfo) => {
     if (err || !user) {
       console.error('Discord auth failed:', err?.message || info?.message || 'Unknown error');
       if (isLinkFlow) {

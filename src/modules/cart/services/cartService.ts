@@ -1,7 +1,12 @@
 import mongoose from 'mongoose';
-import Cart, { CART_MAX_ITEMS } from '../../../models/cartModel';
-import Product from '../../../models/productModel';
+import Cart, { CART_MAX_ITEMS, ICartItem } from '../../../models/cartModel';
+import Product, { IProduct } from '../../../models/productModel';
 import { HttpError } from '../../../commons/utils/httpError';
+
+/** Article du panier dont le produit est peuplé (null s'il a été supprimé). */
+type ValidatedCartItem = Omit<ICartItem, 'product'> & {
+  product: Pick<IProduct, '_id' | 'title' | 'price' | 'currency' | 'isAvailable' | 'isSold' | 'seller'> | null;
+};
 
 function isValidObjectId(id: string): boolean {
   return mongoose.Types.ObjectId.isValid(id);
@@ -86,7 +91,8 @@ export async function clearCart(userId: string) {
 
 export async function validateCart(userId: string) {
   // `title` sert aux messages d'erreur.
-  const cart = await Cart.findOne({ user: userId }).populate('items.product', 'title price currency isAvailable isSold seller');
+  const cart = await Cart.findOne({ user: userId })
+    .populate<{ items: ValidatedCartItem[] }>('items.product', 'title price currency isAvailable isSold seller');
   if (!cart || cart.items.length === 0) {
     throw new HttpError(400, 'Panier vide');
   }
@@ -95,7 +101,7 @@ export async function validateCart(userId: string) {
   const validItems: typeof cart.items = [];
 
   for (const item of cart.items) {
-    const product = item.product as any;
+    const product = item.product;
     if (!product) {
       issues.push(`Produit supprimé`);
       continue;

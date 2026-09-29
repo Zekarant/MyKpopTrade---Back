@@ -10,7 +10,7 @@ beforeEach(() => {
   (mockedAxios.isAxiosError as unknown as jest.Mock) = jest.fn().mockReturnValue(false);
 });
 
-function banFeature(props: any) {
+function banFeature(props: Record<string, string | number>) {
   return { properties: props };
 }
 
@@ -67,14 +67,14 @@ describe('lookupAddress', () => {
 
     await lookupAddress({ q: 'paris', limit: 99 });
 
-    const callParams = mockedAxios.get.mock.calls[0][1]?.params as any;
+    const callParams = mockedAxios.get.mock.calls[0][1]?.params as { q: string; limit: number };
     expect(callParams.limit).toBe(15);
   });
 
   it('default limit = 8 si non fourni', async () => {
     mockedAxios.get.mockResolvedValueOnce({ data: { features: [] } });
     await lookupAddress({ q: 'paris' });
-    const callParams = mockedAxios.get.mock.calls[0][1]?.params as any;
+    const callParams = mockedAxios.get.mock.calls[0][1]?.params as { q: string; limit: number };
     expect(callParams.limit).toBe(8);
   });
 
@@ -117,7 +117,7 @@ describe('lookupAddress', () => {
     mockedAxios.get.mockResolvedValueOnce({ data: { features: [] } });
     const longQuery = 'a'.repeat(500);
     await lookupAddress({ q: longQuery });
-    const callParams = mockedAxios.get.mock.calls[0][1]?.params as any;
+    const callParams = mockedAxios.get.mock.calls[0][1]?.params as { q: string; limit: number };
     expect(callParams.q.length).toBe(200);
   });
 });

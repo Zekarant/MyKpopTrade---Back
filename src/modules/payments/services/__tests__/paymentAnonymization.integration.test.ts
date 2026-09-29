@@ -65,20 +65,20 @@ describe('paymentAnonymizationService (integration)', () => {
 
       const count = await anonymizeExpiredPayments(fourYearsLater);
 
-      const saved = await Payment.findById(payment._id).select('+ipAddress +userAgent').lean<any>();
+      const saved = await Payment.findById(payment._id).select('+ipAddress +userAgent').lean();
       expect(count).toBe(1);
-      expect(saved.shippingAddress).toBeUndefined();
-      expect(saved.ipAddress).toBe('0.0.0.0');
-      expect(saved.shipment.events[0].location).toBeUndefined();
-      expect(saved.anonymized).toBe(true);
-      expect(saved.amount).toBe(20);
+      expect(saved?.shippingAddress).toBeUndefined();
+      expect(saved?.ipAddress).toBe('0.0.0.0');
+      expect(saved?.shipment?.events?.[0].location).toBeUndefined();
+      expect(saved?.anonymized).toBe(true);
+      expect(saved?.amount).toBe(20);
     });
 
     it('ne touche pas un paiement récent', async () => {
       const payment = await createPayment();
 
       expect(await anonymizeExpiredPayments()).toBe(0);
-      expect((await Payment.findById(payment._id).lean<any>()).shippingAddress.city).toBe('Lyon');
+      expect((await Payment.findById(payment._id).lean())?.shippingAddress?.city).toBe('Lyon');
     });
   });
 
@@ -90,8 +90,8 @@ describe('paymentAnonymizationService (integration)', () => {
       const count = await anonymizeBuyerPayments(String(delivered.buyer));
 
       expect(count).toBe(1);
-      expect((await Payment.findById(delivered._id).lean<any>()).shippingAddress).toBeUndefined();
-      expect((await Payment.findById(toShip._id).lean<any>()).shippingAddress.city).toBe('Lyon');
+      expect((await Payment.findById(delivered._id).lean())?.shippingAddress).toBeUndefined();
+      expect((await Payment.findById(toShip._id).lean())?.shippingAddress?.city).toBe('Lyon');
     });
   });
 });

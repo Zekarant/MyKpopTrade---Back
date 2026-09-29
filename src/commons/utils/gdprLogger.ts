@@ -23,9 +23,9 @@ export class GdprLogger {
   /**
    * Journalise une action liée au paiement en respectant les principes RGPD
    */
-  static logPaymentAction(action: string, data: any, userId: string): void {
+  static logPaymentAction(action: string, data: Record<string, unknown>, userId: string): void {
     // Créer une copie des données pour éviter la modification de l'original
-    const sanitizedData = this.sanitizeData({ ...data });
+    const sanitizedData = this.sanitizeObject({ ...data });
     
     // Pseudonymiser l'ID utilisateur
     const pseudonymizedUserId = this.pseudonymizeId(userId);
@@ -40,8 +40,8 @@ export class GdprLogger {
   /**
    * Journalise une erreur liée au paiement
    */
-  static logPaymentError(error: any, userId: string, context: any = {}): void {
-    const sanitizedContext = this.sanitizeData({ ...context });
+  static logPaymentError(error: unknown, userId: string, context: Record<string, unknown> = {}): void {
+    const sanitizedContext = this.sanitizeObject({ ...context });
     
     // Pseudonymiser l'ID utilisateur
     const pseudonymizedUserId = this.pseudonymizeId(userId);
@@ -73,8 +73,8 @@ export class GdprLogger {
    * @param error Objet d'erreur
    * @param context Contexte supplémentaire
    */
-  static logError(message: string, error: any, context: any = {}): void {
-    const sanitizedContext = this.sanitizeData({ ...context });
+  static logError(message: string, error: unknown, context: Record<string, unknown> = {}): void {
+    const sanitizedContext = this.sanitizeObject({ ...context });
     
     logger.error(message, {
       error: error instanceof Error ? error.message : String(error),
@@ -89,8 +89,8 @@ export class GdprLogger {
    * @param message Message d'information
    * @param context Contexte supplémentaire
    */
-  static logInfo(message: string, context: any = {}): void {
-    const sanitizedContext = this.sanitizeData({ ...context });
+  static logInfo(message: string, context: Record<string, unknown> = {}): void {
+    const sanitizedContext = this.sanitizeObject({ ...context });
     
     logger.info(message, {
       context: sanitizedContext,
@@ -101,24 +101,31 @@ export class GdprLogger {
   /**
    * Sanitise les données en masquant les informations sensibles
    */
-  private static sanitizeData(data: any): any {
+  private static sanitizeData(data: unknown): unknown {
     if (!data) return data;
-    
+
     if (typeof data !== 'object') return data;
-    
+
     // Pour les tableaux, traiter chaque élément
     if (Array.isArray(data)) {
       return data.map(item => this.sanitizeData(item));
     }
-    
-    // Pour les objets, traiter chaque propriété
-    const result: any = {};
-    
-    for (const [key, value] of Object.entries(data)) {
+
+    return this.sanitizeObject(data);
+  }
+
+  /**
+   * Pour les objets, traiter chaque propriété
+   */
+  private static sanitizeObject(data: object): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    const entries: [string, unknown][] = Object.entries(data);
+
+    for (const [key, value] of entries) {
       // Si la clé contient un champ sensible
       if (this.sensitiveFields.some(field => key.toLowerCase().includes(field.toLowerCase()))) {
-        result[key] = typeof value === 'string' ? 
-          EncryptionService.anonymize(value as string) : '***MASQUÉ***';
+        result[key] = typeof value === 'string' ?
+          EncryptionService.anonymize(value) : '***MASQUÉ***';
       }
       // Si la valeur est un objet, récursion
       else if (value && typeof value === 'object') {

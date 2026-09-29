@@ -5,7 +5,7 @@ import path from 'path';
 import { createCanvas } from 'canvas';
 
 import User from '../models/userModel';
-import Product from '../models/productModel';
+import Product, { IProduct } from '../models/productModel';
 import Rating from '../models/ratingModel';
 import KpopGroup from '../models/kpopGroupModel';
 import Conversation from '../models/conversationModel';
@@ -14,6 +14,22 @@ import Post from '../modules/posts/model';
 import Follow from '../modules/follows/model';
 
 dotenv.config({ quiet: true });
+
+type UserDoc = InstanceType<typeof User>;
+type GroupDoc = InstanceType<typeof KpopGroup>;
+type ConversationDoc = InstanceType<typeof Conversation>;
+type MessageDoc = InstanceType<typeof Message>;
+type PostDoc = InstanceType<typeof Post>;
+
+type SeedProduct = Pick<
+  IProduct,
+  | 'seller' | 'title' | 'description' | 'price' | 'currency' | 'condition' | 'category' | 'type'
+  | 'kpopGroup' | 'kpopMember' | 'albumName' | 'images' | 'isAvailable' | 'isReserved' | 'reservedFor'
+  | 'isSold' | 'soldAt' | 'soldTo' | 'shippingOptions' | 'allowOffers' | 'minOfferPercentage'
+  | 'isPayWhatYouWant' | 'views' | 'favorites' | 'createdAt' | 'updatedAt'
+>;
+
+type SeededProduct = Awaited<ReturnType<typeof seedProducts>>[number];
 
 /**
  * Jeu de données de test : profils variés, annonces et publications crédibles.
@@ -270,7 +286,7 @@ async function purgePreviousSeed(): Promise<void> {
   const seededUsers = await User.find({ email: new RegExp(`@${SEED_EMAIL_DOMAIN.replace(/\./g, '\\.')}$`) })
     .select('_id')
     .lean();
-  const userIds = seededUsers.map((u: any) => u._id);
+  const userIds = seededUsers.map((u) => u._id);
   const seedConvoIds = await Conversation.find({ participants: { $in: userIds } }).distinct('_id');
 
   await Promise.all([
@@ -292,7 +308,7 @@ async function purgePreviousSeed(): Promise<void> {
  * ceux qui manquent, tagués `seed` pour être purgeables.
  */
 async function resolveGroups() {
-  const resolved: any[] = [];
+  const resolved: GroupDoc[] = [];
   let createdCount = 0;
   for (const g of GROUPS) {
     let doc = await KpopGroup.findOne({ name: g.name });
@@ -317,7 +333,7 @@ async function resolveGroups() {
 }
 
 async function seedUsers() {
-  const created: any[] = [];
+  const created: UserDoc[] = [];
   for (const spec of PERSONAS) {
     const email = `${spec.username}@${SEED_EMAIL_DOMAIN}`;
     const realAvatarPath = spec.avatarFile ? path.join(UPLOADS_ROOT, 'profiles', spec.avatarFile) : undefined;
@@ -377,7 +393,7 @@ async function seedUsers() {
   return created;
 }
 
-async function seedProducts(usersByName: Record<string, any>) {
+async function seedProducts(usersByName: Record<string, UserDoc>) {
   // Répartition des annonces par vendeur.
   const plan: { seller: string; count: number }[] = [
     { seller: 'mina_collects', count: 13 },
@@ -388,7 +404,7 @@ async function seedProducts(usersByName: Record<string, any>) {
   ];
 
   const buyers = ['clara_wty', 'skz_archive', 'kpop_leo'].map((n) => usersByName[n]);
-  const products: any[] = [];
+  const products: SeedProduct[] = [];
 
   for (const { seller, count } of plan) {
     const sellerDoc = usersByName[seller];
@@ -468,18 +484,18 @@ async function seedProducts(usersByName: Record<string, any>) {
   // Mise à jour des statistiques vendeurs.
   for (const { seller } of plan) {
     const sellerDoc = usersByName[seller];
-    const own = created.filter((p: any) => p.seller.toString() === sellerDoc._id.toString());
-    sellerDoc.statistics.totalListings = own.length;
-    sellerDoc.statistics.totalSales = own.filter((p: any) => p.isSold).length;
+    const own = created.filter((p) => p.seller.toString() === sellerDoc._id.toString());
+    sellerDoc.statistics!.totalListings = own.length;
+    sellerDoc.statistics!.totalSales = own.filter((p) => p.isSold).length;
     await sellerDoc.save();
   }
 
   return created;
 }
 
-async function seedPosts(users: any[]) {
+async function seedPosts(users: UserDoc[]) {
   const authors = users.filter((u) => u.accountStatus === 'active');
-  const roots: any[] = [];
+  const roots: PostDoc[] = [];
 
   for (let i = 0; i < 15; i++) {
     const r = rng(`post-${i}`);
@@ -530,7 +546,7 @@ async function seedPosts(users: any[]) {
   console.log(`Publications : ${roots.length} posts + ${replyCount} réponses.`);
 }
 
-async function seedUserFollows(usersByName: Record<string, any>) {
+async function seedUserFollows(usersByName: Record<string, UserDoc>) {
   const edges: [string, string][] = [
     ['clara_wty', 'mina_collects'],
     ['skz_archive', 'mina_collects'],
@@ -557,7 +573,7 @@ async function seedUserFollows(usersByName: Record<string, any>) {
  * groupes réels en base stockent ce champ dans un format hétérogène et ces
  * documents ne sont pas nettoyés par la purge.
  */
-async function seedGroupFollows(users: any[], groups: any[]) {
+async function seedGroupFollows(users: UserDoc[], groups: GroupDoc[]) {
   let links = 0;
   for (const user of users) {
     if (user.accountStatus !== 'active') continue;
@@ -573,7 +589,7 @@ async function seedGroupFollows(users: any[], groups: any[]) {
   console.log(`Suivis de groupes : ${links} liens créés (côté membre).`);
 }
 
-async function seedRatings(usersByName: Record<string, any>) {
+async function seedRatings(usersByName: Record<string, UserDoc>) {
   const targets = ['mina_collects', 'kpop_leo', 'skz_archive'];
   const reviewers = ['clara_wty', 'skz_archive', 'kpop_leo', 'seed_admin'];
   const reviews = [
@@ -606,9 +622,9 @@ async function seedRatings(usersByName: Record<string, any>) {
       });
     }
 
-    recipient.statistics.totalRatings = n;
-    recipient.statistics.averageRating = Math.round((sum / n) * 10) / 10;
-    recipient.sellerRating = recipient.statistics.averageRating;
+    recipient.statistics!.totalRatings = n;
+    recipient.statistics!.averageRating = Math.round((sum / n) * 10) / 10;
+    recipient.sellerRating = recipient.statistics!.averageRating;
     await recipient.save();
   }
   console.log('Avis vendeurs : créés et statistiques de profil recalculées.');
@@ -651,10 +667,10 @@ interface NegotiationSpec {
  */
 async function buildNegotiationThread(
   spec: NegotiationSpec,
-  mina: any,
-  buyerDoc: any,
-  product: any
-): Promise<{ conversationId: any; messageCount: number }> {
+  mina: UserDoc,
+  buyerDoc: UserDoc,
+  product: SeededProduct
+): Promise<{ conversationId: mongoose.Types.ObjectId; messageCount: number }> {
   const cur = product.currency === 'EUR' ? '€' : product.currency;
   const amountOf = (pct: number) => Math.max(1, Math.round(product.price * pct));
   const start = daysAgo(spec.startDaysAgo);
@@ -757,13 +773,13 @@ async function buildNegotiationThread(
 
 /** Insère les messages d'un fil, met à jour lastMessage / lastMessageAt. */
 async function insertThreadMessages(
-  conversation: any,
-  mina: any,
-  other: any,
+  conversation: ConversationDoc,
+  mina: UserDoc,
+  other: UserDoc,
   messages: SeedMessage[],
   start: Date
 ): Promise<number> {
-  let lastMsg: any = null;
+  let lastMsg: MessageDoc | null = null;
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     const sender = m.from === 'mina' ? mina : other;
@@ -782,8 +798,8 @@ async function insertThreadMessages(
       updatedAt: createdAt
     });
   }
-  conversation.lastMessage = lastMsg._id;
-  conversation.lastMessageAt = lastMsg.createdAt;
+  conversation.lastMessage = lastMsg!._id;
+  conversation.lastMessageAt = lastMsg!.createdAt;
   await conversation.save();
   return messages.length;
 }
@@ -794,7 +810,7 @@ async function insertThreadMessages(
  * avec offres et contre-offres (en cours, acceptée, refusée). Certains fils
  * restent non lus côté Mina pour afficher un badge.
  */
-async function seedConversations(usersByName: Record<string, any>, products: any[]) {
+async function seedConversations(usersByName: Record<string, UserDoc>, products: SeededProduct[]) {
   const mina = usersByName['mina_collects'];
   const minaProducts = products.filter((p) => p.seller.toString() === mina._id.toString());
   const productFor = (i: number) => minaProducts[i % minaProducts.length];
@@ -950,7 +966,7 @@ async function main() {
 
     const groups = await resolveGroups();
     const users = await seedUsers();
-    const usersByName: Record<string, any> = Object.fromEntries(users.map((u) => [u.username, u]));
+    const usersByName: Record<string, UserDoc> = Object.fromEntries(users.map((u) => [u.username, u]));
 
     const products = await seedProducts(usersByName);
     await seedPosts(users);

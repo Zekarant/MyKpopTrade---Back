@@ -1,3 +1,4 @@
+import { Request } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -32,11 +33,11 @@ const storage = multer.diskStorage({
   }
 });
 
-const fileFilter = (req: any, file: any, cb: any) => {
+const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   if (ATTACHMENT_EXTENSION_BY_MIME_TYPE.has(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Type de fichier non pris en charge. Seuls JPEG, PNG, GIF et PDF sont autorisés.'), false);
+    cb(new Error('Type de fichier non pris en charge. Seuls JPEG, PNG, GIF et PDF sont autorisés.'));
   }
 };
 

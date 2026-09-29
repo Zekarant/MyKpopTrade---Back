@@ -39,7 +39,7 @@ describe('authProfileService (integration)', () => {
       const user = await createTestUser();
       const result = await getPublicProfileData(user._id.toString());
       expect(result.password).toBeUndefined();
-      expect((result as any).emailVerificationToken).toBeUndefined();
+      expect(result.emailVerificationToken).toBeUndefined();
     });
 
     it('404 si utilisateur inexistant', async () => {

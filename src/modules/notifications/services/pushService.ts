@@ -15,21 +15,24 @@ const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:noreply@mykpoptrade.com';
 
-let webpushModule: any = null;
+type WebPush = typeof import('web-push');
+
+let webpushModule: WebPush | null = null;
 let webpushConfigured = false;
 
-async function getWebPush(): Promise<any | null> {
+async function getWebPush(): Promise<WebPush | null> {
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return null;
   if (webpushModule) return webpushModule;
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    webpushModule = require('web-push');
+    const webpush: WebPush = require('web-push');
+    webpushModule = webpush;
     if (!webpushConfigured) {
-      webpushModule.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+      webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
       webpushConfigured = true;
     }
-    return webpushModule;
+    return webpush;
   } catch {
     logger.warn('web-push n\'est pas installé : push désactivé');
     return null;
@@ -45,7 +48,7 @@ export interface PushNotificationPayload {
   title: string;
   body: string;
   link?: string;
-  data?: Record<string, any>;
+  data?: Record<string, unknown>;
 }
 
 /**
@@ -143,8 +146,9 @@ export async function sendToUser(
       );
       sub.lastUsedAt = new Date();
       await sub.save();
-    } catch (error: any) {
-      const status = error?.statusCode;
+    } catch (error) {
+      const isObject = typeof error === 'object' && error !== null;
+      const status = isObject && 'statusCode' in error ? error.statusCode : undefined;
       if (status === 404 || status === 410) {
         await PushSubscription.deleteOne({ _id: sub._id });
       } else {
@@ -152,7 +156,7 @@ export async function sendToUser(
           userId,
           endpoint: sub.endpoint,
           status,
-          message: error?.message
+          message: isObject && 'message' in error ? error.message : undefined
         });
       }
     }

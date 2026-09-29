@@ -1,36 +1,49 @@
 import express from 'express';
 import passport from 'passport';
 import request from 'supertest';
-import { Strategy as OAuth2Strategy } from 'passport-oauth2';
-import { CookieStateStore, OAUTH_STATE_COOKIE, readOAuthState } from '../oauthStateStore';
+import { OAuth2 } from 'oauth';
+import { Strategy as OAuth2Strategy, StateStore, VerifyCallback } from 'passport-oauth2';
+import { CookieStateStore, OAUTH_STATE_COOKIE, OAuthAppState, readOAuthState } from '../oauthStateStore';
+
+type TokenCallback = (err: null, accessToken: string, refreshToken: string, results: object) => void;
+
+/** Stratégie de test : simule l'échange du code d'autorisation, sans réseau. */
+class TestOAuth2Strategy extends OAuth2Strategy {
+  stubTokenExchange(): void {
+    this._oauth2.getOAuthAccessToken = ((_code: string, _params: unknown, cb: TokenCallback) =>
+      cb(null, 'access', 'refresh', {})) as OAuth2['getOAuthAccessToken'];
+  }
+}
 
 /** Parcours via passport-oauth2, sans réseau : échange du code et profil simulés. */
 function buildApp() {
   const authenticator = new passport.Passport();
-  const strategy = new OAuth2Strategy(
+  const strategy = new TestOAuth2Strategy(
     {
       authorizationURL: 'https://fournisseur.test/authorize',
       tokenURL: 'https://fournisseur.test/token',
       clientID: 'client',
       clientSecret: 'secret',
       callbackURL: 'http://api.test/api/auth/test/callback',
-      store: new CookieStateStore()
-    } as any,
-    (_accessToken: string, _refreshToken: string, profile: any, done: any) => done(null, profile)
+      store: new CookieStateStore() as StateStore
+    },
+    (_accessToken: string, _refreshToken: string, profile: Express.User, done: VerifyCallback) =>
+      done(null, profile)
   );
-  (strategy as any)._oauth2.getOAuthAccessToken = (_code: string, _params: unknown, cb: any) =>
-    cb(null, 'access', 'refresh', {});
+  strategy.stubTokenExchange();
   strategy.userProfile = (_accessToken, done) => done(null, { id: 'profil-1' });
   authenticator.use('test', strategy);
 
+  const linkState: OAuthAppState = { linkToken: 'jeton-liaison' };
   const app = express();
   app.use(authenticator.initialize());
   app.get('/api/auth/test', authenticator.authenticate('test', { session: false }));
   app.get('/api/auth/test/link', (req, res, next) =>
-    authenticator.authenticate('test', { session: false, state: { linkToken: 'jeton-liaison' } as any })(req, res, next)
+    // passport type `state` en chaîne ; passport-oauth2 n'utilise le magasin que pour un objet.
+    authenticator.authenticate('test', { session: false, state: linkState as unknown as string })(req, res, next)
   );
   app.get('/api/auth/test/callback', (req, res, next) =>
-    authenticator.authenticate('test', { session: false }, (err: any, user: any, info: any) => {
+    authenticator.authenticate('test', { session: false }, (err: unknown, user?: Express.User | false, info?: object) => {
       if (err) return next(err);
       res.json({ user: user || null, info: info ?? null });
     })(req, res, next)

@@ -1,8 +1,17 @@
 import mongoose from 'mongoose';
-import KpopGroup from '../../../models/kpopGroupModel';
+import KpopGroup, { IKpopGroup } from '../../../models/kpopGroupModel';
 import User from '../../../models/userModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+
+/** 404 du statut de suivi : le contrôleur renvoie quand même le nom et le compteur du groupe. */
+export class FollowStatusUserNotFoundError extends HttpError {
+  constructor(public groupName: string, public followersCount: number) {
+    super(404, 'Utilisateur non trouvé');
+  }
+}
+
+export type FollowedGroupSummary = Pick<IKpopGroup, 'name' | 'profileImage' | 'genres' | 'followersCount'>;
 
 function assertValidGroupId(groupId: string) {
   if (!mongoose.Types.ObjectId.isValid(groupId)) {
@@ -123,10 +132,7 @@ export async function getFollowStatusForUser(userId: string, groupId: string) {
   }
 
   if (!user) {
-    const err = new HttpError(404, 'Utilisateur non trouvé');
-    (err as any).groupName = group.name;
-    (err as any).followersCount = group.followersCount || 0;
-    throw err;
+    throw new FollowStatusUserNotFoundError(group.name, group.followersCount || 0);
   }
 
   const isFollowing = user.followedGroups?.some(
@@ -143,7 +149,7 @@ export async function getFollowStatusForUser(userId: string, groupId: string) {
 
 export async function listFollowedGroups(userId: string, page: number, limit: number) {
   const user = await User.findById(userId)
-    .populate({
+    .populate<{ followedGroups?: FollowedGroupSummary[] }>({
       path: 'followedGroups',
       select: 'name profileImage genres followersCount',
       options: {

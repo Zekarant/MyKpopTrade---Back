@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import Product from '../../../models/productModel';
+import Product, { IProduct } from '../../../models/productModel';
+import { IUser } from '../../../models/userModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
@@ -10,7 +11,9 @@ import logger from '../../../commons/utils/logger';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
-const productStatusLabel = (product: any): string => {
+const productStatusLabel = (
+  product: Pick<IProduct, 'isSold' | 'isReserved' | 'isAvailable' | 'moderationFlag'>
+): string => {
   if (product.isSold) return 'vendu';
   if (product.isReserved) return 'réservé';
   if (!product.isAvailable && product.moderationFlag?.suspect) return 'suspendu';
@@ -27,7 +30,7 @@ export const getAllProducts = asyncHandler(async (req: Request, res: Response) =
   const status = req.query.status as string;
   const type = req.query.type as string;
 
-  const filter: any = {};
+  const filter: mongoose.QueryFilter<IProduct> = {};
 
   if (search) {
     const pattern = escapeRegex(String(search));
@@ -46,26 +49,26 @@ export const getAllProducts = asyncHandler(async (req: Request, res: Response) =
   }
 
   if (type && ['photocard', 'album', 'merch', 'other'].includes(type)) {
-    filter.type = type;
+    filter.type = type as IProduct['type'];
   }
 
   if (wantsCsv(req.query.format)) {
     const rows = await Product.find(filter)
-      .populate('seller', 'username email')
+      .populate<{ seller: Pick<IUser, 'username' | 'email'> | null }>('seller', 'username email')
       .sort({ createdAt: -1 })
       .limit(CSV_EXPORT_ROW_LIMIT);
 
     return sendCsvDownload(res, 'produits', rows, [
-      { header: 'Titre', value: (p: any) => p.title },
-      { header: 'Vendeur', value: (p: any) => p.seller?.username },
-      { header: 'Email vendeur', value: (p: any) => p.seller?.email },
-      { header: 'Prix', value: (p: any) => p.price },
-      { header: 'Devise', value: (p: any) => p.currency },
-      { header: 'Type', value: (p: any) => p.type },
-      { header: 'État', value: (p: any) => p.condition },
+      { header: 'Titre', value: (p) => p.title },
+      { header: 'Vendeur', value: (p) => p.seller?.username },
+      { header: 'Email vendeur', value: (p) => p.seller?.email },
+      { header: 'Prix', value: (p) => p.price },
+      { header: 'Devise', value: (p) => p.currency },
+      { header: 'Type', value: (p) => p.type },
+      { header: 'État', value: (p) => p.condition },
       { header: 'Statut', value: productStatusLabel },
-      { header: 'Créé le', value: (p: any) => p.createdAt },
-      { header: 'Vendu le', value: (p: any) => p.soldAt }
+      { header: 'Créé le', value: (p) => p.createdAt },
+      { header: 'Vendu le', value: (p) => p.soldAt }
     ]);
   }
 
@@ -107,7 +110,7 @@ export const getProductAdminStats = asyncHandler(async (req: Request, res: Respo
   const newProducts = await Product.countDocuments({ createdAt: { $gte: sevenDaysAgo } });
 
   // Répartition par type
-  const typeDistribution = await Product.aggregate([
+  const typeDistribution = await Product.aggregate<{ _id: string | null; count: number }>([
     { $group: { _id: '$type', count: { $sum: 1 } } }
   ]);
 
@@ -117,7 +120,7 @@ export const getProductAdminStats = asyncHandler(async (req: Request, res: Respo
   const recentSales = await Product.countDocuments({ isSold: true, soldAt: { $gte: thirtyDaysAgo } });
 
   // Revenu total (somme des prix des produits vendus)
-  const revenueResult = await Product.aggregate([
+  const revenueResult = await Product.aggregate<{ _id: null; total: number }>([
     { $match: { isSold: true } },
     { $group: { _id: null, total: { $sum: '$price' } } }
   ]);
@@ -132,7 +135,7 @@ export const getProductAdminStats = asyncHandler(async (req: Request, res: Respo
     newProducts,
     recentSales,
     totalRevenue,
-    typeDistribution: typeDistribution.reduce((acc: any, item: any) => {
+    typeDistribution: typeDistribution.reduce((acc: Record<string, number>, item) => {
       acc[item._id || 'unknown'] = item.count;
       return acc;
     }, {})
@@ -147,7 +150,10 @@ export const adminDeleteProduct = asyncHandler(async (req: Request, res: Respons
   const adminId = req.user!.id;
   const { reason } = req.body ?? {};
 
-  const product = await Product.findByIdAndDelete(productId).populate('seller', 'username');
+  const product = await Product.findByIdAndDelete(productId).populate<{ seller: Pick<IUser, 'username'> | null }>(
+    'seller',
+    'username'
+  );
   if (!product) {
     return res.status(404).json({ message: 'Produit non trouvé' });
   }
@@ -158,7 +164,7 @@ export const adminDeleteProduct = asyncHandler(async (req: Request, res: Respons
     targetType: 'product',
     targetId: productId,
     details: `Produit « ${product.title} » supprimé${reason ? ` — ${reason}` : ''}`,
-    metadata: { price: product.price, currency: product.currency, seller: (product.seller as any)?.username }
+    metadata: { price: product.price, currency: product.currency, seller: product.seller?.username }
   });
 
   dispatchAdminAlert({
@@ -168,7 +174,7 @@ export const adminDeleteProduct = asyncHandler(async (req: Request, res: Respons
     summary: `« ${product.title} »${reason ? ` — ${reason}` : ''}`,
     adminTab: 'products',
     fields: [
-      { name: 'Vendeur', value: (product.seller as any)?.username || 'inconnu', inline: true },
+      { name: 'Vendeur', value: product.seller?.username || 'inconnu', inline: true },
       { name: 'Prix', value: `${product.price} ${product.currency}`, inline: true }
     ],
     data: { productId, reason }

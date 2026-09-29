@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Report, {
+  type IReport,
   REPORT_REASONS,
   REPORT_TARGET_TYPES,
   REPORT_TEXT_MAX_LENGTH,
@@ -9,7 +10,7 @@ import Report, {
 import Rating from '../../../models/ratingModel';
 import Product from '../../../models/productModel';
 import Post from '../../posts/model';
-import User from '../../../models/userModel';
+import User, { type IUser } from '../../../models/userModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import logger from '../../../commons/utils/logger';
 import { recordAuditLog } from '../../../commons/utils/auditService';
@@ -62,7 +63,16 @@ const findTarget = async (targetType: ReportTargetType, targetId: string) => {
   return User.findById(targetId);
 };
 
-const describeTarget = (targetType: string, target: any): string => {
+type ReportTargetSummary = {
+  _id?: unknown;
+  title?: string;
+  rating?: number;
+  review?: string;
+  content?: string;
+  username?: string;
+};
+
+const describeTarget = (targetType: string, target: ReportTargetSummary | null): string => {
   if (targetType === 'product') return target?.title || 'produit inconnu';
   if (targetType === 'rating') return `${target?.rating ?? '?'}/5 — ${excerpt(target?.review) || 'sans commentaire'}`;
   if (targetType === 'post') return excerpt(target?.content) || 'publication vide';
@@ -145,9 +155,9 @@ export const createReport = asyncHandler(async (req: Request, res: Response) => 
 
   try {
     await report.save();
-  } catch (error: any) {
+  } catch (error) {
     // Double envoi simultané : l'index unique a refusé le second.
-    if (error?.code === DUPLICATE_KEY_ERROR) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === DUPLICATE_KEY_ERROR) {
       return res.status(400).json({ message: 'Vous avez déjà signalé cet élément' });
     }
     throw error;
@@ -198,10 +208,10 @@ export const getUserReports = asyncHandler(async (req: Request, res: Response) =
   const status = req.query.status as string;
   
   // Construire le filtre
-  const filter: any = { reporter: userId };
+  const filter: mongoose.QueryFilter<IReport> = { reporter: userId };
   
   if (status && ['pending', 'reviewed', 'resolved', 'rejected'].includes(status)) {
-    filter.status = status;
+    filter.status = status as IReport['status'];
   }
   
   const [reports, count] = await Promise.all([
@@ -275,10 +285,10 @@ export const getAllReports = asyncHandler(async (req: Request, res: Response) =>
   const targetType = req.query.targetType as string;
   
   // Construire le filtre
-  const filter: any = {};
+  const filter: mongoose.QueryFilter<IReport> = {};
   
   if (status && ['pending', 'reviewed', 'resolved', 'rejected'].includes(status)) {
-    filter.status = status;
+    filter.status = status as IReport['status'];
   }
   
   if (isValidTargetType(targetType)) {
@@ -287,21 +297,21 @@ export const getAllReports = asyncHandler(async (req: Request, res: Response) =>
 
   if (wantsCsv(req.query.format)) {
     const rows = await Report.find(filter)
-      .populate('reporter', 'username email')
+      .populate<{ reporter: Pick<IUser, 'username' | 'email'> | null }>('reporter', 'username email')
       .sort({ createdAt: -1 })
       .limit(CSV_EXPORT_ROW_LIMIT);
 
     return sendCsvDownload(res, 'signalements', rows, [
-      { header: 'Date', value: (r: any) => r.createdAt },
-      { header: 'Signaleur', value: (r: any) => r.reporter?.username },
-      { header: 'Email signaleur', value: (r: any) => r.reporter?.email },
-      { header: 'Type de cible', value: (r: any) => TARGET_TYPE_LABELS[r.targetType] || r.targetType },
-      { header: 'ID cible', value: (r: any) => r.targetId },
-      { header: 'Motif', value: (r: any) => REASON_LABELS[r.reason] || r.reason },
-      { header: 'Détails', value: (r: any) => r.details },
-      { header: 'Statut', value: (r: any) => r.status },
-      { header: 'Notes admin', value: (r: any) => r.adminNotes },
-      { header: 'Résolu le', value: (r: any) => r.resolvedAt }
+      { header: 'Date', value: (r) => r.createdAt },
+      { header: 'Signaleur', value: (r) => r.reporter?.username },
+      { header: 'Email signaleur', value: (r) => r.reporter?.email },
+      { header: 'Type de cible', value: (r) => TARGET_TYPE_LABELS[r.targetType] || r.targetType },
+      { header: 'ID cible', value: (r) => r.targetId },
+      { header: 'Motif', value: (r) => REASON_LABELS[r.reason] || r.reason },
+      { header: 'Détails', value: (r) => r.details },
+      { header: 'Statut', value: (r) => r.status },
+      { header: 'Notes admin', value: (r) => r.adminNotes },
+      { header: 'Résolu le', value: (r) => r.resolvedAt }
     ]);
   }
 
@@ -433,7 +443,7 @@ export const getReportDetail = asyncHandler(async (req: Request, res: Response) 
   ]);
 
   const countByStatus = (status: string) =>
-    reporterReports.filter((r: any) => r.status === status).length;
+    reporterReports.filter((r) => r.status === status).length;
 
   return res.status(200).json({
     report,

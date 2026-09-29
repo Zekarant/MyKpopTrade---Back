@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
-import Post from '../../posts/model';
-import AuditLog from '../../../models/auditLogModel';
+import mongoose from 'mongoose';
+import Post, { IPost } from '../../posts/model';
+import AuditLog, { IAuditLog } from '../../../models/auditLogModel';
+import { IUser } from '../../../models/userModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
@@ -15,7 +17,7 @@ export const getAdminPosts = asyncHandler(async (req: Request, res: Response) =>
   const search = req.query.search as string;
   const type = req.query.type as string; // 'post' | 'reply' | 'all'
 
-  const filter: any = {};
+  const filter: mongoose.QueryFilter<IPost> = {};
 
   if (type === 'post') filter.isReply = false;
   else if (type === 'reply') filter.isReply = true;
@@ -67,7 +69,7 @@ export const adminDeletePost = asyncHandler(async (req: Request, res: Response) 
   const { postId } = req.params;
   const { reason } = req.body;
 
-  const post = await Post.findById(postId).populate('author', 'username');
+  const post = await Post.findById(postId).populate<{ author: Pick<IUser, 'username'> | null }>('author', 'username');
   if (!post) {
     return res.status(404).json({ message: 'Post introuvable' });
   }
@@ -90,7 +92,7 @@ export const adminDeletePost = asyncHandler(async (req: Request, res: Response) 
     targetId: post._id,
     details: reason || 'Suppression par modération',
     metadata: {
-      authorUsername: (post.author as any)?.username,
+      authorUsername: post.author?.username,
       contentPreview: post.content.substring(0, 100)
     }
   });
@@ -102,7 +104,7 @@ export const adminDeletePost = asyncHandler(async (req: Request, res: Response) 
     summary: reason || 'Suppression par modération',
     adminTab: 'moderation',
     fields: [
-      { name: 'Auteur', value: (post.author as any)?.username || 'inconnu', inline: true },
+      { name: 'Auteur', value: post.author?.username || 'inconnu', inline: true },
       { name: 'Contenu', value: post.content.substring(0, 200) }
     ],
     data: { postId, isReply: post.isReply }
@@ -119,9 +121,9 @@ export const getAuditLogs = asyncHandler(async (req: Request, res: Response) => 
   const limit = clampLimit(req.query.limit, 30, MAX_PAGE_SIZE);
   const targetType = req.query.targetType as string;
 
-  const filter: any = {};
+  const filter: mongoose.QueryFilter<IAuditLog> = {};
   if (targetType && ['user', 'product', 'post', 'report', 'verification', 'system', 'dispute', 'payment'].includes(targetType)) {
-    filter.targetType = targetType;
+    filter.targetType = targetType as IAuditLog['targetType'];
   }
 
   const [logs, count] = await Promise.all([
@@ -149,7 +151,7 @@ export const getAuditStats = asyncHandler(async (req: Request, res: Response) =>
   const [todayActions, weekActions, byType] = await Promise.all([
     AuditLog.countDocuments({ createdAt: { $gte: today } }),
     AuditLog.countDocuments({ createdAt: { $gte: weekAgo } }),
-    AuditLog.aggregate([
+    AuditLog.aggregate<{ _id: string; count: number }>([
       { $match: { createdAt: { $gte: weekAgo } } },
       { $group: { _id: '$targetType', count: { $sum: 1 } } }
     ])
@@ -158,6 +160,6 @@ export const getAuditStats = asyncHandler(async (req: Request, res: Response) =>
   return res.status(200).json({
     todayActions,
     weekActions,
-    byType: byType.reduce((acc: any, item: any) => { acc[item._id] = item.count; return acc; }, {})
+    byType: byType.reduce((acc: Record<string, number>, item) => { acc[item._id] = item.count; return acc; }, {})
   });
 });

@@ -1,13 +1,24 @@
 import axios from 'axios';
+import { Types } from 'mongoose';
 import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
 import Payment from '../../../models/paymentModel';
-import { PayPalClient, paypalApiBaseUrl, partnerHeaders, extractDebugId } from './paypalClient';
+import {
+  PayPalClient,
+  PayPalLink,
+  PayPalMoney,
+  paypalApiBaseUrl,
+  partnerHeaders,
+  extractDebugId,
+  paypalErrorBody,
+  paypalErrorMessage,
+  paypalErrorStatus
+} from './paypalClient';
 import { PayPalPartnerService, SELLER_BLOCK_MESSAGES } from './paypalPartnerService';
 import { paymentConfig } from '../../../config/paymentConfig';
 import logger from '../../../commons/utils/logger';
 import { formatForPayPal } from '../../../commons/utils/moneyMath';
-import { resolveCheckout, ShippingAddress } from './checkoutService';
+import { resolveCheckout, ShippingAddress, ShippingMethod } from './checkoutService';
 import { HttpError } from '../../../commons/utils/httpError';
 
 /** Durée pendant laquelle un produit reste réservé à l'acheteur qui paie. */
@@ -16,6 +27,49 @@ const RESERVATION_DURATION_MS = 60 * 60 * 1000;
 export interface CheckoutInput {
   shippingMethod: unknown;
   shippingAddress?: unknown;
+}
+
+export interface DirectPaymentResult {
+  orderId: string;
+  approvalUrl?: string;
+  paymentId: Types.ObjectId;
+  amount: number;
+  currency: string;
+  /** Ordre PayPal encore valide réutilisé plutôt que recréé. */
+  resumed?: boolean;
+  productAmount?: number;
+  shippingAmount?: number;
+  shippingMethod?: ShippingMethod;
+}
+
+/** Ordre PayPal (v2/checkout/orders), champs exploités uniquement. */
+interface PayPalOrder {
+  id: string;
+  status: string;
+  links: PayPalLink[];
+  purchase_units: Array<{
+    payments?: { captures?: Array<{ id: string; amount: PayPalMoney }> };
+  }>;
+}
+
+interface PayPalPurchaseUnit {
+  amount: PayPalMoney & {
+    breakdown: { item_total: PayPalMoney; shipping: PayPalMoney };
+  };
+  items: Array<{
+    name: string;
+    quantity: string;
+    unit_amount: PayPalMoney;
+    category: string;
+  }>;
+  description: string;
+  custom_id: string;
+  payee: { merchant_id?: string };
+  shipping?: ReturnType<typeof buildPayPalShipping>;
+  payment_instruction?: {
+    disbursement_mode: string;
+    platform_fees: Array<{ amount: PayPalMoney; payee: { merchant_id: string } }>;
+  };
 }
 
 /** Erreur métier : le vendeur n'est pas en état d'encaisser. */
@@ -70,7 +124,7 @@ export class PayPalPaymentService {
     productId: string,
     buyerId: string,
     checkout: CheckoutInput
-  ): Promise<any> {
+  ): Promise<DirectPaymentResult> {
     let reservedHere = false;
     try {
       const existingPayment = await Payment.findOne({
@@ -87,13 +141,13 @@ export class PayPalPaymentService {
         if (paymentStatus === 'CREATED' || paymentStatus === 'APPROVED') {
           const accessToken = await PayPalClient.getAccessToken();
 
-          const response = await axios.get(
+          const response = await axios.get<PayPalOrder>(
             `${paypalApiBaseUrl}/v2/checkout/orders/${existingPayment.paymentIntentId}`,
             { headers: partnerHeaders({ accessToken }) }
           );
 
           const approvalUrl = response.data.links.find(
-            (link: any) => link.rel === 'approve'
+            (link) => link.rel === 'approve'
           )?.href;
 
           return {
@@ -154,7 +208,7 @@ export class PayPalPaymentService {
 
       if (product.negotiations && product.negotiations.length > 0) {
         const acceptedNegotiation = product.negotiations.find(
-          (neg: any) => neg.buyer.toString() === buyerId && neg.status === 'accepted'
+          (neg) => neg.buyer.toString() === buyerId && neg.status === 'accepted'
         );
 
         if (acceptedNegotiation) {
@@ -173,7 +227,7 @@ export class PayPalPaymentService {
 
       const accessToken = await PayPalClient.getAccessToken();
 
-      const purchaseUnit: any = {
+      const purchaseUnit: PayPalPurchaseUnit = {
         amount: {
           currency_code: currency,
           value: formatForPayPal(breakdown.total),
@@ -210,7 +264,7 @@ export class PayPalPaymentService {
         };
       }
 
-      const response = await axios.post(
+      const response = await axios.post<PayPalOrder>(
         `${paypalApiBaseUrl}/v2/checkout/orders`,
         {
           intent: 'CAPTURE',
@@ -240,7 +294,7 @@ export class PayPalPaymentService {
       );
 
       const approvalUrl = response.data.links.find(
-        (link: any) => link.rel === 'payer-action' || link.rel === 'approve'
+        (link) => link.rel === 'payer-action' || link.rel === 'approve'
       )?.href;
 
       const payment = new Payment({
@@ -324,7 +378,7 @@ export class PayPalPaymentService {
     const orderUrl = `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}`;
 
     const fetchExistingCapture = async () => {
-      const orderDetails = await axios.get(orderUrl, {
+      const orderDetails = await axios.get<PayPalOrder>(orderUrl, {
         headers: partnerHeaders({ accessToken })
       });
       const captureInfo = orderDetails.data.purchase_units[0]?.payments?.captures?.[0];
@@ -349,7 +403,7 @@ export class PayPalPaymentService {
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        const response = await axios.post(captureUrl, undefined, {
+        const response = await axios.post<PayPalOrder>(captureUrl, undefined, {
           headers: partnerHeaders({
             accessToken,
             // Même clé d'idempotence sur toutes les tentatives : si PayPal a
@@ -374,9 +428,9 @@ export class PayPalPaymentService {
           amount: captureInfo.amount.value,
           currency: captureInfo.amount.currency_code
         };
-      } catch (err: any) {
-        const status = err.response?.status;
-        const issue = err.response?.data?.details?.[0]?.issue || '';
+      } catch (err) {
+        const status = paypalErrorStatus(err);
+        const issue = paypalErrorBody(err)?.details?.[0]?.issue || '';
         lastIssue = issue || lastIssue;
 
         if (issue === 'ORDER_ALREADY_CAPTURED') {
@@ -391,7 +445,7 @@ export class PayPalPaymentService {
             status,
             issue,
             attempt,
-            error: err.response?.data?.message || err.message,
+            error: paypalErrorMessage(err),
             debugId: extractDebugId(err)
           });
           throw err;

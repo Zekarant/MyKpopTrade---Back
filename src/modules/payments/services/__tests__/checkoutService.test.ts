@@ -1,10 +1,11 @@
 import {
   computeCheckout,
   validateShippingAddress,
-  resolveCheckout
+  resolveCheckout,
+  CheckoutProduct
 } from '../checkoutService';
 
-function buildProduct(overrides: any = {}) {
+function buildProduct(overrides: CheckoutProduct = {}) {
   return {
     price: 20,
     currency: 'EUR',

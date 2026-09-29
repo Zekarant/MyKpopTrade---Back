@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import User from '../../../models/userModel';
 import { NotificationService } from '../../notifications/services/notificationService';
 import logger from '../../../commons/utils/logger';
@@ -8,9 +9,9 @@ import logger from '../../../commons/utils/logger';
  * pas lui-même quand il modifie son propre produit.
  */
 async function broadcastToWishlistOwners(
-  productId: any,
-  sellerId: any,
-  payload: { type: string; title: string; content: string; link: string; data?: any }
+  productId: mongoose.Types.ObjectId,
+  sellerId: mongoose.Types.ObjectId,
+  payload: { type: string; title: string; content: string; link: string; data?: Record<string, unknown> }
 ): Promise<number> {
   const owners = await User.find(
     { favorites: productId, _id: { $ne: sellerId } },
@@ -39,13 +40,20 @@ async function broadcastToWishlistOwners(
   return owners.length;
 }
 
+type WishlistProduct = {
+  _id?: mongoose.Types.ObjectId;
+  seller?: mongoose.Types.ObjectId;
+  title: string;
+  currency?: string;
+};
+
 /**
  * Notifie tous les "wishlisters" qu'un produit a baissé de prix. On
  * suppose que oldPrice > newPrice (l'appelant a déjà vérifié) ; on calcule
  * juste le pourcentage pour le contenu de la notification.
  */
 export async function notifyWishlistPriceDrop(
-  product: any,
+  product: WishlistProduct | null | undefined,
   oldPrice: number,
   newPrice: number
 ): Promise<void> {
@@ -75,7 +83,7 @@ export async function notifyWishlistPriceDrop(
  * wishlist et de chercher des alternatives.
  */
 export async function notifyWishlistUnavailable(
-  product: any,
+  product: WishlistProduct | null | undefined,
   reason: 'sold' | 'unavailable' | 'reserved'
 ): Promise<void> {
   if (!product?._id || !product?.seller) return;

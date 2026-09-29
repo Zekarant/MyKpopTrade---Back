@@ -1,4 +1,4 @@
-import User from '../../../models/userModel';
+import User, { IUser } from '../../../models/userModel';
 import { validateEmail, normalizePhoneNumber, validateUsername } from '../../../commons/utils/validators';
 import { sendVerificationEmail } from '../../../commons/services/emailService';
 import { HttpError } from '../../../commons/utils/httpError';
@@ -54,7 +54,36 @@ export async function getPublicProfileData(userId: string) {
   return user;
 }
 
-export async function updateProfileData(userId: string, body: any) {
+interface AddressInput {
+  streetLine1?: string;
+  streetLine2?: string;
+  postalCode?: string;
+  city?: string;
+  country?: string;
+}
+
+export interface ProfileUpdateInput {
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  paypalEmail?: string | null;
+  phoneNumber?: string;
+  bio?: string;
+  location?: string;
+  socialLinks?: IUser['socialLinks'];
+  preferences?: IUser['preferences'];
+  legalName?: string;
+  address?: AddressInput | null | '';
+}
+
+export interface FirstProfileInput extends ProfileUpdateInput {
+  privacyPolicyAccepted?: boolean;
+  dataProcessingConsent?: boolean;
+  marketingConsent?: boolean;
+}
+
+export async function updateProfileData(userId: string, body: ProfileUpdateInput) {
   const user = await loadUserOr404(userId);
 
   const {
@@ -232,7 +261,7 @@ export async function updateProfileData(userId: string, body: any) {
  * Délègue les validations à `updateProfileData`, puis flippe `profileCompleted`
  * à `true` à condition qu'un numéro de téléphone ait été renseigné.
  */
-export async function completeFirstProfile(userId: string, body: any) {
+export async function completeFirstProfile(userId: string, body: FirstProfileInput) {
   const result = await updateProfileData(userId, body);
   const user = await loadUserOr404(userId);
 

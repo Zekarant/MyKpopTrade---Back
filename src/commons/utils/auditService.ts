@@ -16,7 +16,7 @@ export async function recordAuditLog(params: {
   targetType: TargetType;
   targetId?: string | mongoose.Types.ObjectId;
   details?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }): Promise<void> {
   try {
     await AuditLog.create({

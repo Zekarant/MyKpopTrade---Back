@@ -328,7 +328,7 @@ export const sendShipmentAutoConfirmedEmail = async (
  * Envoie un email en utilisant le transporteur configuré
  * @param options Options de l'email (destinataire, sujet, contenu HTML)
  */
-export async function sendEmail(options: { to: string; subject: string; html: any; }): Promise<void> {
+export async function sendEmail(options: { to: string; subject: string; html: string; }): Promise<void> {
   try {
     const transporter = await createTransporter();
     

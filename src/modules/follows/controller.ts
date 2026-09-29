@@ -126,8 +126,8 @@ export const removeFollower = async (req: Request, res: Response) => {
   try {
     const result = await followService.removeFollower(userId, followerId);
     return res.status(200).json({ message: 'Abonné retiré', ...result });
-  } catch (error: any) {
+  } catch (error) {
     // removeFollower ne lève que « cet utilisateur ne vous suit pas ».
-    return res.status(404).json({ message: error.message });
+    return res.status(404).json({ message: error instanceof Error ? error.message : String(error) });
   }
 };

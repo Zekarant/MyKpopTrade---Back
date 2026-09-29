@@ -1,6 +1,8 @@
-import { applyRefundToPayment, remainingRefundable } from '../refundLedger';
+import { applyRefundToPayment, remainingRefundable, RefundablePayment } from '../refundLedger';
 
-function payment(overrides: any = {}) {
+function payment(
+  overrides: Partial<RefundablePayment> = {}
+): RefundablePayment & { _id: string; currency: string } {
   return {
     _id: 'pay1',
     amount: 28.98,
@@ -49,7 +51,7 @@ describe('applyRefundToPayment', () => {
 
   it('ignore les entrées non abouties dans le total', () => {
     const p = payment({
-      refunds: [{ refundId: 'R0', amount: 10, currency: 'EUR', status: 'pending' }]
+      refunds: [{ refundId: 'R0', amount: 10, currency: 'EUR', status: 'pending', initiatedAt: new Date() }]
     });
 
     const result = applyRefundToPayment(p, { refundId: 'R1', amount: 5, currency: 'EUR' });
@@ -65,7 +67,7 @@ describe('remainingRefundable', () => {
 
   it('déduit les remboursements déjà aboutis', () => {
     const p = payment({
-      refunds: [{ refundId: 'R1', amount: 5, currency: 'EUR', status: 'completed' }]
+      refunds: [{ refundId: 'R1', amount: 5, currency: 'EUR', status: 'completed', initiatedAt: new Date() }]
     });
 
     expect(remainingRefundable(p)).toBe(23.98);
@@ -77,7 +79,7 @@ describe('remainingRefundable', () => {
     // vendeur pouvait rembourser deux fois.
     const p = payment({
       totalRefunded: 0,
-      refunds: [{ refundId: 'R1', amount: 5, currency: 'EUR', status: 'completed' }]
+      refunds: [{ refundId: 'R1', amount: 5, currency: 'EUR', status: 'completed', initiatedAt: new Date() }]
     });
 
     expect(remainingRefundable(p)).toBe(23.98);
@@ -91,7 +93,7 @@ describe('remainingRefundable', () => {
 
   it('ne descend jamais sous zéro', () => {
     const p = payment({
-      refunds: [{ refundId: 'R1', amount: 40, currency: 'EUR', status: 'completed' }]
+      refunds: [{ refundId: 'R1', amount: 40, currency: 'EUR', status: 'completed', initiatedAt: new Date() }]
     });
 
     expect(remainingRefundable(p)).toBe(0);

@@ -2,6 +2,7 @@ import winston from 'winston';
 import 'winston-daily-rotate-file';
 import path from 'path';
 import fs from 'fs';
+import type { Request } from 'express';
 
 // Créer le répertoire des logs s'il n'existe pas
 const logDir = path.join(process.cwd(), 'logs');
@@ -125,19 +126,21 @@ const maskEmail = (value: string): string => {
 
 const logsSanitizer = winston.format((info) => {
   // Fonction récursive pour masquer les données sensibles
-  const sanitizeObject = (obj: any): any => {
-    if (!obj) return obj;
-
+  const sanitizeObject = (obj: object): object => {
     // Les tableaux doivent être parcourus, sinon un tableau d'objets contenant
     // des données personnelles échappait entièrement au masquage.
     if (Array.isArray(obj)) {
-      return obj.map(item =>
+      return obj.map((item: unknown) =>
         typeof item === 'object' && item !== null ? sanitizeObject(item) : item
       );
     }
 
-    const newObj = { ...obj };
+    const newObj: Record<string, unknown> = { ...obj };
+    sanitizeEntries(newObj);
+    return newObj;
+  };
 
+  const sanitizeEntries = (newObj: Record<string, unknown>): void => {
     Object.keys(newObj).forEach(key => {
       const value = newObj[key];
 
@@ -159,12 +162,12 @@ const logsSanitizer = winston.format((info) => {
         newObj[key] = maskUrlSecrets(value);
       }
     });
-    
-    return newObj;
   };
-  
+
   // Appliquer la sanitisation aux données du log
-  return sanitizeObject(info);
+  const sanitizedInfo: winston.Logform.TransformableInfo = { ...info };
+  sanitizeEntries(sanitizedInfo);
+  return sanitizedInfo;
 });
 
 // Création du logger
@@ -188,15 +191,15 @@ const logger = winston.createLogger({
 export default logger;
 
 // Fonctions utilitaires pour les logs métier
-export const logAuthEvent = (userId: string, event: string, details?: any) => {
+export const logAuthEvent = (userId: string, event: string, details?: Record<string, unknown>) => {
   logger.info(`AUTH [${event}] - User ID: ${userId}`, { details });
 };
 
-export const logUserAction = (userId: string, action: string, details?: any) => {
+export const logUserAction = (userId: string, action: string, details?: Record<string, unknown>) => {
   logger.info(`USER [${action}] - User ID: ${userId}`, { details });
 };
 
-export const logAPIRequest = (req: any, responseTime?: number) => {
+export const logAPIRequest = (req: Request, responseTime?: number) => {
   logger.debug(`API Request: ${req.method} ${req.originalUrl}`, {
     method: req.method,
     url: req.originalUrl,

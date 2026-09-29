@@ -1,4 +1,5 @@
 import { HttpError } from '../../../commons/utils/httpError';
+import type { IProduct } from '../../../models/productModel';
 
 export type ShippingMethod = 'national' | 'worldwide' | 'localPickup';
 
@@ -46,6 +47,10 @@ export interface ShippingAddress {
   phone?: string;
 }
 
+export interface CheckoutProduct {
+  shippingOptions?: Partial<IProduct['shippingOptions']> | null;
+}
+
 export interface CheckoutBreakdown {
   productAmount: number;
   shippingAmount: number;
@@ -58,7 +63,7 @@ export interface CheckoutBreakdown {
  * qui n'ont pas encore été ré-édités.
  */
 function resolveShippingCost(
-  product: any,
+  product: CheckoutProduct,
   method: ShippingMethod
 ): number | undefined {
   if (method === SHIPPING_METHODS.LOCAL_PICKUP) return 0;
@@ -73,7 +78,7 @@ function resolveShippingCost(
   return undefined;
 }
 
-function isMethodOffered(product: any, method: ShippingMethod): boolean {
+function isMethodOffered(product: CheckoutProduct, method: ShippingMethod): boolean {
   const opts = product.shippingOptions ?? {};
   if (method === SHIPPING_METHODS.NATIONAL) return Boolean(opts.nationalOnly);
   if (method === SHIPPING_METHODS.WORLDWIDE) return Boolean(opts.worldwide);
@@ -100,7 +105,7 @@ function assertShippingMethod(value: unknown): ShippingMethod {
  * si le coût n'est pas configuré.
  */
 export function computeCheckout(
-  product: any,
+  product: CheckoutProduct,
   method: ShippingMethod,
   productPrice: number
 ): CheckoutBreakdown {
@@ -182,13 +187,19 @@ export function validateShippingAddress(input: ShippingAddressInput): ShippingAd
     );
   }
 
-  const fields: any = {};
+  const required: Partial<Record<(typeof ADDRESS_FIELDS)[number]['key'], string>> = {};
   for (const def of ADDRESS_FIELDS) {
-    fields[def.key] = assertString((input as any)[def.key], def.label, def.max);
+    required[def.key] = assertString(input[def.key], def.label, def.max);
   }
-  fields.streetLine2 = assertOptionalString(input.streetLine2, 'Complément d\'adresse', 200);
-  fields.country = normalizeCountryCode(input.country);
-  fields.phone = assertOptionalString(input.phone, 'Téléphone', 32);
+  const fields: ShippingAddress = {
+    recipientName: required.recipientName!,
+    streetLine1: required.streetLine1!,
+    postalCode: required.postalCode!,
+    city: required.city!,
+    streetLine2: assertOptionalString(input.streetLine2, 'Complément d\'adresse', 200),
+    country: normalizeCountryCode(input.country),
+    phone: assertOptionalString(input.phone, 'Téléphone', 32)
+  };
 
   if (fields.country === 'FR' && !FR_POSTAL_CODE.test(fields.postalCode)) {
     throw new HttpError(
@@ -198,7 +209,7 @@ export function validateShippingAddress(input: ShippingAddressInput): ShippingAd
     );
   }
 
-  return fields as ShippingAddress;
+  return fields;
 }
 
 /**
@@ -206,7 +217,7 @@ export function validateShippingAddress(input: ShippingAddressInput): ShippingAd
  * lance une HttpError si l'adresse manque alors qu'elle est requise.
  */
 export function resolveCheckout(
-  product: any,
+  product: CheckoutProduct,
   productPrice: number,
   rawMethod: unknown,
   rawAddress: unknown

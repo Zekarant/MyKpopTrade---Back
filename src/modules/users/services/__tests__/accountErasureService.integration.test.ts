@@ -61,7 +61,7 @@ describe('accountErasureService (integration)', () => {
 
     const { pseudonym } = await eraseUserAccount(user._id.toString());
 
-    const erased = await User.findById(user._id).lean<any>();
+    const erased = (await User.findById(user._id).lean())!;
     expect(erased.username).toBe(pseudonym);
     expect(erased.email).not.toContain(originalEmail);
     expect(erased.firstName).toBeUndefined();

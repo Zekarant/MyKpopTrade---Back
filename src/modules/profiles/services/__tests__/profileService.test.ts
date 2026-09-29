@@ -15,12 +15,12 @@ describe('calculateProfileCompleteness', () => {
       profilePicture: '/img.jpg',
       bio: 'Hello',
       location: 'Paris',
-      preferences: { kpopGroups: ['BTS'] } as any,
+      preferences: { kpopGroups: ['BTS'] },
       socialLinks: {
         instagram: 'insta',
         twitter: 'twit',
         discord: 'disc'
-      } as any,
+      },
       isEmailVerified: true,
       isPhoneVerified: true
     });
@@ -38,7 +38,7 @@ describe('calculateProfileCompleteness', () => {
 
   it('ne compte pas un tableau vide pour les kpopGroups', () => {
     const user = makeUser({
-      preferences: { kpopGroups: [] } as any
+      preferences: { kpopGroups: [] }
     });
     expect(calculateProfileCompleteness(user)).toBe(0);
   });
@@ -58,7 +58,7 @@ describe('calculateProfileCompleteness', () => {
 
   it('ignore les champs undefined dans les objets imbriqués', () => {
     const user = makeUser({
-      socialLinks: { instagram: 'insta' } as any
+      socialLinks: { instagram: 'insta' }
     });
     expect(calculateProfileCompleteness(user)).toBe(5);
   });

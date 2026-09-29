@@ -5,9 +5,9 @@ import {
 } from '../../../../tests/helpers/mongoMemory';
 import { createTestUser } from '../../../../tests/helpers/fixtures';
 import { toggleFollow, getFollowStatusForUser } from '../groupFollowService';
-import KpopGroup from '../../../../models/kpopGroupModel';
+import KpopGroup, { IKpopGroup } from '../../../../models/kpopGroupModel';
 
-async function createTestGroup(overrides: any = {}) {
+async function createTestGroup(overrides: Partial<Pick<IKpopGroup, 'name' | 'followersCount' | 'isActive'>> = {}) {
   const defaults = {
     name: `Group_${Date.now()}_${Math.random()}`,
     followersCount: 0

@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import path from 'path';
 import fs from 'fs';
-import Rating from '../../../models/ratingModel';
+import Rating, { IRating } from '../../../models/ratingModel';
 import User from '../../../models/userModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import { NotificationService } from '../../notifications/services/notificationService';
@@ -92,7 +92,7 @@ export async function getUserRatingsWithStats(
   page: number,
   limit: number
 ) {
-  const filter: any = { recipient: userId, isHidden: false };
+  const filter: mongoose.QueryFilter<IRating> = { recipient: userId, isHidden: false };
 
   if (type === 'buyer' || type === 'seller') {
     filter.type = type;
@@ -107,12 +107,12 @@ export async function getUserRatingsWithStats(
     Rating.countDocuments(filter)
   ]);
 
-  const starAggregations: Record<string, any> = {};
+  const starAggregations: Record<string, unknown> = {};
   for (const [score, key] of Object.entries(STAR_KEY_BY_RATING)) {
     starAggregations[key] = { $sum: { $cond: [{ $eq: ['$rating', Number(score)] }, 1, 0] } };
   }
 
-  const stats = await Rating.aggregate([
+  const stats = await Rating.aggregate<Record<string, number>>([
     { $match: { recipient: new mongoose.Types.ObjectId(userId), isHidden: false } },
     {
       $group: {

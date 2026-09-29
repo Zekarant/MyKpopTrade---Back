@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import Dispute, { DisputeReason, DisputeStatus } from '../../../models/disputeModel';
+import Dispute, { DisputeReason, DisputeStatus, IDispute } from '../../../models/disputeModel';
 import Payment from '../../../models/paymentModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import { NotificationService } from '../../notifications/services/notificationService';
@@ -278,7 +278,7 @@ export async function takeDisputeUnderReview(adminId: string, disputeId: string)
     adminId,
     action: 'dispute_taken_under_review',
     targetType: 'dispute',
-    targetId: dispute._id as any,
+    targetId: dispute._id,
     metadata: { paymentId: dispute.payment.toString() }
   });
 
@@ -402,7 +402,7 @@ export async function resolveDispute({
     adminId,
     action: `dispute_${outcome}`,
     targetType: 'dispute',
-    targetId: dispute._id as any,
+    targetId: dispute._id,
     details: notesStr,
     metadata: {
       paymentId: dispute.payment.toString(),
@@ -448,8 +448,9 @@ export async function listAllDisputes({
 }: { status?: string; page?: number; limit?: number } = {}) {
   const safeLimit = Math.min(Math.max(limit, 1), 100);
   const safePage = Math.max(page, 1);
-  const filter: any = {};
-  if (status) filter.status = status;
+  const filter: mongoose.QueryFilter<IDispute> = {};
+  // Valeur libre venue de la query : un statut inconnu ne renvoie aucun litige.
+  if (status) filter.status = status as DisputeStatus;
   const [disputes, total] = await Promise.all([
     Dispute.find(filter)
       .sort({ createdAt: -1 })

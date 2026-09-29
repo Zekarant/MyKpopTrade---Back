@@ -13,7 +13,7 @@ jest.mock('../../../notifications/services/notificationService');
 
 const mockedPayment = Payment as jest.Mocked<typeof Payment>;
 
-function fakePayment(overrides: any = {}) {
+function fakePayment(overrides: { status?: string; captureId?: string } = {}) {
   return {
     _id: 'pay1',
     product: 'prod1',

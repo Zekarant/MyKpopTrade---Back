@@ -18,7 +18,9 @@ const MIN_MESSAGE_LENGTH = 10;
 const readText = (value: unknown, maxLength: number): string =>
   typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
 
-export function parseContactMessage(body: any): ContactMessage {
+export function parseContactMessage(
+  body: Partial<Record<keyof ContactMessage, unknown>> | null | undefined
+): ContactMessage {
   const contact: ContactMessage = {
     name: readText(body?.name, MAX_LENGTHS.name),
     email: readText(body?.email, MAX_LENGTHS.email),

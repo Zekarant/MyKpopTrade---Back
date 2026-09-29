@@ -2,6 +2,7 @@ import jwt, { SignOptions } from 'jsonwebtoken';
 import crypto from 'crypto';
 import RefreshToken, { IRefreshToken } from '../../models/tokenModel';
 import RevokedAccessToken from '../../models/revokedAccessTokenModel';
+import { IUser } from '../../models/userModel';
 import env from '../../config/env';
 import logger from '../utils/logger';
 
@@ -21,7 +22,7 @@ function hashToken(token: string): string {
 /**
  * Génère un token d'accès JWT (courte durée)
  */
-export const generateAccessToken = (user: any): string => {
+export const generateAccessToken = (user: Pick<IUser, '_id' | 'email' | 'username' | 'role'>): string => {
   const payload = {
     id: user._id,
     email: user.email,

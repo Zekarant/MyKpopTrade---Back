@@ -68,7 +68,7 @@ describe('shipmentService — automatisation', () => {
     trackingModule.getTrackingProvider = originalGetProvider;
   });
 
-  async function createPaymentWithShipment(overrides: any = {}) {
+  async function createPaymentWithShipment(overrides: Record<string, unknown> = {}) {
     const seller = await createTestUser();
     const buyer = await createTestUser();
     const product = await createTestProduct(seller._id);
@@ -136,7 +136,7 @@ describe('shipmentService — automatisation', () => {
         })
       });
 
-      await pollShipment(payment);
+      await pollShipment(payment!);
 
       const reloaded = await Payment.findById(payment!._id);
       expect(reloaded?.shipment?.events).toHaveLength(2);
@@ -159,11 +159,11 @@ describe('shipmentService — automatisation', () => {
       };
       setProvider(provider);
 
-      await pollShipment(payment);
+      await pollShipment(payment!);
       const reloaded1 = await Payment.findById(payment!._id);
       const countAfterFirst = reloaded1!.shipment!.events!.length;
 
-      await pollShipment(reloaded1);
+      await pollShipment(reloaded1!);
       const reloaded2 = await Payment.findById(payment!._id);
       expect(reloaded2!.shipment!.events!.length).toBe(countAfterFirst);
     });
@@ -179,14 +179,14 @@ describe('shipmentService — automatisation', () => {
         })
       });
 
-      const wasDelivered = await pollShipment(payment);
+      const wasDelivered = await pollShipment(payment!);
 
       const reloaded = await Payment.findById(payment!._id);
       expect(wasDelivered).toBe(true);
       expect(reloaded?.shipment?.status).toBe('delivered');
       expect(reloaded?.shipment?.deliveredAt).toBeDefined();
       // applyDelivery ajoute son propre event "delivered" en plus de celui du carrier
-      const deliveredEvents = reloaded!.shipment!.events!.filter((e: any) => e.status === 'delivered');
+      const deliveredEvents = reloaded!.shipment!.events!.filter((e) => e.status === 'delivered');
       expect(deliveredEvents.length).toBeGreaterThanOrEqual(1);
     });
 
@@ -198,7 +198,7 @@ describe('shipmentService — automatisation', () => {
       setProvider(provider);
 
       const reloaded = await Payment.findById(payment!._id);
-      const result = await pollShipment(reloaded);
+      const result = await pollShipment(reloaded!);
       expect(result).toBe(false);
       expect(provider.track).not.toHaveBeenCalled();
     });

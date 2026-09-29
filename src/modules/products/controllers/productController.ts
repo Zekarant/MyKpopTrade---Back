@@ -14,7 +14,7 @@ import {
   toggleFavoriteForUser
 } from '../services/productService';
 
-function cleanupFiles(files?: any) {
+function cleanupFiles(files?: Express.Request['files']) {
   if (files && Array.isArray(files)) {
     (files as Express.Multer.File[]).forEach(file => {
       if (fs.existsSync(file.path)) {

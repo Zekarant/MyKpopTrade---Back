@@ -34,7 +34,7 @@ describe('lectures regroupées (N+1)', () => {
 
       const res = await request(app).get('/api/groups/search?query=TW');
 
-      const stats = Object.fromEntries(res.body.groups.map((g: any) => [g.name, g.stats]));
+      const stats = Object.fromEntries(res.body.groups.map((g: { name: string; stats: unknown }) => [g.name, g.stats]));
       expect(stats.TWICE).toEqual({ albumCount: 2, totalTracks: 12, latestRelease: '2023-06-01T00:00:00.000Z' });
       expect(stats.TWS).toEqual({ albumCount: 0, totalTracks: 0, latestRelease: null });
     });
@@ -54,7 +54,7 @@ describe('lectures regroupées (N+1)', () => {
 
       const res = await request(app).get(`/api/albums/group/${group._id}`);
 
-      const counts = Object.fromEntries(res.body.albums.map((a: any) => [a.name, a.availableProducts]));
+      const counts = Object.fromEntries(res.body.albums.map((a: { name: string; availableProducts: number }) => [a.name, a.availableProducts]));
       expect(counts).toEqual({ Eleven: 3, 'Love Dive': 2 });
     });
   });
@@ -71,7 +71,7 @@ describe('lectures regroupées (N+1)', () => {
 
       const res = await request(app).get('/api/products?limit=10');
 
-      const byTitle = Object.fromEntries(res.body.products.map((p: any) => [p.title, p]));
+      const byTitle = Object.fromEntries(res.body.products.map((p: { title: string; kpopGroupName?: string }) => [p.title, p]));
       expect(byTitle['par nom']).toMatchObject({
         kpopGroupName: 'BTS',
         kpopGroupId: String(bts._id),
@@ -110,13 +110,13 @@ describe('lectures regroupées (N+1)', () => {
         { conversation: conversation._id, sender: other._id, content: 'supprimé', contentType: 'text', isDeleted: true, createdAt: at(5) }
       ]);
 
-      const { conversations } = (await listUserConversations(me._id.toString(), 1, 20, 'all')) as { conversations: any[] };
+      const { conversations } = await listUserConversations(me._id.toString(), 1, 20, 'all');
 
-      const busy = conversations.find((c: any) => String(c._id) === String(conversation._id))!;
+      const busy = conversations.find((c) => String(c._id) === String(conversation._id))!;
       expect(busy.unreadCount).toBe(2);
       expect(busy.lastMessage).toMatchObject({ content: 'non lu 2', preview: 'non lu 2' });
-      expect(busy.lastMessage.sender.username).toBe(other.username);
-      const empty = conversations.find((c: any) => String(c._id) === String(quiet._id))!;
+      expect(busy.lastMessage?.sender).toMatchObject({ username: other.username });
+      const empty = conversations.find((c) => String(c._id) === String(quiet._id))!;
       expect(empty.unreadCount).toBe(0);
       expect(empty.lastMessage).toBeNull();
     });
