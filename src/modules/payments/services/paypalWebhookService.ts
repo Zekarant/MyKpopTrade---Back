@@ -394,11 +394,12 @@ export class PayPalWebhookService {
       payment.status = 'failed';
       await payment.save();
 
-      await Product.findByIdAndUpdate(payment.product, {
-        isAvailable: true,
-        isReserved: false,
-        reservedFor: null
-      });
+      // Le produit a été marqué vendu à cet acheteur avant la capture : on
+      // annule cette vente, sans toucher à une vente faite à quelqu'un d'autre.
+      await Product.updateOne(
+        { _id: payment.product, soldTo: payment.buyer },
+        { $set: { isAvailable: true, isSold: false }, $unset: { soldAt: 1, soldTo: 1 } }
+      );
 
       dispatchAdminAlert({
         event: 'payment.capture_denied',

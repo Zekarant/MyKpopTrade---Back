@@ -10,6 +10,7 @@ jest.mock('../../../../models/conversationModel');
 jest.mock('../../../../models/messageModel');
 jest.mock('../../../../models/userModel');
 jest.mock('../../../notifications/services/notificationService');
+jest.mock('../../../../commons/services/adminAlertService');
 
 const mockedPayment = Payment as jest.Mocked<typeof Payment>;
 
@@ -107,5 +108,24 @@ describe('CHECKOUT.ORDER.APPROVED', () => {
     expect(payment.save).not.toHaveBeenCalled();
     expect(Product.findByIdAndUpdate).not.toHaveBeenCalled();
     expect(NotificationService.createNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe('PAYMENT.CAPTURE.DENIED', () => {
+  it('annule la vente faite à cet acheteur pour remettre le produit en vente', async () => {
+    const payment = fakePayment({ status: 'completed' });
+    (mockedPayment.findOne as jest.Mock).mockResolvedValue(payment);
+    (Product.updateOne as jest.Mock).mockResolvedValue(undefined);
+
+    await PayPalWebhookService.handleWebhook({
+      event_type: 'PAYMENT.CAPTURE.DENIED',
+      resource: { id: CAPTURE_ID, supplementary_data: { related_ids: { order_id: ORDER_ID } } }
+    });
+
+    expect(payment.status).toBe('failed');
+    expect(Product.updateOne).toHaveBeenCalledWith(
+      { _id: 'prod1', soldTo: 'buyer1' },
+      { $set: { isAvailable: true, isSold: false }, $unset: { soldAt: 1, soldTo: 1 } }
+    );
   });
 });
