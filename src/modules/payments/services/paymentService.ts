@@ -717,8 +717,9 @@ export async function fetchPaymentDetails(userId: string, paymentId: string) {
   const payment = await Payment.findById(paymentId)
     .populate('product', 'title description price images')
     // Jamais l'email de l'autre partie : acheteur et vendeur échangent via la messagerie.
-    .populate<{ buyer: PaymentParty }>('buyer', 'username profilePicture')
-    .populate<{ seller: PaymentParty }>('seller', 'username profilePicture');
+    // null si le compte a été supprimé depuis.
+    .populate<{ buyer: PaymentParty | null }>('buyer', 'username profilePicture')
+    .populate<{ seller: PaymentParty | null }>('seller', 'username profilePicture');
 
   if (!payment) {
     throw new HttpError(404, 'Paiement non trouvé');
@@ -728,8 +729,8 @@ export async function fetchPaymentDetails(userId: string, paymentId: string) {
     payment,
     userId,
     paymentId,
-    (p) => p.buyer._id.toString(),
-    (p) => p.seller._id.toString()
+    (p) => p.buyer?._id.toString() ?? '',
+    (p) => p.seller?._id.toString() ?? ''
   );
 
   GdprLogger.logPaymentAction('payment_details_accessed', { paymentId }, userId);

@@ -8,6 +8,8 @@ module.exports = {
   // Suite d'intégration lourde (mongodb-memory-server) : éviter la sursouscription CPU
   // qui provoque des timeouts de 5 s en faux négatif.
   maxWorkers: '50%',
+  // Sur une machine chargée, une requête MongoDB en mémoire dépasse parfois les 5 s par défaut.
+  testTimeout: 15000,
   testPathIgnorePatterns: ['/node_modules/', '/dist/', '/\\.claude/'],
   modulePathIgnorePatterns: ['/\\.claude/'],
   moduleNameMapper: {
