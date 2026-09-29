@@ -7,8 +7,11 @@
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "paypal:status": "ts-node src/scripts/paypalStatus.ts",
     "fix:post-images": "ts-node src/scripts/fixPostImagePaths.ts",
+    "migrate:manual-sales": "ts-node src/scripts/backfillManualSales.ts",
+    "migrate:legacy-fields": "ts-node src/scripts/dropLegacyFields.ts",
     "seed:test": "ts-node src/scripts/seedTestData.ts --yes",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -56,6 +59,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
@@ -73,12 +77,15 @@
     "@types/supertest": "^7.2.0",
     "@types/web-push": "^3.6.4",
     "canvas": "^3.2.3",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
     "husky": "^9.1.7",
     "jest": "^30.3.0",
     "mongodb-memory-server": "^11.0.1",
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.9",
     "ts-node": "^10.9.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0"
   }
 }

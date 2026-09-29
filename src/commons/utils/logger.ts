@@ -12,7 +12,7 @@ if (!fs.existsSync(logDir)) {
 
 // Format personnalisé pour les logs
 const customFormat = winston.format.printf(({ level, message, timestamp, ...meta }) => {
-  let metaStr = Object.keys(meta).length ? JSON.stringify(meta, null, 2) : '';
+  const metaStr = Object.keys(meta).length ? JSON.stringify(meta, null, 2) : '';
   return `${timestamp} [${level.toUpperCase()}]: ${message} ${metaStr}`;
 });
 

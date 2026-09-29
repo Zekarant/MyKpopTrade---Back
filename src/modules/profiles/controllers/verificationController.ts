@@ -114,7 +114,7 @@ export const getUserVerificationStats = asyncHandler(async (req: Request, res: R
   };
   
   stats.forEach(stat => {
-    if (stat.status && formattedStats.hasOwnProperty(stat.status)) {
+    if (stat.status && Object.hasOwn(formattedStats, stat.status)) {
       formattedStats[stat.status as keyof typeof formattedStats] = stat.count;
       formattedStats.total += stat.count;
     }

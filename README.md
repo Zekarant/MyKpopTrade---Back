@@ -67,9 +67,12 @@ L'API écoute sur <http://localhost:3000>.
 | `npm run build` | Compilation TypeScript vers `dist/` |
 | `npm start` | Lance `dist/index.js` |
 | `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | ESLint (`eslint.config.js`) |
 | `npm test` | Suite Jest |
 | `npm run test:coverage` | Suite Jest avec couverture |
 | `npm run paypal:status` | Diagnostic de la configuration PayPal |
+| `npm run migrate:legacy-fields` | Retire les champs de réservation et les conversations « prix libre » obsolètes |
+| `npm run migrate:manual-sales` | Rétablit « vendu » sur les anciennes ventes manuelles (simulation ; `-- --apply` pour écrire) |
 
 ## Supervision
 
@@ -92,7 +95,7 @@ src/
 ├── commons/
 │   ├── middlewares/        auth, erreurs, détection de fuite de données
 │   ├── services/           tokens JWT / refresh tokens
-│   ├── tasks/              CRON : anonymisation RGPD, suivi colis, réservations
+│   ├── tasks/              CRON : RGPD, suivi colis, suspensions, pièces d'identité, comptes
 │   └── utils/              logger (avec sanitisation), chiffrement, erreurs HTTP
 └── modules/                Un dossier par domaine métier
     ├── auth/               inscription, connexion, OAuth, mots de passe

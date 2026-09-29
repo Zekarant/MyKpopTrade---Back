@@ -45,7 +45,7 @@ export const sendVerificationSMS = async (phoneNumber: string, code: string): Pr
         error: error instanceof Error ? error.message : String(error),
         phoneNumber
       });
-      throw new Error('Impossible d\'envoyer le SMS. Veuillez réessayer plus tard.');
+      throw new Error('Impossible d\'envoyer le SMS. Veuillez réessayer plus tard.', { cause: error });
     }
     return;
   }

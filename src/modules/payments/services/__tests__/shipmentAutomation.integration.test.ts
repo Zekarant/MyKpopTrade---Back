@@ -25,6 +25,7 @@ import {
   autoConfirmStaleShipments,
   sendStuckShipmentReminders
 } from '../shipmentService';
+import * as trackingModule from '../tracking';
 import { resetTrackingProviderCache } from '../tracking';
 import { NotificationService } from '../../../notifications/services/notificationService';
 import {
@@ -37,35 +38,31 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
  * Stub de TrackingProvider configurable test par test : on remplace
- * `require('../tracking').getTrackingProvider` à la volée plutôt que de
- * brancher l'env, ce qui garde les tests lisibles et indépendants.
+ * `getTrackingProvider` à la volée plutôt que de brancher l'env, ce qui
+ * garde les tests lisibles et indépendants.
  */
-const trackingModule = require('../tracking');
 function setProvider(stub: { name?: string; track: jest.Mock }) {
   resetTrackingProviderCache();
-  trackingModule.getTrackingProvider = jest.fn().mockReturnValue({
+  jest.spyOn(trackingModule, 'getTrackingProvider').mockReturnValue({
     name: stub.name ?? 'stub',
     track: stub.track
   });
 }
 
 describe('shipmentService — automatisation', () => {
-  const originalGetProvider = trackingModule.getTrackingProvider;
-
   beforeAll(async () => {
     await startInMemoryMongo();
   }, 60000);
 
   afterAll(async () => {
     await stopInMemoryMongo();
-    trackingModule.getTrackingProvider = originalGetProvider;
   });
 
   beforeEach(async () => {
     await clearAllCollections();
     jest.clearAllMocks();
+    jest.restoreAllMocks();
     resetTrackingProviderCache();
-    trackingModule.getTrackingProvider = originalGetProvider;
   });
 
   async function createPaymentWithShipment(overrides: Record<string, unknown> = {}) {

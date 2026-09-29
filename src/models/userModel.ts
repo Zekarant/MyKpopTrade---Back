@@ -533,7 +533,7 @@ UserSchema.methods.comparePassword = async function(candidatePassword: string): 
     return await bcrypt.compare(candidatePassword, this.password);
   } catch (error) {
     console.error('Erreur lors de la comparaison du mot de passe:', error);
-    throw new Error(error instanceof Error ? error.message : String(error));
+    throw new Error(error instanceof Error ? error.message : String(error), { cause: error });
   }
 };
 

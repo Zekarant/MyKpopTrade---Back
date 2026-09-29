@@ -292,7 +292,7 @@ export class PayPalPartnerService {
         message: paypalErrorMessage(error),
         debugId: extractDebugId(error)
       });
-      throw new Error('Impossible de générer le lien d\'inscription PayPal');
+      throw new Error('Impossible de générer le lien d\'inscription PayPal', { cause: error });
     }
   }
 
@@ -346,7 +346,7 @@ export class PayPalPartnerService {
         message: paypalErrorMessage(error),
         debugId: extractDebugId(error)
       });
-      throw new Error('Impossible de récupérer le statut PayPal du vendeur');
+      throw new Error('Impossible de récupérer le statut PayPal du vendeur', { cause: error });
     }
   }
 

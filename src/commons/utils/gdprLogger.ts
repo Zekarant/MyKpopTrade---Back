@@ -242,9 +242,10 @@ export class GdprLogger {
     if (process.env.DATA_PROTECTION_EMAIL) {
       try {
         const user = await User.findById(userId).select('email username');
-        const emailService = require('../services/emailService');
-        
-        await emailService.sendEmail({
+        // Import différé, comme l'ancien require() : charger le service d'emails au démarrage n'est pas nécessaire ici.
+        const { sendEmail } = await import('../services/emailService');
+
+        await sendEmail({
           to: process.env.DATA_PROTECTION_EMAIL,
           subject: 'ALERTE - Activité suspecte détectée',
           html: `

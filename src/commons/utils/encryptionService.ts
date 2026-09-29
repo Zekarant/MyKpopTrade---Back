@@ -67,7 +67,7 @@ export class EncryptionService {
       return `${CURRENT_FORMAT_PREFIX}:${iv.toString('hex')}:${encrypted}`;
     } catch (error) {
       console.error('Erreur lors du chiffrement:', error);
-      throw new Error('Erreur lors du chiffrement des données');
+      throw new Error('Erreur lors du chiffrement des données', { cause: error });
     }
   }
   
@@ -109,7 +109,7 @@ export class EncryptionService {
       }
     } catch (error) {
       console.error('Erreur lors du déchiffrement:', error);
-      throw new Error('Erreur lors du déchiffrement des données');
+      throw new Error('Erreur lors du déchiffrement des données', { cause: error });
     }
   }
   
@@ -128,14 +128,9 @@ export class EncryptionService {
       const domain = parts[1];
       
       // Garder les 2 premiers et derniers caractères du nom
-      let maskedName = '';
-      if (name.length <= 4) {
-        maskedName = name[0] + '*'.repeat(name.length - 1);
-      } else {
-        maskedName = name.substring(0, 2) + 
-                   '*'.repeat(name.length - 4) + 
-                   name.substring(name.length - 2);
-      }
+      const maskedName = name.length <= 4
+        ? name[0] + '*'.repeat(name.length - 1)
+        : name.substring(0, 2) + '*'.repeat(name.length - 4) + name.substring(name.length - 2);
       
       return `${maskedName}@${domain}`;
     }

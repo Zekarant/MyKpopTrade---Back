@@ -257,7 +257,7 @@ export class PayPalClient {
         statusCode: paypalErrorStatus(error),
         debugId: extractDebugId(error)
       });
-      throw new Error('Impossible de récupérer les détails de la capture PayPal');
+      throw new Error('Impossible de récupérer les détails de la capture PayPal', { cause: error });
     }
   }
 

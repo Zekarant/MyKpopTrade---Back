@@ -15,7 +15,7 @@ export const errorHandler = (
   err: AppError,
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ): void => {
   const clientError = err.statusCode ? null : asHttpError(err);
   const statusCode = err.statusCode || clientError?.statusCode || 500;
@@ -66,6 +66,10 @@ export const notFoundHandler = (req: Request, res: Response): void => {
 /**
  * Wrapper pour gérer les erreurs dans les contrôleurs asynchrones
  */
-export const asyncHandler = (fn: Function) => (req: Request, res: Response, next: NextFunction) => {
+// Signature de méthode : ses paramètres sont bivariants, ce qui laisse passer un
+// contrôleur typé avec une requête plus précise (ex. AuthenticatedRequest).
+type RouteHandler = { bivarianceHack(req: Request, res: Response, next: NextFunction): unknown }['bivarianceHack'];
+
+export const asyncHandler = (fn: RouteHandler) => (req: Request, res: Response, next: NextFunction) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
