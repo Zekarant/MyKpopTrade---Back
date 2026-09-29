@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Cart, { CART_MAX_ITEMS, ICartItem } from '../../../models/cartModel';
 import Product, { IProduct } from '../../../models/productModel';
+import User from '../../../models/userModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import { resolveBuyerPrice } from '../../payments/services/buyerPrice';
 import { quoteShipping, ShippingMethod } from '../../payments/services/checkoutService';
@@ -18,7 +19,7 @@ type PricedCartItem = Omit<ICartItem, 'product'> & {
 
 /** Article renvoyé au client, avec le prix produit que PayPal facturera. */
 export type CartViewItem = Omit<ICartItem, 'product'> & {
-  product: CartProduct | null;
+  product: (CartProduct & { sellerUsername?: string }) | null;
   /** Prix négocié accepté s'il existe, sinon prix catalogue (hors livraison). */
   buyerPrice: number;
   /** Frais de port que PayPal ajoutera, par méthode ; `null` si non proposée. */
@@ -40,12 +41,17 @@ async function loadCartView(userId: string) {
     .lean();
   if (!cart) return null;
 
+  // Pseudo des vendeurs, pour que le panier les nomme (un compte supprimé n'en a plus).
+  const sellerIds = cart.items.flatMap(({ product }) => (product ? [product.seller] : []));
+  const sellers = await User.find({ _id: { $in: sellerIds } }).select('username').lean();
+  const usernameById = new Map(sellers.map((seller) => [String(seller._id), seller.username]));
+
   const items: CartViewItem[] = cart.items.map(({ product, ...item }) => {
     if (!product) return { ...item, product: null, buyerPrice: item.priceSnapshot, shippingCosts: null };
     const { _id, title, images, price, currency, isAvailable, isSold, seller } = product;
     return {
       ...item,
-      product: { _id, title, images, price, currency, isAvailable, isSold, seller },
+      product: { _id, title, images, price, currency, isAvailable, isSold, seller, sellerUsername: usernameById.get(String(seller)) },
       buyerPrice: resolveBuyerPrice(product, userId),
       shippingCosts: quoteShipping(product)
     };

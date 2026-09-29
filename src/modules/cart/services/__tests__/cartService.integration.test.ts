@@ -103,6 +103,16 @@ describe('cartService (integration)', () => {
       expect(cart.items[0].shippingCosts).toEqual({ national: 3.2, worldwide: null, localPickup: 0 });
     });
 
+    it('nomme le vendeur de chaque article', async () => {
+      const buyer = await createTestUser();
+      const seller = await createTestUser({ username: 'vendeuse_42' });
+      const product = await createTestProduct(seller._id);
+
+      const cart = await cartService.addItem(buyer._id.toString(), product._id.toString());
+
+      expect(cart.items[0].product).toMatchObject({ seller: seller._id, sellerUsername: 'vendeuse_42' });
+    });
+
     it('ne renvoie pas les négociations (offres des autres acheteurs)', async () => {
       const buyer = await createTestUser();
       const other = await createTestUser();
