@@ -1,9 +1,10 @@
 import mongoose from 'mongoose';
 import User from '../../../models/userModel';
-import Product from '../../../models/productModel';
+import Product, { IProduct } from '../../../models/productModel';
+import { IUser } from '../../../models/userModel';
 
-function buildInventoryFilter(sellerId: string, status: string): any {
-  const filter: any = { seller: sellerId };
+function buildInventoryFilter(sellerId: string, status: string): mongoose.QueryFilter<IProduct> {
+  const filter: mongoose.QueryFilter<IProduct> = { seller: sellerId };
 
   switch (status) {
     case 'available':
@@ -125,7 +126,16 @@ export async function fetchUserFavorites(userId: string, page: number, limit: nu
   };
 }
 
-async function buildPersonalizedRecommendations(userId: string, limit: number): Promise<any[]> {
+type RecommendedProduct = Pick<
+  IProduct,
+  'title' | 'price' | 'currency' | 'images' | 'kpopGroup' | 'kpopMember' | 'type' | 'condition' | 'views' | 'favorites' | 'createdAt'
+> & {
+  _id: mongoose.Types.ObjectId;
+  seller?: Pick<IUser, 'username' | 'profilePicture'>;
+  preferenceScore: number;
+};
+
+async function buildPersonalizedRecommendations(userId: string, limit: number): Promise<RecommendedProduct[]> {
   const user = await User.findById(userId, { favorites: 1, preferences: 1 });
 
   if (!user) return [];
@@ -142,9 +152,10 @@ async function buildPersonalizedRecommendations(userId: string, limit: number): 
   const userPreferredGroups = user.preferences?.kpopGroups || [];
   const allPreferredGroups = [...new Set([...preferredGroups, ...userPreferredGroups])];
 
-  const recommendationQuery: any = {
+  const recommendationQuery: mongoose.QueryFilter<IProduct> = {
     isAvailable: true,
-    seller: { $ne: userId },
+    // Un pipeline d'agrégation ne convertit pas les types : ObjectId explicite.
+    seller: { $ne: new mongoose.Types.ObjectId(userId) },
     _id: { $nin: user.favorites || [] }
   };
 
@@ -164,7 +175,7 @@ async function buildPersonalizedRecommendations(userId: string, limit: number): 
     }
   }
 
-  return await Product.aggregate([
+  return await Product.aggregate<RecommendedProduct>([
     { $match: recommendationQuery },
     {
       $addFields: {
@@ -212,7 +223,7 @@ async function buildPersonalizedRecommendations(userId: string, limit: number): 
 }
 
 export async function fetchRecommendedProducts(userId: string | undefined, limit: number) {
-  let recommendedProducts: any[] = [];
+  let recommendedProducts: Array<RecommendedProduct | mongoose.HydratedDocument<IProduct>> = [];
 
   if (userId) {
     recommendedProducts = await buildPersonalizedRecommendations(userId, limit);
@@ -221,7 +232,6 @@ export async function fetchRecommendedProducts(userId: string | undefined, limit
   if (recommendedProducts.length < limit) {
     const remainingLimit = limit - recommendedProducts.length;
     const excludeIds = recommendedProducts.map(p => p._id);
-    if (userId) excludeIds.push(userId);
 
     const popularProducts = await Product.find({
       isAvailable: true,
