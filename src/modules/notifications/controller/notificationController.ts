@@ -2,18 +2,23 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { NotificationService } from '../services/notificationService';
 import logger from '../../../commons/utils/logger';
+import { clampLimit } from '../../../commons/utils/pagination';
+
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 50;
 
 /**
  * Récupère les notifications de l'utilisateur connecté
  */
 export const getMyNotifications = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.user as any).id;
-  const { page = '1', limit = '20', unread } = req.query;
-  
+  const { page = '1', limit, unread } = req.query;
+
   try {
     const result = await NotificationService.getUserNotifications(userId, {
-      page: parseInt(page as string) || 1,
-      limit: parseInt(limit as string) || 20,
+      page: Math.max(1, parseInt(page as string) || 1),
+      // `limit` venait tel quel de l'URL.
+      limit: clampLimit(limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
       onlyUnread: unread === 'true'
     });
     

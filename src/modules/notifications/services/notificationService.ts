@@ -29,8 +29,9 @@ export class NotificationService {
     expiresInDays?: number;
   }) {
     try {
-      // Vérifier si le destinataire existe
-      const recipient = await User.findById(recipientId);
+      // Vérifier si le destinataire existe (sans charger tout son document :
+      // cette fonction est appelée à chaque action notifiée).
+      const recipient = await User.exists({ _id: recipientId });
       if (!recipient) {
         throw new Error(`Destinataire introuvable: ${recipientId}`);
       }
@@ -136,20 +137,15 @@ export class NotificationService {
         query.isRead = false;
       }
       
-      // Compter le total de notifications non lues
-      const unreadCount = await Notification.countDocuments({ 
-        recipient: userId, 
-        isRead: false 
-      });
-      
-      // Récupérer les notifications avec pagination
-      const notifications = await Notification.find(query)
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit);
-      
-      // Compter le total pour la pagination
-      const total = await Notification.countDocuments(query);
+      // Trois lectures indépendantes : en parallèle plutôt qu'à la suite.
+      const [unreadCount, notifications, total] = await Promise.all([
+        Notification.countDocuments({ recipient: userId, isRead: false }),
+        Notification.find(query)
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * limit)
+          .limit(limit),
+        Notification.countDocuments(query)
+      ]);
       
       return {
         notifications,
