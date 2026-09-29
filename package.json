@@ -8,6 +8,7 @@
     "dev": "ts-node src/index.ts",
     "typecheck": "tsc --noEmit",
     "paypal:status": "ts-node src/scripts/paypalStatus.ts",
+    "fix:post-images": "ts-node src/scripts/fixPostImagePaths.ts",
     "seed:test": "ts-node src/scripts/seedTestData.ts --yes",
     "test": "jest",
     "test:watch": "jest --watch",
