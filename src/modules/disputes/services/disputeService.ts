@@ -321,41 +321,61 @@ export async function resolveDispute({
     : undefined;
 
   let refundAmountNum: number | undefined;
-  if (outcome === 'refunded') {
-    if (refundAmount !== undefined && refundAmount !== null && refundAmount !== '') {
-      const parsed = parseFloat(refundAmount as string);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        throw new HttpError(400, 'refundAmount invalide');
-      }
-      refundAmountNum = parsed;
+  if (outcome === 'refunded' && refundAmount !== undefined && refundAmount !== null && refundAmount !== '') {
+    const parsed = parseFloat(refundAmount as string);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new HttpError(400, 'refundAmount invalide');
     }
-    // Déclenche le remboursement PayPal (plein si refundAmount non précisé)
+    refundAmountNum = parsed;
+  }
+
+  // Clôture atomique AVANT le remboursement : deux admins tranchant en même
+  // temps passaient tous deux le contrôle ci-dessus et remboursaient deux fois.
+  // Seule la requête qui fait passer le litige de « actif » à « clos » continue.
+  const previousStatus = dispute.status;
+  const claimed = await Dispute.findOneAndUpdate(
+    { _id: dispute._id, status: { $in: ACTIVE_STATUSES } },
+    {
+      $set: {
+        status: outcome,
+        resolution: {
+          decidedBy: new mongoose.Types.ObjectId(adminId),
+          decidedAt: new Date(),
+          outcome,
+          notes: notesStr,
+          refundAmount: refundAmountNum
+        },
+        closedAt: new Date()
+      }
+    },
+    { new: true }
+  );
+  if (!claimed) {
+    throw new HttpError(409, 'Le litige vient d\'être clôturé par ailleurs', 'DISPUTE_CLOSED');
+  }
+
+  if (outcome === 'refunded') {
+    // Remboursement PayPal (plein si refundAmount non précisé).
     try {
       await processRefund({
         userId: adminId,
-        paymentId: dispute.payment.toString(),
+        paymentId: claimed.payment.toString(),
         amount: refundAmountNum,
-        reason: `Litige #${dispute._id} — ${notesStr ?? 'résolution administrative'}`
+        reason: `Litige #${claimed._id} — ${notesStr ?? 'résolution administrative'}`
       });
     } catch (error) {
+      // Rien n'a été remboursé : le litige redevient arbitrable.
+      await Dispute.updateOne(
+        { _id: claimed._id, status: 'refunded' },
+        { $set: { status: previousStatus }, $unset: { resolution: 1, closedAt: 1 } }
+      );
       logger.error('Erreur refund pendant résolution dispute', {
-        disputeId: dispute._id?.toString(),
+        disputeId: claimed._id?.toString(),
         error: error instanceof Error ? error.message : String(error)
       });
       throw error;
     }
   }
-
-  dispute.status = outcome as DisputeStatus;
-  dispute.resolution = {
-    decidedBy: new mongoose.Types.ObjectId(adminId),
-    decidedAt: new Date(),
-    outcome: outcome as DisputeStatus,
-    notes: notesStr,
-    refundAmount: refundAmountNum
-  };
-  dispute.closedAt = new Date();
-  await dispute.save();
 
   // Notifie les deux parties
   const verdictLabel = outcome === 'refunded'
@@ -388,7 +408,7 @@ export async function resolveDispute({
     }
   });
 
-  return dispute;
+  return claimed;
 }
 
 export async function getDispute(userId: string, disputeId: string, isAdmin = false) {
