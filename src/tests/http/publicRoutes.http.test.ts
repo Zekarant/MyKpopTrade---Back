@@ -92,6 +92,32 @@ describe('HTTP — routes publiques (via supertest)', () => {
       expect(res.body.products).toHaveLength(1);
     });
 
+    it('ne publie pas les offres des acheteurs dans le détail ni la liste des produits', async () => {
+      const seller = await createTestUser();
+      const buyer = await createTestUser();
+      const product = await createTestProduct(seller._id, {
+        negotiations: [{
+          buyer: buyer._id,
+          initialOffer: 12,
+          currentOffer: 12,
+          status: 'pending',
+          conversationId: buyer._id,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }]
+      });
+
+      const visitor = await createTestUser();
+      const detail = await request(app)
+        .get(`/api/products/${product._id}`)
+        .set('Authorization', `Bearer ${generateAccessToken(visitor)}`);
+      const list = await request(app).get('/api/products');
+
+      expect(detail.status).toBe(200);
+      expect(detail.body.product).not.toHaveProperty('negotiations');
+      expect(list.body.products[0]).not.toHaveProperty('negotiations');
+    });
+
     it('refuse un identifiant d\'artiste invalide sur la liste des albums', async () => {
       const res = await request(app).get('/api/albums?artistId=pas-un-id');
 

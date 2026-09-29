@@ -74,13 +74,6 @@ export interface IProduct extends Document {
   isPayWhatYouWant: boolean;
   pwywMinPrice?: number;
   pwywMaxPrice?: number;
-  pwywOffers?: {
-    buyer: mongoose.Types.ObjectId;
-    proposedPrice: number;
-    status: 'pending' | 'accepted' | 'rejected';
-    conversationId: mongoose.Types.ObjectId;
-    createdAt: Date;
-  }[];
 }
 
 const ProductSchema: Schema = new Schema({
@@ -218,44 +211,48 @@ const ProductSchema: Schema = new Schema({
   minOfferPercentage: {
     type: Number,
   },
-  negotiations: [{
-    buyer: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    initialOffer: {
-      type: Number,
-      required: true
-    },
-    currentOffer: {
-      type: Number,
-      required: true
-    },
-    counterOffer: {
-      type: Number
-    },
-    status: {
-      type: String,
-      enum: ['pending', 'accepted', 'rejected', 'expired', 'completed'],
-      default: 'pending'
-    },
-    expiresAt: {
-      type: Date
-    },
-    conversationId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Conversation'
-    },
-    createdAt: {
-      type: Date,
-      default: Date.now
-    },
-    updatedAt: {
-      type: Date,
-      default: Date.now
-    }
-  }],
+  // Offres de tous les acheteurs : jamais renvoyées sans le demander (`+negotiations`).
+  negotiations: {
+    select: false,
+    type: [{
+      buyer: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
+      },
+      initialOffer: {
+        type: Number,
+        required: true
+      },
+      currentOffer: {
+        type: Number,
+        required: true
+      },
+      counterOffer: {
+        type: Number
+      },
+      status: {
+        type: String,
+        enum: ['pending', 'accepted', 'rejected', 'expired', 'completed'],
+        default: 'pending'
+      },
+      expiresAt: {
+        type: Date
+      },
+      conversationId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Conversation'
+      },
+      createdAt: {
+        type: Date,
+        default: Date.now
+      },
+      updatedAt: {
+        type: Date,
+        default: Date.now
+      }
+    }]
+  },
   // Configuration du "Pay What You Want"
   isPayWhatYouWant: {
     type: Boolean,
@@ -267,30 +264,6 @@ const ProductSchema: Schema = new Schema({
   pwywMaxPrice: {
     type: Number
   },
-  pwywOffers: [{
-    buyer: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    proposedPrice: {
-      type: Number,
-      required: true
-    },
-    status: {
-      type: String,
-      enum: ['pending', 'accepted', 'rejected'],
-      default: 'pending'
-    },
-    conversationId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Conversation'
-    },
-    createdAt: {
-      type: Date,
-      default: Date.now
-    }
-  }],
   views: {
     type: Number,
     default: 0
@@ -325,6 +298,5 @@ ProductSchema.index({ kpopGroup: 1, isAvailable: 1 });
 ProductSchema.index({ type: 1, isAvailable: 1 });
 ProductSchema.index({ createdAt: -1 });
 ProductSchema.index({ 'negotiations.buyer': 1, 'negotiations.status': 1 });
-ProductSchema.index({ 'pwywOffers.buyer': 1, 'pwywOffers.status': 1 });
 
 export default (mongoose.models.Product as mongoose.Model<IProduct>) || mongoose.model<IProduct>('Product', ProductSchema);
