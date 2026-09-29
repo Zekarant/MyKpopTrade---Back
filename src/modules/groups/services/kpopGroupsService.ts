@@ -116,26 +116,30 @@ export async function searchGroupsByQuery({
     .sort({ isActive: -1, name: 1 })
     .lean();
 
-  const enrichedGroups = await Promise.all(
-    groups.map(async (group) => {
-      const albumStats = await Album.aggregate([
-        { $match: { artistId: group._id } },
-        {
-          $group: {
-            _id: null,
-            albumCount: { $sum: 1 },
-            totalTracks: { $sum: '$totalTracks' },
-            latestRelease: { $max: '$releaseDate' }
-          }
-        }
-      ]);
+  // Statistiques d'albums de tous les groupes trouvés en une agrégation (une
+  // par groupe auparavant).
+  const albumStats = await Album.aggregate<{
+    _id: unknown;
+    albumCount: number;
+    totalTracks: number;
+    latestRelease: Date | null;
+  }>([
+    { $match: { artistId: { $in: groups.map((group) => group._id) } } },
+    {
+      $group: {
+        _id: '$artistId',
+        albumCount: { $sum: 1 },
+        totalTracks: { $sum: '$totalTracks' },
+        latestRelease: { $max: '$releaseDate' }
+      }
+    }
+  ]);
+  const statsByGroup = new Map(albumStats.map(({ _id, ...stats }) => [String(_id), stats]));
 
-      return {
-        ...group,
-        stats: albumStats[0] || { albumCount: 0, totalTracks: 0, latestRelease: null }
-      };
-    })
-  );
+  const enrichedGroups = groups.map((group) => ({
+    ...group,
+    stats: statsByGroup.get(String(group._id)) ?? { albumCount: 0, totalTracks: 0, latestRelease: null }
+  }));
 
   logger.info('Recherche de groupes effectuée', {
     query,

@@ -146,22 +146,23 @@ export async function fetchAlbumsByGroup(groupId: string) {
     return { albums: [], empty: true };
   }
 
-  const albumsWithProducts = await Promise.all(
-    albums.map(async (album) => {
-      const productCount = await Product.countDocuments({
-        $or: [
-          { albumName: album.name },
-          { kpopGroup: album.artistName }
-        ],
-        isAvailable: true
-      });
+  // Une seule agrégation au lieu d'un comptage par album : les annonces en
+  // ligne sont regroupées par (groupe, album), puis chaque album additionne les
+  // paires qui le concernent — même règle qu'avant : même nom d'album OU même
+  // groupe.
+  const names = [...new Set(albums.map((album) => album.name))];
+  const artists = [...new Set(albums.map((album) => album.artistName))];
+  const pairs = await Product.aggregate<{ _id: { kpopGroup?: string; albumName?: string }; count: number }>([
+    { $match: { isAvailable: true, $or: [{ albumName: { $in: names } }, { kpopGroup: { $in: artists } }] } },
+    { $group: { _id: { kpopGroup: '$kpopGroup', albumName: '$albumName' }, count: { $sum: 1 } } }
+  ]);
 
-      return {
-        ...album,
-        availableProducts: productCount
-      };
-    })
-  );
+  const albumsWithProducts = albums.map((album) => ({
+    ...album,
+    availableProducts: pairs
+      .filter(({ _id }) => _id.albumName === album.name || _id.kpopGroup === album.artistName)
+      .reduce((sum, { count }) => sum + count, 0)
+  }));
 
   return { albums: albumsWithProducts, empty: false };
 }

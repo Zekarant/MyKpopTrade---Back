@@ -176,6 +176,55 @@ export async function fetchConversation(
   };
 }
 
+/**
+ * Messages non lus et dernier message de chaque conversation d'une page, en
+ * deux requêtes pour toute la page (elles étaient faites deux fois par
+ * conversation). Le dernier message profite de l'index
+ * `{ conversation: 1, createdAt: -1 }`.
+ */
+async function loadConversationSummaries(conversationIds: unknown[], userId: string) {
+  const unreadCounts = new Map<string, number>();
+  const lastMessages = new Map<string, any>();
+  if (!conversationIds.length) return { unreadCounts, lastMessages };
+
+  // Un pipeline d'agrégation ne convertit pas les types : ObjectId explicites.
+  const ids = conversationIds.map((id) => new mongoose.Types.ObjectId(String(id)));
+  const me = new mongoose.Types.ObjectId(userId);
+
+  const [unread, latest] = await Promise.all([
+    Message.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
+      { $match: { conversation: { $in: ids }, sender: { $ne: me }, readBy: { $ne: me }, isDeleted: false } },
+      { $group: { _id: '$conversation', count: { $sum: 1 } } }
+    ]),
+    Message.aggregate<{ _id: mongoose.Types.ObjectId; message: any }>([
+      { $match: { conversation: { $in: ids }, isDeleted: false } },
+      { $sort: { conversation: 1, createdAt: -1 } },
+      {
+        $group: {
+          _id: '$conversation',
+          message: {
+            $first: {
+              _id: '$_id',
+              content: '$content',
+              contentType: '$contentType',
+              sender: '$sender',
+              createdAt: '$createdAt',
+              isEncrypted: '$isEncrypted'
+            }
+          }
+        }
+      }
+    ])
+  ]);
+
+  const messages = latest.map((entry) => entry.message);
+  await Message.populate(messages, { path: 'sender', select: 'username' });
+
+  for (const entry of unread) unreadCounts.set(String(entry._id), entry.count);
+  latest.forEach((entry, index) => lastMessages.set(String(entry._id), messages[index]));
+  return { unreadCounts, lastMessages };
+}
+
 export async function listUserConversations(
   userId: string,
   page: number,
@@ -214,23 +263,15 @@ export async function listUserConversations(
     .lean();
 
   const conversations = conversationsRaw as LeanConversation[];
+  const { unreadCounts, lastMessages } = await loadConversationSummaries(
+    conversations.map((conversation) => conversation._id),
+    userId
+  );
 
-  const conversationsWithMetadata = await Promise.all(conversations.map(async (conversation) => {
-    const unreadCount = await Message.countDocuments({
-      conversation: conversation._id,
-      sender: { $ne: userId },
-      readBy: { $ne: userId },
-      isDeleted: false
-    });
-
-    const lastMessage = await Message.findOne({
-      conversation: conversation._id,
-      isDeleted: false
-    })
-      .sort({ createdAt: -1 })
-      .select('content contentType sender createdAt isEncrypted')
-      .populate('sender', 'username')
-      .lean();
+  const conversationsWithMetadata = conversations.map((conversation) => {
+    const key = String(conversation._id);
+    const unreadCount = unreadCounts.get(key) ?? 0;
+    const lastMessage = lastMessages.get(key) ?? null;
 
     let messagePreview = '';
     if (lastMessage && !Array.isArray(lastMessage)) {
@@ -257,7 +298,7 @@ export async function listUserConversations(
         offerCount: Array.isArray(conversation.offerHistory) ? conversation.offerHistory.length : 0
       }
     };
-  }));
+  });
 
   return {
     conversations: conversationsWithMetadata,

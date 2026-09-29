@@ -31,13 +31,39 @@ function assertValidObjectId(productId: string) {
   }
 }
 
-async function findKpopEntityByIdOrName<T extends { _id: any; name: string }>(
-  model: { findById: Function; findOne: Function },
-  identifier: string
-): Promise<T | null> {
-  return mongoose.Types.ObjectId.isValid(identifier)
-    ? await model.findById(identifier).select('_id name')
-    : await model.findOne({ name: identifier }).select('_id name');
+type KpopEntity = { _id: mongoose.Types.ObjectId; name: string };
+
+/**
+ * Groupes (ou albums) désignés par les annonces, en une requête pour toute la
+ * liste : l'enrichissement faisait deux requêtes par annonce, soit jusqu'à
+ * 1 000 pour une page de 500. Un identifiant désigne l'entité par son `_id`,
+ * sinon par son nom exact ; à nom égal, la première trouvée l'emporte, comme
+ * avec le `findOne` d'origine.
+ *
+ * @returns les entités indexées par l'identifiant ou le nom employé.
+ */
+async function loadKpopEntities(
+  model: typeof KpopGroup | typeof KpopAlbum,
+  identifiers: unknown[]
+): Promise<Map<string, KpopEntity>> {
+  const wanted = [...new Set(identifiers.filter((value): value is string => typeof value === 'string' && value !== ''))];
+  const ids = new Set(wanted.filter((value) => mongoose.Types.ObjectId.isValid(value)));
+  const names = new Set(wanted.filter((value) => !ids.has(value)));
+  const byKey = new Map<string, KpopEntity>();
+  if (!wanted.length) return byKey;
+
+  const criteria = [
+    ...(ids.size ? [{ _id: { $in: [...ids] } }] : []),
+    ...(names.size ? [{ name: { $in: [...names] } }] : [])
+  ];
+  const entities = await (model as typeof KpopGroup).find({ $or: criteria }).select('_id name').lean<KpopEntity[]>();
+
+  for (const entity of entities) {
+    const id = entity._id.toString();
+    if (ids.has(id)) byKey.set(id, entity);
+    if (names.has(entity.name) && !byKey.has(entity.name)) byKey.set(entity.name, entity);
+  }
+  return byKey;
 }
 
 function cleanupUploadedFiles(files?: Express.Multer.File[]) {
@@ -49,22 +75,27 @@ function cleanupUploadedFiles(files?: Express.Multer.File[]) {
   }
 }
 
-async function enrichWithKpopNames(product: any, enriched: any) {
-  if (product.kpopGroup) {
-    const group = await findKpopEntityByIdOrName<any>(KpopGroup, product.kpopGroup);
+/** Ajoute aux annonces le nom et l'identifiant de leur groupe et de leur album. */
+async function withKpopNames(products: any[]): Promise<any[]> {
+  const [groups, albums] = await Promise.all([
+    loadKpopEntities(KpopGroup, products.map((product) => product.kpopGroup)),
+    loadKpopEntities(KpopAlbum, products.map((product) => product.albumName))
+  ]);
+
+  return products.map((product) => {
+    const enriched: any = product.toObject();
+    const group = groups.get(product.kpopGroup);
     if (group) {
       enriched.kpopGroupName = group.name;
       enriched.kpopGroupId = group._id.toString();
     }
-  }
-
-  if (product.albumName) {
-    const album = await findKpopEntityByIdOrName<any>(KpopAlbum, product.albumName);
+    const album = albums.get(product.albumName);
     if (album) {
       enriched.albumNameStr = album.name;
       enriched.albumId = album._id.toString();
     }
-  }
+    return enriched;
+  });
 }
 
 async function findProductOr404(productId: string) {
@@ -181,9 +212,7 @@ export async function fetchProductById(productId: string, userId?: string) {
     throw new HttpError(404, 'Produit non trouvé');
   }
 
-  const enrichedProduct: any = product.toObject();
-
-  await enrichWithKpopNames(product, enrichedProduct);
+  const [enrichedProduct] = await withKpopNames([product]);
 
   const opts = enrichedProduct.shippingOptions || {};
   enrichedProduct.shippingPrice = opts.nationalCost ?? opts.shippingCost ?? null;
@@ -243,16 +272,8 @@ export async function listProducts(query: any) {
     Product.countDocuments(filter)
   ]);
 
-  const enrichedProducts = await Promise.all(
-    products.map(async (product) => {
-      const enrichedProduct: any = product.toObject();
-      await enrichWithKpopNames(product, enrichedProduct);
-      return enrichedProduct;
-    })
-  );
-
   return {
-    products: enrichedProducts,
+    products: await withKpopNames(products),
     pagination: {
       page,
       limit,
