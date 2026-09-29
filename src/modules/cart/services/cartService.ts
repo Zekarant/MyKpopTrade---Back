@@ -3,6 +3,7 @@ import Cart, { CART_MAX_ITEMS, ICartItem } from '../../../models/cartModel';
 import Product, { IProduct } from '../../../models/productModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import { resolveBuyerPrice } from '../../payments/services/buyerPrice';
+import { quoteShipping, ShippingMethod } from '../../payments/services/checkoutService';
 
 /** Article du panier dont le produit est peuplé (null s'il a été supprimé). */
 type ValidatedCartItem = Omit<ICartItem, 'product'> & {
@@ -12,7 +13,7 @@ type ValidatedCartItem = Omit<ICartItem, 'product'> & {
 type CartProduct = Pick<IProduct, '_id' | 'title' | 'images' | 'price' | 'currency' | 'isAvailable' | 'isSold' | 'seller'>;
 
 type PricedCartItem = Omit<ICartItem, 'product'> & {
-  product: (CartProduct & Pick<IProduct, 'negotiations'>) | null;
+  product: (CartProduct & Pick<IProduct, 'negotiations' | 'shippingOptions'>) | null;
 };
 
 /** Article renvoyé au client, avec le prix produit que PayPal facturera. */
@@ -20,6 +21,8 @@ export type CartViewItem = Omit<ICartItem, 'product'> & {
   product: CartProduct | null;
   /** Prix négocié accepté s'il existe, sinon prix catalogue (hors livraison). */
   buyerPrice: number;
+  /** Frais de port que PayPal ajoutera, par méthode ; `null` si non proposée. */
+  shippingCosts: Record<ShippingMethod, number | null> | null;
 };
 
 function isValidObjectId(id: string): boolean {
@@ -33,17 +36,18 @@ function isValidObjectId(id: string): boolean {
  */
 async function loadCartView(userId: string) {
   const cart = await Cart.findOne({ user: userId })
-    .populate<{ items: PricedCartItem[] }>('items.product', 'title images price currency isAvailable isSold seller +negotiations')
+    .populate<{ items: PricedCartItem[] }>('items.product', 'title images price currency isAvailable isSold seller shippingOptions +negotiations')
     .lean();
   if (!cart) return null;
 
   const items: CartViewItem[] = cart.items.map(({ product, ...item }) => {
-    if (!product) return { ...item, product: null, buyerPrice: item.priceSnapshot };
+    if (!product) return { ...item, product: null, buyerPrice: item.priceSnapshot, shippingCosts: null };
     const { _id, title, images, price, currency, isAvailable, isSold, seller } = product;
     return {
       ...item,
       product: { _id, title, images, price, currency, isAvailable, isSold, seller },
-      buyerPrice: resolveBuyerPrice(product, userId)
+      buyerPrice: resolveBuyerPrice(product, userId),
+      shippingCosts: quoteShipping(product)
     };
   });
   return { ...cart, items };

@@ -91,6 +91,18 @@ describe('cartService (integration)', () => {
       expect(cart.items[0].priceSnapshot).toBe(20);
     });
 
+    it('donne les frais de port que PayPal ajoutera à chaque article', async () => {
+      const buyer = await createTestUser();
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id, {
+        shippingOptions: { worldwide: false, nationalOnly: true, localPickup: true, nationalCost: 3.2 }
+      });
+
+      const cart = await cartService.addItem(buyer._id.toString(), product._id.toString());
+
+      expect(cart.items[0].shippingCosts).toEqual({ national: 3.2, worldwide: null, localPickup: 0 });
+    });
+
     it('ne renvoie pas les négociations (offres des autres acheteurs)', async () => {
       const buyer = await createTestUser();
       const other = await createTestUser();

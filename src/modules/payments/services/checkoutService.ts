@@ -86,6 +86,20 @@ function isMethodOffered(product: CheckoutProduct, method: ShippingMethod): bool
   return false;
 }
 
+/**
+ * Frais de port de chaque méthode, tels que `computeCheckout` les facturera ;
+ * `null` si le vendeur ne propose pas la méthode ou n'en a pas fixé le coût.
+ */
+export function quoteShipping(product: CheckoutProduct): Record<ShippingMethod, number | null> {
+  const quote = (method: ShippingMethod) =>
+    isMethodOffered(product, method) ? resolveShippingCost(product, method) ?? null : null;
+  return {
+    national: quote(SHIPPING_METHODS.NATIONAL),
+    worldwide: quote(SHIPPING_METHODS.WORLDWIDE),
+    localPickup: quote(SHIPPING_METHODS.LOCAL_PICKUP)
+  };
+}
+
 function assertShippingMethod(value: unknown): ShippingMethod {
   if (value === SHIPPING_METHODS.NATIONAL ||
       value === SHIPPING_METHODS.WORLDWIDE ||

@@ -1,5 +1,6 @@
 import {
   computeCheckout,
+  quoteShipping,
   validateShippingAddress,
   resolveCheckout,
   CheckoutProduct
@@ -82,6 +83,23 @@ describe('computeCheckout', () => {
     });
     expect(() => computeCheckout(product, 'worldwide', 20))
       .toThrow(expect.objectContaining({ statusCode: 400, code: 'SHIPPING_COST_MISSING' }));
+  });
+});
+
+describe('quoteShipping', () => {
+  it('donne le coût de chaque méthode proposée, null pour les autres', () => {
+    const product = buildProduct({
+      shippingOptions: { worldwide: true, nationalOnly: true, localPickup: false, nationalCost: 4.5 }
+    });
+
+    // worldwide est proposée mais sans coût : computeCheckout la refuserait.
+    expect(quoteShipping(product)).toEqual({ national: 4.5, worldwide: null, localPickup: null });
+  });
+
+  it('la remise en main propre ne coûte rien', () => {
+    const product = buildProduct({ shippingOptions: { worldwide: false, nationalOnly: false, localPickup: true } });
+
+    expect(quoteShipping(product).localPickup).toBe(0);
   });
 });
 
