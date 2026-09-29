@@ -2,30 +2,24 @@ import { Request, Response, NextFunction } from 'express';
 import DOMPurify from 'isomorphic-dompurify';
 
 /**
- * Sanitize les données d'entrée pour prévenir les attaques XSS
+ * Retire le HTML actif des champs texte de premier niveau du corps JSON.
+ *
+ * Les paramètres d'URL ne sont pas concernés : sous Express 5, `req.query` est
+ * recalculé à chaque lecture, et la version précédente, qui les réécrivait,
+ * n'avait donc aucun effet. Les activer maintenant modifierait des recherches
+ * légitimes (« a<b »), alors qu'aucun paramètre n'est renvoyé en HTML : l'API
+ * répond en JSON et le front échappe à l'affichage.
+ *
+ * Monté par `router.use`, ce middleware passe avant multer : les corps
+ * multipart (messages avec pièces jointes) ne sont pas encore parsés ici.
  */
 export const sanitizeInputs = (req: Request, _res: Response, next: NextFunction): void => {
-  try {
-    if (req.body && typeof req.body === 'object') {
-      // Sanitize chaque champ texte du corps de la requête
-      Object.keys(req.body).forEach((key) => {
-        if (typeof req.body[key] === 'string') {
-          req.body[key] = DOMPurify.sanitize(req.body[key]);
-        }
-      });
+  if (req.body && typeof req.body === 'object') {
+    for (const key of Object.keys(req.body)) {
+      if (typeof req.body[key] === 'string') {
+        req.body[key] = DOMPurify.sanitize(req.body[key]);
+      }
     }
-    
-    // Sanitize les paramètres de requête
-    if (req.query && typeof req.query === 'object') {
-      Object.keys(req.query).forEach((key) => {
-        if (typeof req.query[key] === 'string') {
-          req.query[key] = DOMPurify.sanitize(req.query[key] as string);
-        }
-      });
-    }
-    
-    next();
-  } catch (error) {
-    next();
   }
+  next();
 };
