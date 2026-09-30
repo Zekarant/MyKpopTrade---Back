@@ -126,7 +126,7 @@ export async function runAdvancedSearch({
         lastSearched: new Date(),
         $inc: { searchCount: 1 }
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
   }
 

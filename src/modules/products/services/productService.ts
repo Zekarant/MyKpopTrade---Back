@@ -364,7 +364,7 @@ export async function updateProductForOwner({
     cancelsSale
       ? { $set: { ...updates, isSold: false }, $unset: { soldAt: 1, soldTo: 1 } }
       : { $set: updates },
-    { new: true, runValidators: true }
+    { returnDocument: 'after', runValidators: true }
   );
 
   if (updated && cancelsSale) {

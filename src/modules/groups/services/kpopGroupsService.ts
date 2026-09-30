@@ -277,7 +277,7 @@ export async function updateGroup(groupId: string, body: Record<string, unknown>
   const group = await KpopGroup.findByIdAndUpdate(
     groupId,
     { $set: updates },
-    { new: true, runValidators: true }
+    { returnDocument: 'after', runValidators: true }
   );
 
   if (updates.name && updates.name !== oldGroup.name) {

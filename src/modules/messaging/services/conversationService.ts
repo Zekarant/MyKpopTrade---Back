@@ -73,7 +73,7 @@ async function addUserToConversationField(
   const conversation = await Conversation.findByIdAndUpdate(
     conversationId,
     { $addToSet: { [field]: userId } },
-    { new: true }
+    { returnDocument: 'after' }
   );
   if (!conversation) {
     throw new HttpError(404, 'Conversation non trouvée');
@@ -89,7 +89,7 @@ async function removeUserFromConversationField(
   const conversation = await Conversation.findByIdAndUpdate(
     conversationId,
     { $pull: { [field]: userId } },
-    { new: true }
+    { returnDocument: 'after' }
   );
   if (!conversation) {
     throw new HttpError(404, 'Conversation non trouvée');

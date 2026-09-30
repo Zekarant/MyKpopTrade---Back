@@ -197,7 +197,7 @@ export const toggleLike = asyncHandler(async (req: Request, res: Response) => {
   const liked = await Post.findOneAndUpdate(
     { _id: postId, likes: { $ne: likerId } },
     { $push: { likes: likerId }, $inc: { likesCount: 1 } },
-    { new: true }
+    { returnDocument: 'after' }
   );
   if (liked) {
     return res.status(200).json({ liked: true, likesCount: liked.likesCount });
@@ -206,7 +206,7 @@ export const toggleLike = asyncHandler(async (req: Request, res: Response) => {
   const unliked = await Post.findOneAndUpdate(
     { _id: postId, likes: likerId },
     { $pull: { likes: likerId }, $inc: { likesCount: -1 } },
-    { new: true }
+    { returnDocument: 'after' }
   );
   if (!unliked) {
     return res.status(404).json({ message: 'Post introuvable' });

@@ -351,7 +351,7 @@ export async function resolveDispute({
         closedAt: new Date()
       }
     },
-    { new: true }
+    { returnDocument: 'after' }
   );
   if (!claimed) {
     throw new HttpError(409, 'Le litige vient d\'être clôturé par ailleurs', 'DISPUTE_CLOSED');

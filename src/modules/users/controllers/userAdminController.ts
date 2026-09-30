@@ -165,7 +165,7 @@ export const addUserNote = asyncHandler(async (req: Request, res: Response) => {
   const user = await User.findByIdAndUpdate(
     userId,
     { $push: { adminNotes: note } },
-    { new: true, runValidators: false }
+    { returnDocument: 'after', runValidators: false }
   )
     .select('adminNotes username')
     .populate('adminNotes.author', 'username');
@@ -193,7 +193,7 @@ export const deleteUserNote = asyncHandler(async (req: Request, res: Response) =
   const user = await User.findByIdAndUpdate(
     userId,
     { $pull: { adminNotes: { _id: noteId } } },
-    { new: true, runValidators: false }
+    { returnDocument: 'after', runValidators: false }
   )
     .select('adminNotes username')
     .populate('adminNotes.author', 'username');

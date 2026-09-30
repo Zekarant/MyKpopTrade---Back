@@ -244,7 +244,7 @@ export async function updateAlbumById(albumId: string, body: AlbumInput) {
   const album = await Album.findByIdAndUpdate(
     albumId,
     { $set: updates },
-    { new: true, runValidators: true }
+    { returnDocument: 'after', runValidators: true }
   ).populate('artistId', 'name description profileImage');
 
   if (!album) {

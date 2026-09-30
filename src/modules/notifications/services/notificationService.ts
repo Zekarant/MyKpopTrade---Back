@@ -173,7 +173,7 @@ export class NotificationService {
       const notification = await Notification.findOneAndUpdate(
         { _id: notificationId, recipient: userId },
         { isRead: true },
-        { new: true }
+        { returnDocument: 'after' }
       );
       
       if (!notification) {

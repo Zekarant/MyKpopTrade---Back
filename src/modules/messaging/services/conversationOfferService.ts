@@ -581,7 +581,7 @@ export async function initiatePayWhatYouWantFlow({
     const product = await Product.findOneAndUpdate(
       { _id: productId, seller: userId },
       { $set: { isPayWhatYouWant: false }, $unset: { pwywMinPrice: '', pwywMaxPrice: '' } },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!product) {
       throw new HttpError(404, 'Produit non trouvé ou vous n\'êtes pas le vendeur');
@@ -607,7 +607,7 @@ export async function initiatePayWhatYouWantFlow({
   const product = await Product.findOneAndUpdate(
     { _id: productId, seller: userId },
     { $set: { isPayWhatYouWant: true, pwywMinPrice: min, pwywMaxPrice: max ?? null } },
-    { new: true }
+    { returnDocument: 'after' }
   );
   if (!product) {
     throw new HttpError(404, 'Produit non trouvé ou vous n\'êtes pas le vendeur');

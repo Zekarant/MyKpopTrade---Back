@@ -317,7 +317,7 @@ export async function captureDirectPayment(userId: string, orderId: string) {
   const claimedProduct = await Product.findOneAndUpdate(
     { _id: payment.product, isSold: false, isAvailable: true },
     { $set: { isAvailable: false, isSold: true, soldAt: new Date(), soldTo: payment.buyer } },
-    { new: false }
+    { returnDocument: 'before' }
   );
   if (!claimedProduct) {
     // Seule exception : une capture concurrente de CE paiement (double clic,

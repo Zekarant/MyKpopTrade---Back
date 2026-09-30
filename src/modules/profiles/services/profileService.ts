@@ -199,7 +199,7 @@ export async function updateMyProfile(userId: string, body: Record<string, unkno
   const user = await User.findByIdAndUpdate(
     userId,
     { $set: updates },
-    { new: true, runValidators: true }
+    { returnDocument: 'after', runValidators: true }
   );
 
   if (!user) {

@@ -103,7 +103,7 @@ export async function registerSubscription(
         userAgent
       }
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   );
 }
 

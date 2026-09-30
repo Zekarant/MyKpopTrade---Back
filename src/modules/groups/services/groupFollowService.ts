@@ -51,7 +51,7 @@ export async function toggleFollow(userId: string, groupId: string) {
           $pull: { followedGroups: groupObjectId },
           $inc: { followedGroupsCount: -1 }
         },
-        { new: true }
+        { returnDocument: 'after' }
       ),
       KpopGroup.findByIdAndUpdate(
         groupId,
@@ -59,7 +59,7 @@ export async function toggleFollow(userId: string, groupId: string) {
           $pull: { followers: userObjectId },
           $inc: { followersCount: -1 }
         },
-        { new: true }
+        { returnDocument: 'after' }
       )
     ]);
 
@@ -80,7 +80,7 @@ export async function toggleFollow(userId: string, groupId: string) {
           $addToSet: { followedGroups: groupObjectId },
           $inc: { followedGroupsCount: 1 }
         },
-        { new: true }
+        { returnDocument: 'after' }
       ),
       KpopGroup.findByIdAndUpdate(
         groupId,
@@ -88,7 +88,7 @@ export async function toggleFollow(userId: string, groupId: string) {
           $addToSet: { followers: userObjectId },
           $inc: { followersCount: 1 }
         },
-        { new: true }
+        { returnDocument: 'after' }
       )
     ]);
 
