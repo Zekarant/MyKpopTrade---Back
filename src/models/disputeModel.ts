@@ -71,8 +71,7 @@ const DisputeSchema: Schema = new Schema({
   payment: {
     type: Schema.Types.ObjectId,
     ref: 'Payment',
-    required: true,
-    index: true
+    required: true
   },
   buyer: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   seller: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -109,10 +108,16 @@ const DisputeSchema: Schema = new Schema({
   closedAt: { type: Date }
 }, { timestamps: true });
 
-// Index partiel : un seul litige actif par paiement
+// Index partiel : un seul litige actif par paiement. Nommé, car l'ancien
+// `index: true` du champ occupait le nom auto « payment_1 » et empêchait sa création.
 DisputeSchema.index(
   { payment: 1 },
-  { unique: true, partialFilterExpression: { status: { $in: ['opened', 'under_review'] } } }
+  {
+    name: 'payment_active_unique',
+    unique: true,
+    partialFilterExpression: { status: { $in: ['opened', 'under_review'] } }
+  }
 );
+DisputeSchema.index({ payment: 1, createdAt: -1 });
 
 export default (mongoose.models.Dispute as mongoose.Model<IDispute>) || mongoose.model<IDispute>('Dispute', DisputeSchema);
