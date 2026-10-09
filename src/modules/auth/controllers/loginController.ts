@@ -1,14 +1,16 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import User from '../../../models/userModel';
 import env from '../../../config/env';
-import { 
-  generateAccessToken, 
+import {
+  generateAccessToken,
   generateRefreshToken,
   invalidateRefreshToken,
   invalidateAllUserRefreshTokens,
   rotateRefreshToken,
-  revokeAccessToken
+  revokeAccessToken,
+  JWT_VERIFY_OPTIONS
 } from '../../../commons/services/tokenService';
 import logger from '../../../commons/utils/logger';
 import {
@@ -22,13 +24,21 @@ import {
 } from '../services/refreshTokenCookie';
 
 /**
+ * Empreinte bcrypt (même coût que les vrais mots de passe) comparée quand le
+ * compte n'existe pas : la réponse prend alors le même temps, et ne révèle pas
+ * quels identifiants ont un compte.
+ */
+const DUMMY_PASSWORD_HASH = '$2b$10$v.0iX5kb.g6SF.4uGSbCiO.QZLrO5BcDOwfIoEU7nfxBJurfArh0q';
+
+/**
  * Connexion utilisateur
  */
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const { identifier, password } = req.body;
-    
-    if (!identifier || !password) {
+
+    // Chaînes uniquement : un tableau deviendrait un `$in` dans la requête Mongo.
+    if (typeof identifier !== 'string' || typeof password !== 'string' || !identifier || !password) {
       res.status(400).json({ message: 'Email/nom d\'utilisateur et mot de passe sont requis' });
       return;
     }
@@ -43,6 +53,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     }).select('+password');
 
     if (!user) {
+      await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
       res.status(401).json({ message: 'Identifiants incorrects' });
       return;
     }
@@ -118,14 +129,13 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error('Erreur lors de la connexion', { error: errorMessage });
-    console.error('Erreur lors de la connexion:', error);
     res.status(500).json({ message: 'Erreur lors de la connexion. Veuillez réessayer.' });
   }
 };
 
 function isValidAccessToken(token: string): boolean {
   try {
-    jwt.verify(token, env.JWT_SECRET);
+    jwt.verify(token, env.JWT_SECRET, JWT_VERIFY_OPTIONS);
     return true;
   } catch {
     return false;
@@ -153,7 +163,9 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
     clearRefreshTokenCookie(res);
     res.status(200).json({ message: 'Déconnexion réussie' });
   } catch (error) {
-    console.error('Erreur lors de la déconnexion:', error);
+    logger.error('Erreur lors de la déconnexion', {
+      error: error instanceof Error ? error.message : String(error)
+    });
     res.status(500).json({ message: 'Erreur lors de la déconnexion' });
   }
 };
@@ -191,7 +203,9 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
     setRefreshTokenCookie(req, res, rotated.refreshToken);
     res.status(200).json({ accessToken: generateAccessToken(user) });
   } catch (error) {
-    console.error('Erreur lors du rafraîchissement du token:', error);
+    logger.error('Erreur lors du rafraîchissement du token', {
+      error: error instanceof Error ? error.message : String(error)
+    });
     res.status(500).json({ message: 'Erreur lors du rafraîchissement du token' });
   }
 };

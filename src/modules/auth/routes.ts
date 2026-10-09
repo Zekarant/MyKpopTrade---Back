@@ -21,6 +21,8 @@ import {
 import env from '../../config/env';
 import { readOAuthState, OAuthAppState } from '../../config/oauthStateStore';
 import { issueOneTimeCode, consumeOneTimeCode } from './services/oneTimeCodeService';
+import { JWT_VERIFY_OPTIONS } from '../../commons/services/tokenService';
+import logger from '../../commons/utils/logger';
 
 const router = Router();
 
@@ -46,7 +48,7 @@ function linkUserIdFromState(rawState: unknown): string | undefined {
   const linkToken = readOAuthState(rawState)?.linkToken;
   if (!linkToken) return undefined;
   try {
-    const decoded = jwt.verify(linkToken, env.JWT_SECRET) as { userId?: string; purpose?: string };
+    const decoded = jwt.verify(linkToken, env.JWT_SECRET, JWT_VERIFY_OPTIONS) as { userId?: string; purpose?: string };
     // Même secret que le défi 2FA (qui porte aussi `userId`) : sans ce
     // contrôle, un défi 2FA servirait de jeton de liaison.
     return decoded.purpose === SOCIAL_LINK_TOKEN_PURPOSE ? decoded.userId : undefined;
@@ -110,16 +112,16 @@ router.get('/google/callback', (req: Request, res: Response, next: NextFunction)
     if (err || !user) {
       if (req.linkUserId) {
         const code = info?.message || 'google_link_failed';
-        return res.redirect(`${process.env.FRONTEND_URL}/settings?error=${code}`);
+        return res.redirect(`${env.FRONTEND_URL}/settings?error=${code}`);
       }
       const code = info?.message || 'google_auth_failed';
-      return res.redirect(`${process.env.FRONTEND_URL}/login?error=${code}`);
+      return res.redirect(`${env.FRONTEND_URL}/login?error=${code}`);
     }
     req.user = user;
 
     // Si c'est une liaison, rediriger vers settings avec succès
     if (info?.isLink) {
-      return res.redirect(`${process.env.FRONTEND_URL}/settings?linked=google`);
+      return res.redirect(`${env.FRONTEND_URL}/settings?linked=google`);
     }
 
     (req as Request & { isNewUser?: boolean }).isNewUser = info?.isNew === true;
@@ -141,18 +143,20 @@ router.get('/discord/callback', (req: Request, res: Response, next: NextFunction
 
   passport.authenticate('discord', { session: false, failWithError: true }, (err: Error | null, user?: Express.User | false, info?: OAuthCallbackInfo) => {
     if (err || !user) {
-      console.error('Discord auth failed:', err?.message || info?.message || 'Unknown error');
+      logger.warn('Échec de l\'authentification Discord', {
+        reason: err?.message || info?.message || 'Unknown error'
+      });
       if (isLinkFlow) {
-        return res.redirect(`${process.env.FRONTEND_URL}/settings?error=discord_link_failed&reason=${encodeURIComponent(err?.message || 'auth_failed')}`);
+        return res.redirect(`${env.FRONTEND_URL}/settings?error=discord_link_failed&reason=${encodeURIComponent(err?.message || 'auth_failed')}`);
       }
       const code = encodeURIComponent(info?.message || 'discord_auth_failed');
-      return res.redirect(`${process.env.FRONTEND_URL}/login?error=${code}`);
+      return res.redirect(`${env.FRONTEND_URL}/login?error=${code}`);
     }
     req.user = user;
 
     // Si c'est une liaison, rediriger vers settings avec succès
     if (info?.isLink || isLinkFlow) {
-      return res.redirect(`${process.env.FRONTEND_URL}/settings?linked=discord`);
+      return res.redirect(`${env.FRONTEND_URL}/settings?linked=discord`);
     }
 
     return socialAuthController.oauthCallback(req, res);
@@ -179,13 +183,13 @@ for (const provider of Object.keys(LINK_SCOPES) as LinkProvider[]) {
   router.get(`/${provider}/link`, async (req: Request, res: Response, next: NextFunction) => {
     const ticket = req.query.ticket;
     if (typeof ticket !== 'string' || !ticket) {
-      return res.redirect(`${process.env.FRONTEND_URL}/settings?error=no_token`);
+      return res.redirect(`${env.FRONTEND_URL}/settings?error=no_token`);
     }
 
     try {
       const userId = await consumeOneTimeCode(ticket, 'social_link');
       if (!userId) {
-        return res.redirect(`${process.env.FRONTEND_URL}/settings?error=invalid_token`);
+        return res.redirect(`${env.FRONTEND_URL}/settings?error=invalid_token`);
       }
       const linkToken = jwt.sign(
         { userId, purpose: SOCIAL_LINK_TOKEN_PURPOSE },

@@ -15,6 +15,13 @@ export const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
  */
 const ROTATION_GRACE_MS = 30 * 1000;
 
+/**
+ * Seul algorithme accepté à la vérification d'un JWT : sans liste explicite,
+ * c'est l'en-tête `alg` du jeton, choisi par celui qui le présente, qui décide.
+ */
+export const JWT_ALGORITHM = 'HS256';
+export const JWT_VERIFY_OPTIONS: jwt.VerifyOptions = { algorithms: [JWT_ALGORITHM] };
+
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
@@ -132,4 +139,15 @@ export const invalidateRefreshToken = async (token: string): Promise<boolean> =>
 export const invalidateAllUserRefreshTokens = async (userId: string): Promise<boolean> => {
   const result = await RefreshToken.deleteMany({ userId });
   return result.deletedCount > 0;
+};
+
+/**
+ * Ferme toutes les sessions d'un utilisateur sauf celle de `keptToken` (la
+ * session courante). Sans jeton à garder, toutes les sessions sont fermées.
+ */
+export const invalidateOtherUserRefreshTokens = async (userId: string, keptToken?: string): Promise<number> => {
+  // Empreinte pour un jeton récent, valeur brute pour une session ouverte avant le hachage.
+  const keptValues = keptToken ? [hashToken(keptToken), keptToken] : [];
+  const result = await RefreshToken.deleteMany({ userId, token: { $nin: keptValues } });
+  return result.deletedCount;
 };

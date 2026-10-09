@@ -6,10 +6,11 @@ import User from '../../models/userModel';
 import RefreshToken from '../../models/tokenModel';
 import { generateRefreshToken } from '../../commons/services/tokenService';
 import { initializePassport } from '../passport';
+import env from '../env';
 
 // Identifiants factices : la stratégie est enregistrée sans aucun appel réseau.
-process.env.GOOGLE_CLIENT_ID = 'client-de-test';
-process.env.GOOGLE_CLIENT_SECRET = 'secret-de-test';
+env.GOOGLE_CLIENT_ID = 'client-de-test';
+env.GOOGLE_CLIENT_SECRET = 'secret-de-test';
 
 type VerifyDone = (error: Error | null, user?: unknown, info?: { message?: string }) => void;
 type GoogleVerify = (req: Request, accessToken: string, refreshToken: string, profile: object, done: VerifyDone) => void;

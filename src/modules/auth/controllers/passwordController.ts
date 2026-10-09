@@ -1,10 +1,14 @@
 import { Request, Response } from 'express';
-import User from '../../../models/userModel';
+import User, { hashOneTimeToken } from '../../../models/userModel';
 import { sendPasswordResetEmail } from '../../../commons/services/emailService';
 import { validatePassword } from '../../../commons/utils/validators';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import logger from '../../../commons/utils/logger';
-import { invalidateAllUserRefreshTokens } from '../../../commons/services/tokenService';
+import {
+  invalidateAllUserRefreshTokens,
+  invalidateOtherUserRefreshTokens
+} from '../../../commons/services/tokenService';
+import { readRefreshTokenCookie } from '../services/refreshTokenCookie';
 
 const FORGOT_PASSWORD_RESPONSE =
   'Si cet email est associé à un compte, un lien de réinitialisation a été envoyé.';
@@ -82,7 +86,7 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response): P
   }
 
   const user = await User.findOne({
-    passwordResetToken: token,
+    passwordResetToken: hashOneTimeToken(String(token)),
     passwordResetExpires: { $gt: Date.now() },
     accountStatus: { $ne: 'deleted' }
   });
@@ -197,7 +201,11 @@ export const updatePassword = asyncHandler(async (req: AuthenticatedRequest, res
   user.password = newPassword;
   user.lastLoginAt = new Date(); // Mettre à jour la dernière activité
   await user.save();
-  
+
+  // Changer de mot de passe doit déconnecter un éventuel intrus : les autres
+  // sessions ne peuvent plus se rafraîchir, seule celle qui a fait le changement reste.
+  await invalidateOtherUserRefreshTokens(userId, readRefreshTokenCookie(req));
+
   logger.info('Mot de passe mis à jour avec succès', { 
     userId: user._id,
     email: user.email 

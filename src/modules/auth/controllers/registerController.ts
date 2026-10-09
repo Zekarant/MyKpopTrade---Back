@@ -115,7 +115,9 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       }
     });
   } catch (error) {
-    console.error('Erreur lors de l\'inscription:', error);
+    logger.error('Erreur lors de l\'inscription', {
+      error: error instanceof Error ? error.message : String(error)
+    });
     res.status(500).json({ message: 'Erreur lors de l\'inscription. Veuillez réessayer.' });
   }
 };

@@ -16,7 +16,7 @@ import User, { IUser } from '../models/userModel';
 import crypto from 'crypto';
 import env from './env';
 import { CookieStateStore } from './oauthStateStore';
-import { invalidateAllUserRefreshTokens } from '../commons/services/tokenService';
+import { invalidateAllUserRefreshTokens, JWT_ALGORITHM } from '../commons/services/tokenService';
 import {
   generateUniqueUsername,
   splitDisplayName
@@ -87,7 +87,8 @@ export const initializePassport = (): void => {
     new JwtStrategy(
       {
         jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-        secretOrKey: env.JWT_SECRET
+        secretOrKey: env.JWT_SECRET,
+        algorithms: [JWT_ALGORITHM]
       },
       async (payload, done) => {
         try {
@@ -104,13 +105,13 @@ export const initializePassport = (): void => {
   );
 
   // Configuration Google OAuth
-  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     passport.use(
       new GoogleStrategy(
         {
-          clientID: process.env.GOOGLE_CLIENT_ID,
-          clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-          callbackURL: `${process.env.API_URL}/api/auth/google/callback`,
+          clientID: env.GOOGLE_CLIENT_ID,
+          clientSecret: env.GOOGLE_CLIENT_SECRET,
+          callbackURL: `${env.API_URL}/api/auth/google/callback`,
           passReqToCallback: true,
           store: createStateStore()
         },
@@ -231,13 +232,13 @@ export const initializePassport = (): void => {
   }
 
   // Configuration Facebook
-  if (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET) {
+  if (env.FACEBOOK_APP_ID && env.FACEBOOK_APP_SECRET) {
     passport.use(
       new FacebookStrategy(
         {
-          clientID: process.env.FACEBOOK_APP_ID,
-          clientSecret: process.env.FACEBOOK_APP_SECRET,
-          callbackURL: `${process.env.API_URL}/api/auth/facebook/callback`,
+          clientID: env.FACEBOOK_APP_ID,
+          clientSecret: env.FACEBOOK_APP_SECRET,
+          callbackURL: `${env.API_URL}/api/auth/facebook/callback`,
           profileFields: ['id', 'emails', 'name', 'displayName'],
           store: createStateStore()
         },
@@ -321,13 +322,13 @@ export const initializePassport = (): void => {
   }
 
   // Configuration Discord
-  if (process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET) {
+  if (env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET) {
     passport.use(
       new DiscordStrategy(
         {
-          clientID: process.env.DISCORD_CLIENT_ID,
-          clientSecret: process.env.DISCORD_CLIENT_SECRET,
-          callbackURL: `${process.env.API_URL}/api/auth/discord/callback`,
+          clientID: env.DISCORD_CLIENT_ID,
+          clientSecret: env.DISCORD_CLIENT_SECRET,
+          callbackURL: `${env.API_URL}/api/auth/discord/callback`,
           scope: ['identify', 'email'],
           passReqToCallback: true,
           store: createStateStore()

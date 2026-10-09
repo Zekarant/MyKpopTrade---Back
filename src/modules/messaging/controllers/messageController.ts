@@ -30,6 +30,9 @@ function setAttachmentHeaders(res: Response, fileName: string): void {
   const inlineType = INLINE_ATTACHMENT_TYPES.get(path.extname(fileName).toLowerCase());
   if (inlineType) {
     res.type(inlineType);
+    // La visionneuse PDF du navigateur est un plugin : la CSP d'API
+    // (`default-src 'none'`, donc `object-src 'none'`) l'empêcherait de s'afficher.
+    if (inlineType === 'application/pdf') res.removeHeader('Content-Security-Policy');
   } else {
     // `sendFile` ne remplace pas un Content-Type déjà posé.
     res.type('application/octet-stream');
@@ -65,9 +68,8 @@ export const sendNewMessage = asyncHandler(async (req: Request, res: Response) =
     if (mapped) return mapped;
 
     logger.error('Erreur lors de l\'envoi d\'un message', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    // Message générique : le détail d'une erreur serveur (requête, chemin) reste dans les logs.
+    return res.status(500).json({ message: 'Une erreur est survenue' });
   }
 });
 
@@ -90,9 +92,7 @@ export const markConversationAsRead = asyncHandler(async (req: Request, res: Res
     if (mapped) return mapped;
 
     logger.error('Erreur lors du marquage des messages comme lus', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
+    return res.status(500).json({ message: 'Une erreur est survenue' });
   }
 });
 
@@ -135,8 +135,8 @@ export const deleteMessage = asyncHandler(async (req: Request, res: Response) =>
     const mapped = mapHttpError(res, error);
     if (mapped) return mapped;
 
-    logger.error('Erreur lors de la suppression d\'un message', { error });
-    return res.status(500).json({ message: error instanceof Error ? error.message : undefined });
+    logger.error('Erreur lors de la suppression d\'un message', { error, userId, messageId });
+    return res.status(500).json({ message: 'Une erreur est survenue' });
   }
 });
 
@@ -161,7 +161,7 @@ export const getMessageAttachment = asyncHandler(async (req: Request, res: Respo
     const mapped = mapHttpError(res, error);
     if (mapped) return mapped;
 
-    logger.error('Erreur lors de la récupération d\'une pièce jointe', { error });
-    return res.status(500).json({ message: error instanceof Error ? error.message : undefined });
+    logger.error('Erreur lors de la récupération d\'une pièce jointe', { error, userId, messageId });
+    return res.status(500).json({ message: 'Une erreur est survenue' });
   }
 });

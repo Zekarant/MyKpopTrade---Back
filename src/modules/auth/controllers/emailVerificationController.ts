@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
-import User from '../../../models/userModel';
+import User, { hashOneTimeToken } from '../../../models/userModel';
 import { sendVerificationEmail } from '../../../commons/services/emailService';
+import logger from '../../../commons/utils/logger';
 
 /**
  * Vérification de l'email avec le token
@@ -15,7 +16,7 @@ export const verifyEmail = async (req: Request, res: Response): Promise<void> =>
     }
 
     const user = await User.findOne({
-      emailVerificationToken: token,
+      emailVerificationToken: hashOneTimeToken(String(token)),
       emailVerificationExpires: { $gt: Date.now() },
       accountStatus: { $ne: 'deleted' }
     });
@@ -33,7 +34,9 @@ export const verifyEmail = async (req: Request, res: Response): Promise<void> =>
 
     res.status(200).json({ message: 'Email vérifié avec succès. Vous pouvez maintenant vous connecter.' });
   } catch (error) {
-    console.error('Erreur lors de la vérification de l\'email:', error);
+    logger.error('Erreur lors de la vérification de l\'email', {
+      error: error instanceof Error ? error.message : String(error)
+    });
     res.status(500).json({ message: 'Erreur lors de la vérification de l\'email' });
   }
 };
@@ -72,7 +75,9 @@ export const resendVerification = async (req: Request, res: Response): Promise<v
 
     res.status(200).json({ message: 'Un nouveau lien de vérification a été envoyé à votre adresse email' });
   } catch (error) {
-    console.error('Erreur lors de l\'envoi du lien de vérification:', error);
+    logger.error('Erreur lors de l\'envoi du lien de vérification', {
+      error: error instanceof Error ? error.message : String(error)
+    });
     res.status(500).json({ message: 'Erreur lors de l\'envoi du lien de vérification' });
   }
 };

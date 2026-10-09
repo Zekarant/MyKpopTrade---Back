@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { isAccessTokenRevoked } from '../services/tokenService';
+import { isAccessTokenRevoked, JWT_VERIFY_OPTIONS } from '../services/tokenService';
 import env from '../../config/env';
 import User, { IUser } from '../../models/userModel';
 import logger from '../utils/logger';
@@ -49,7 +49,7 @@ export const authenticateJWT = async (req: Request, res: Response, next: NextFun
     
     try {
       // Décodage avec typage du payload
-      const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+      const decoded = jwt.verify(token, env.JWT_SECRET, JWT_VERIFY_OPTIONS) as JwtPayload;
 
       // Vérifier que l'ID est présent
       if (!decoded.id) {
@@ -125,7 +125,7 @@ export const optionalAuthenticateJWT = async (req: Request, _res: Response, next
 
   let decoded: JwtPayload;
   try {
-    decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+    decoded = jwt.verify(token, env.JWT_SECRET, JWT_VERIFY_OPTIONS) as JwtPayload;
   } catch (tokenError) {
     // Expiré ou falsifié : anonyme. Toute autre erreur remonte au gestionnaire.
     if (tokenError instanceof jwt.JsonWebTokenError) {

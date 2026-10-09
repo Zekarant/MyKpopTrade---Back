@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { validateEmail } from '../commons/utils/validators';
+import logger from '../commons/utils/logger';
 
 export interface IUser extends Document {
   username: string;
@@ -535,25 +536,39 @@ UserSchema.methods.comparePassword = async function(candidatePassword: string): 
     
     return await bcrypt.compare(candidatePassword, this.password);
   } catch (error) {
-    console.error('Erreur lors de la comparaison du mot de passe:', error);
+    logger.error('Erreur lors de la comparaison du mot de passe', {
+      error: error instanceof Error ? error.message : String(error)
+    });
     throw new Error(error instanceof Error ? error.message : String(error), { cause: error });
   }
 };
 
+/**
+ * Empreinte d'un jeton envoyé par email (vérification, réinitialisation). Seule
+ * l'empreinte est stockée : une copie de la base ne donne aucun lien utilisable.
+ * SHA-256 suffit, le jeton étant aléatoire sur 256 bits.
+ */
+export const hashOneTimeToken = (token: string): string =>
+  crypto.createHash('sha256').update(token).digest('hex');
+
+/** Génère le jeton à envoyer par email ; le document n'en garde que l'empreinte. */
 UserSchema.methods.generateVerificationToken = function(): string {
   const token = crypto.randomBytes(32).toString('hex');
-  this.emailVerificationToken = token;
+  this.emailVerificationToken = hashOneTimeToken(token);
   this.emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 heures
   return token;
 };
 
+/** Génère le jeton à envoyer par email ; le document n'en garde que l'empreinte. */
 UserSchema.methods.generatePasswordResetToken = function(): string {
   const token = crypto.randomBytes(32).toString('hex');
-  this.passwordResetToken = token;
+  this.passwordResetToken = hashOneTimeToken(token);
   this.passwordResetExpires = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 heure
   return token;
 };
 
 UserSchema.index({ accountStatus: 1, 'suspension.until': 1 });
+// Suppressions programmées (tâche nocturne, file admin triée par échéance).
+UserSchema.index({ scheduledForDeletion: 1, scheduledDeletionDate: 1 });
 
 export default (mongoose.models.User as mongoose.Model<IUser>) || mongoose.model<IUser>('User', UserSchema);

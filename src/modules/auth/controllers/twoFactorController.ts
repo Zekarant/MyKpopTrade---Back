@@ -8,7 +8,8 @@ import env from '../../../config/env';
 import { setRefreshTokenCookie } from '../services/refreshTokenCookie';
 import {
   generateAccessToken,
-  generateRefreshToken
+  generateRefreshToken,
+  JWT_VERIFY_OPTIONS
 } from '../../../commons/services/tokenService';
 import {
   startTwoFactorActivation,
@@ -149,7 +150,7 @@ export const verifyChallenge = asyncHandler(async (req: Request, res: Response) 
 
   let userId: string;
   try {
-    const decoded = jwt.verify(String(twoFactorToken), env.JWT_SECRET) as {
+    const decoded = jwt.verify(String(twoFactorToken), env.JWT_SECRET, JWT_VERIFY_OPTIONS) as {
       userId?: string;
       purpose?: string;
     };

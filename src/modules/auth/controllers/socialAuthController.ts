@@ -71,7 +71,9 @@ export const oauthCallback = async (req: Request, res: Response): Promise<void> 
       res.redirect(`${process.env.FRONTEND_URL}/auth/callback?${params.toString()}`);
     }
   } catch (error) {
-    console.error('Erreur lors de l\'authentification sociale:', error);
+    logger.error('Erreur lors de l\'authentification sociale', {
+      error: error instanceof Error ? error.message : String(error)
+    });
 
     if (req.query.responseMode === 'json') {
       res.status(500).json({ message: 'Erreur serveur lors de l\'authentification sociale' });
