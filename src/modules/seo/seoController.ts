@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../commons/middlewares/errorMiddleware';
 import Product from '../../models/productModel';
+import env from '../../config/env';
 
-const FRONTEND_URL = (process.env.FRONTEND_URL || 'https://www.mykpoptrade.com').replace(/\/$/, '');
+const FRONTEND_URL = env.FRONTEND_URL.replace(/\/$/, '');
 const SITEMAP_PRODUCT_LIMIT = 5000;
 
 /**

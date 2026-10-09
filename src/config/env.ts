@@ -6,8 +6,12 @@ import fs from 'fs';
 // Charger le fichier .env
 dotenv.config({ quiet: true });
 
-// Schéma de validation pour les variables d'environnement
-const envSchema = z.object({
+/** Valeur par défaut de JWT_SECRET, tolérée hors production uniquement. */
+const DEV_JWT_SECRET = 'this_is_a_development_secret_key_do_not_use_in_production';
+
+// Schéma de validation pour les variables d'environnement.
+// Exporté pour être testé sans dépendre de process.env ni de process.exit.
+export const envSchema = z.object({
   // Variables d'environnement générales
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   // zod 4 : la valeur par défaut est celle de sortie (déjà transformée).
@@ -27,9 +31,15 @@ const envSchema = z.object({
   
   // Base de données
   MONGODB_URI: z.string().default('mongodb://localhost:27017/mykpoptrade'),
-  
+  // Pool borné : le défaut du pilote (100 connexions par process) sature vite
+  // une petite instance Mongo dès qu'on scale l'API horizontalement.
+  MONGODB_MAX_POOL_SIZE: z.coerce.number().int().positive().default(10),
+  // Échouer vite (5 s au lieu des 30 s du pilote) si Mongo est injoignable :
+  // le démarrage échoue clairement et /ready repasse en 503 sans attendre.
+  MONGODB_SERVER_SELECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+
   // JWT
-  JWT_SECRET: z.string().min(32).default('this_is_a_development_secret_key_do_not_use_in_production'),
+  JWT_SECRET: z.string().min(32).default(DEV_JWT_SECRET),
   JWT_EXPIRE: z.string().default('15m'),
   JWT_REFRESH_EXPIRE: z.string().default('7d'),
 
@@ -72,9 +82,27 @@ const envSchema = z.object({
   DISCORD_CLIENT_ID: z.string().optional(),
   DISCORD_CLIENT_SECRET: z.string().optional(),
   
+  // Notifications push navigateur (web-push). Clés absentes = envoi désactivé,
+  // les abonnements restent enregistrés. Génération : npx web-push generate-vapid-keys
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().default('mailto:noreply@mykpoptrade.com'),
+
   // PayPal
+  // Toute autre valeur que sandbox/live est refusée : une faute de frappe ne
+  // doit pas basculer silencieusement d'un environnement PayPal à l'autre.
+  PAYPAL_MODE: z.enum(['sandbox', 'live']).default('sandbox'),
   PAYPAL_CLIENT_ID: z.string().optional(),
   PAYPAL_CLIENT_SECRET: z.string().optional(),
+  // Sans lui, la signature des webhooks PayPal ne peut pas être vérifiée.
+  PAYPAL_WEBHOOK_ID: z.string().optional(),
+  // Merchant ID de la plateforme : `partner_id` des appels « show seller
+  // status » et `payee` des platform_fees.
+  PAYPAL_PARTNER_MERCHANT_ID: z.string().optional(),
+  PAYPAL_BN_CODE: z.string().default('MYKPOPTRADE_SP_PPCP'),
+  PAYPAL_PLATFORM_FEE_PERCENT: z.coerce.number().min(0).max(100).default(0),
+  PAYPAL_RETURN_URL: z.string().default('http://localhost:3000/payment/success'),
+  PAYPAL_CANCEL_URL: z.string().default('http://localhost:3000/payment/cancel'),
 
   // URL publique de la marketplace et email de support, pré-remplis sur les
   // comptes vendeurs connectés.
@@ -92,22 +120,31 @@ const envSchema = z.object({
 
   // Logs
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
-}).refine(
-  (data) => {
-    // En production, les secrets sensibles sont obligatoires
-    if (data.NODE_ENV !== 'production') return true;
-    return (
-      Boolean(data.PAYPAL_CLIENT_ID) &&
-      Boolean(data.PAYPAL_CLIENT_SECRET) &&
-      Boolean(data.MESSAGE_ENCRYPTION_KEY) &&
-      Boolean(data.ENCRYPTION_KEY) &&
-      data.JWT_SECRET !== 'this_is_a_development_secret_key_do_not_use_in_production'
-    );
-  },
-  {
-    message:
-      'En production, PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, MESSAGE_ENCRYPTION_KEY, ENCRYPTION_KEY et un JWT_SECRET custom sont requis.'
+}).superRefine((data, ctx) => {
+  // En production, les secrets sensibles sont obligatoires. On nomme chaque
+  // variable manquante : l'exploitant doit pouvoir corriger sans lire le code.
+  if (data.NODE_ENV !== 'production') return;
+  const requiredInProduction = {
+    PAYPAL_CLIENT_ID: data.PAYPAL_CLIENT_ID,
+    PAYPAL_CLIENT_SECRET: data.PAYPAL_CLIENT_SECRET,
+    PAYPAL_WEBHOOK_ID: data.PAYPAL_WEBHOOK_ID,
+    PAYPAL_PARTNER_MERCHANT_ID: data.PAYPAL_PARTNER_MERCHANT_ID,
+    MESSAGE_ENCRYPTION_KEY: data.MESSAGE_ENCRYPTION_KEY,
+    ENCRYPTION_KEY: data.ENCRYPTION_KEY
+  };
+  for (const [name, value] of Object.entries(requiredInProduction)) {
+    if (!value) {
+      ctx.addIssue({ code: 'custom', path: [name], message: `${name} est requise en production.` });
+    }
   }
+  if (data.JWT_SECRET === DEV_JWT_SECRET) {
+    ctx.addIssue({ code: 'custom', path: ['JWT_SECRET'], message: 'Un JWT_SECRET propre à la production est requis.' });
+  }
+}).refine(
+  // Garde-fou : un `.env` oublié sur PAYPAL_MODE=live ferait passer de vraies
+  // transactions depuis un poste de développement.
+  (data) => data.PAYPAL_MODE !== 'live' || data.NODE_ENV === 'production',
+  { path: ['PAYPAL_MODE'], message: 'PAYPAL_MODE=live est interdit hors production. Utilisez PAYPAL_MODE=sandbox.' }
 ).refine(
   // SMS activé sans Twilio complet : l'API promettrait des SMS jamais envoyés.
   (data) => !data.SMS_ENABLED ||
@@ -115,6 +152,8 @@ const envSchema = z.object({
   { message: 'SMS_ENABLED=true exige TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN et TWILIO_PHONE_NUMBER.' }
 );
 
+// console et non le logger : le logger lit sa configuration ici, il n'existe
+// pas encore quand cette validation s'exécute.
 // Vérifier qu'un fichier .env existe et alerter en mode développement s'il manque
 if (process.env.NODE_ENV !== 'production') {
   const envFilePath = path.join(process.cwd(), '.env');
