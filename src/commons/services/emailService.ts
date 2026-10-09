@@ -2,6 +2,7 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import { IUser } from '../../models/userModel';
 import env from '../../config/env';
 import logger from '../utils/logger';
+import { escapeHtml } from '../utils/escapeHtml';
 
 const BASE_URL = env.FRONTEND_URL;
 const FROM_EMAIL = env.FROM_EMAIL;
@@ -20,6 +21,12 @@ const FROM_EMAIL = env.FROM_EMAIL;
 let transporterPromise: Promise<Transporter> | null = null;
 
 const buildTransporter = async (): Promise<Transporter> => {
+  // Les notifications envoient désormais des emails depuis les tests
+  // d'intégration : même Ethereal serait un appel réseau (cf. garde de env.ts).
+  if (env.NODE_ENV === 'test') {
+    return nodemailer.createTransport({ jsonTransport: true });
+  }
+
   // Hors production : compte Ethereal jetable, aucun email réellement délivré.
   if (env.NODE_ENV !== 'production') {
     const testAccount = await nodemailer.createTestAccount();
@@ -219,6 +226,8 @@ function emailTemplate(options: {
   content: string;
   ctaText?: string;
   ctaUrl?: string;
+  /** HTML déjà sûr, affiché sous la signature. */
+  footer?: string;
 }): string {
   const ctaButton = options.ctaText && options.ctaUrl
     ? `<p>
@@ -234,9 +243,80 @@ function emailTemplate(options: {
       ${options.content}
       ${ctaButton}
       <p>Cordialement,<br/>L'équipe MyKpopTrade</p>
+      ${options.footer ?? ''}
     </div>
   `;
 }
+
+/* ----------------------------------------------------------------------- */
+/* Emails de notification                                                   */
+/* ----------------------------------------------------------------------- */
+
+/** Section « Préférences » des paramètres, où se règlent les emails de notification. */
+const NOTIFICATION_PREFERENCES_URL = `${BASE_URL}/adherents/settings?section=preferences`;
+
+export interface NotificationEmail {
+  to: string;
+  username: string;
+  title: string;
+  content: string;
+  /** Chemin interne du front (ex. `/account/purchases/:id`), comme la notification in-app. */
+  link?: string | null;
+  tracking?: { carrier?: string; number?: string; url?: string };
+}
+
+/** Bloc de suivi du colis ; l'URL n'est reprise que si elle est en http(s). */
+function trackingHtml(tracking: NotificationEmail['tracking']): string {
+  if (!tracking) return '';
+  const lines: string[] = [];
+  if (tracking.carrier) {
+    lines.push(`<p><strong>Transporteur :</strong> ${escapeHtml(tracking.carrier)}</p>`);
+  }
+  if (tracking.number) {
+    lines.push(`<p><strong>Numéro de suivi :</strong> ${escapeHtml(tracking.number)}</p>`);
+  }
+  if (tracking.url && /^https?:\/\//i.test(tracking.url)) {
+    const url = escapeHtml(tracking.url);
+    lines.push(`<p>Suivez votre colis en direct : <a href="${url}">${url}</a></p>`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Un seul gabarit pour toutes les notifications : le titre et le texte sont
+ * ceux de la notification in-app, ce qui évite de maintenir deux rédactions
+ * par événement. Tout ce qui est interpolé est échappé : pseudos, titres
+ * d'annonces et messages de litige viennent des membres.
+ */
+export function buildNotificationEmailHtml(email: NotificationEmail): string {
+  // Seuls les chemins internes deviennent un bouton : le lien porte le domaine du front.
+  const ctaUrl = email.link?.startsWith('/') ? escapeHtml(`${BASE_URL}${email.link}`) : undefined;
+
+  return emailTemplate({
+    title: escapeHtml(email.title),
+    content: `
+      <p>Bonjour ${escapeHtml(email.username)},</p>
+      <p>${escapeHtml(email.content)}</p>
+      ${trackingHtml(email.tracking)}
+    `,
+    ctaText: 'Voir sur MyKpopTrade',
+    ctaUrl,
+    footer: `
+      <p style="font-size: 12px; color: #777;">
+        Vous recevez cet email suite à une activité sur votre compte MyKpopTrade.
+        <a href="${escapeHtml(NOTIFICATION_PREFERENCES_URL)}">Gérer mes préférences de notification</a>
+      </p>
+    `
+  });
+}
+
+export const sendNotificationEmail = async (email: NotificationEmail): Promise<void> => {
+  await sendEmail({
+    to: email.to,
+    subject: email.title,
+    html: buildNotificationEmailHtml(email)
+  });
+};
 
 /* ----------------------------------------------------------------------- */
 /* Emails shipping                                                          */
@@ -248,51 +328,6 @@ interface ShipmentEmailContext {
   trackingNumber: string;
   trackingUrl?: string;
 }
-
-/** Notifie l'acheteur que son colis vient d'être expédié. */
-export const sendShipmentShippedEmail = async (
-  user: IUser,
-  ctx: ShipmentEmailContext
-): Promise<void> => {
-  const trackingLink = ctx.trackingUrl
-    ? `<p>Suivez votre colis en direct : <a href="${ctx.trackingUrl}">${ctx.trackingUrl}</a></p>`
-    : '';
-  await sendEmail({
-    to: user.email,
-    subject: 'Votre commande a été expédiée',
-    html: emailTemplate({
-      title: 'Votre commande est en route !',
-      content: `
-        <p>Bonjour ${user.username},</p>
-        <p>Le vendeur vient d'expédier votre commande via <strong>${ctx.carrier}</strong>.</p>
-        <p><strong>Numéro de suivi :</strong> ${ctx.trackingNumber}</p>
-        ${trackingLink}
-      `,
-      ctaText: 'Voir mes achats',
-      ctaUrl: `${BASE_URL}/payments`
-    })
-  });
-};
-
-/** Notifie le vendeur que l'acheteur a confirmé la réception. */
-export const sendShipmentDeliveredEmail = async (
-  user: IUser,
-  ctx: { paymentId: string; carrier: string; trackingNumber: string }
-): Promise<void> => {
-  await sendEmail({
-    to: user.email,
-    subject: 'Livraison confirmée',
-    html: emailTemplate({
-      title: 'Votre vente est finalisée',
-      content: `
-        <p>Bonjour ${user.username},</p>
-        <p>L'acheteur vient de confirmer la réception du colis (<strong>${ctx.carrier}</strong> — ${ctx.trackingNumber}). La transaction est complète.</p>
-      `,
-      ctaText: 'Voir mes ventes',
-      ctaUrl: `${BASE_URL}/payments`
-    })
-  });
-};
 
 /** Relance email à l'acheteur si le colis est expédié depuis trop longtemps. */
 export const sendShipmentReminderEmail = async (
@@ -314,34 +349,6 @@ export const sendShipmentReminderEmail = async (
         ${trackingLink}
       `,
       ctaText: 'Confirmer la réception',
-      ctaUrl: `${BASE_URL}/payments`
-    })
-  });
-};
-
-/** Notifie acheteur ou vendeur d'une auto-confirmation après délai dépassé. */
-export const sendShipmentAutoConfirmedEmail = async (
-  user: IUser,
-  ctx: { paymentId: string; role: 'buyer' | 'seller'; days: number }
-): Promise<void> => {
-  const subject = 'Livraison auto-confirmée';
-  const content = ctx.role === 'buyer'
-    ? `
-      <p>Bonjour ${user.username},</p>
-      <p>Sans confirmation de votre part après ${ctx.days} jours, la livraison a été automatiquement validée et la transaction clôturée.</p>
-      <p>Si le colis n'est jamais arrivé, contactez immédiatement le support.</p>
-    `
-    : `
-      <p>Bonjour ${user.username},</p>
-      <p>Le délai de ${ctx.days} jours est dépassé sans contestation : la livraison a été automatiquement confirmée et la vente est finalisée.</p>
-    `;
-  await sendEmail({
-    to: user.email,
-    subject,
-    html: emailTemplate({
-      title: subject,
-      content,
-      ctaText: 'Accéder à mes paiements',
       ctaUrl: `${BASE_URL}/payments`
     })
   });

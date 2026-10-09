@@ -220,7 +220,14 @@ export async function updateProfileData(userId: string, body: ProfileUpdateInput
   if (bio !== undefined) user.bio = bio.substring(0, 500);
   if (location !== undefined) user.location = location.substring(0, 100);
   if (socialLinks) user.socialLinks = { ...user.socialLinks, ...socialLinks };
-  if (preferences) user.preferences = { ...user.preferences, ...preferences };
+  if (preferences) {
+    // Clé par clé : réaffecter l'objet entier pourrait effacer les
+    // préférences de notification, qui passent par leur propre endpoint validé.
+    const { notifications: _notifications, ...otherPreferences } = preferences;
+    for (const [key, value] of Object.entries(otherPreferences)) {
+      user.set(`preferences.${key}`, value);
+    }
+  }
 
   // Uniquement utilisés pour pré-remplir l'onboarding PayPal (cf.
   // paypalPartnerService.ts) — facultatifs, jamais requis pour vendre.

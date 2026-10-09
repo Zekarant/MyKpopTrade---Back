@@ -230,7 +230,8 @@ export async function addDisputeMessage({
     : [role === 'buyer' ? dispute.seller : dispute.buyer];
   await Promise.all(recipients.map((r) => NotificationService.createNotification({
     recipientId: r,
-    type: 'order_status',
+    // Type litige (et non commande) : l'email suit les préférences « litiges ».
+    type: 'dispute_message',
     title: 'Nouveau message dans votre litige',
     content: text.length > 100 ? text.substring(0, 100) + '…' : text,
     link: `/disputes/${dispute._id}`,
@@ -255,7 +256,7 @@ export async function cancelDispute(userId: string, disputeId: string) {
 
   await NotificationService.createNotification({
     recipientId: dispute.openedByRole === 'buyer' ? dispute.seller : dispute.buyer,
-    type: 'order_status',
+    type: 'dispute_resolved',
     title: 'Litige retiré',
     content: 'Le plaignant a retiré le litige.',
     link: `/disputes/${dispute._id}`,

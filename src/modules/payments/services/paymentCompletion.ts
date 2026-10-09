@@ -100,14 +100,31 @@ function alertProductAlreadySold(payment: IPayment): void {
   });
 }
 
-/** Prévient le vendeur et poste le message système dans la conversation de la vente. */
+/** Prévient vendeur et acheteur, puis poste le message système dans la conversation de la vente. */
 async function announceCompletedPayment(payment: IPayment): Promise<void> {
+  // `product_sold` (et non `system`) : la vente suit les préférences
+  // « commandes » du vendeur au lieu de lui être imposée par email.
   await NotificationService.createNotification({
     recipientId: payment.seller,
-    type: 'system',
+    type: 'product_sold',
     title: 'Nouveau paiement reçu',
     content: `Votre produit a été acheté pour ${payment.amount} ${payment.currency}.`,
     link: `/account/sales/${payment._id}`,
+    data: {
+      paymentId: payment._id,
+      productId: payment.product,
+      amount: payment.amount,
+      currency: payment.currency
+    }
+  });
+
+  // Confirmation d'achat : l'acheteur n'avait jusqu'ici que la page de retour PayPal.
+  await NotificationService.createNotification({
+    recipientId: payment.buyer,
+    type: 'order_status',
+    title: 'Achat confirmé',
+    content: `Votre paiement de ${payment.amount} ${payment.currency} est validé. Le vendeur va préparer l'envoi.`,
+    link: `/account/purchases/${payment._id}`,
     data: {
       paymentId: payment._id,
       productId: payment.product,

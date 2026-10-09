@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { validateEmail } from '../commons/utils/validators';
 import logger from '../commons/utils/logger';
+import type { StoredNotificationPreferences } from '../modules/notifications/notificationPreferences';
 
 export interface IUser extends Document {
   username: string;
@@ -56,6 +57,8 @@ export interface IUser extends Document {
   preferences?: {
     kpopGroups?: string[];
     allowDirectMessages?: boolean;
+    /** Choix explicites par catégorie et canal ; les défauts vivent dans notificationPreferences.ts. */
+    notifications?: StoredNotificationPreferences;
   };
   socialLinks?: {
     instagram?: string;
@@ -388,6 +391,16 @@ const UserSchema: Schema = new Schema({
     allowDirectMessages: {
       type: Boolean,
       default: true
+    },
+    // Pas de `default` : seuls les choix explicites sont stockés, les défauts
+    // sont appliqués à la lecture (cf. resolveNotificationPreferences).
+    notifications: {
+      orders: { email: Boolean, push: Boolean },
+      offers: { email: Boolean, push: Boolean },
+      messages: { email: Boolean, push: Boolean },
+      disputes: { email: Boolean, push: Boolean },
+      reviews: { email: Boolean, push: Boolean },
+      social: { email: Boolean, push: Boolean }
     }
   },
   socialLinks: {

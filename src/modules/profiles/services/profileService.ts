@@ -196,6 +196,16 @@ export async function updateMyProfile(userId: string, body: Record<string, unkno
     throw new HttpError(400, 'La bio ne peut pas dépasser 500 caractères');
   }
 
+  // `$set: { preferences }` remplacerait tout l'objet et effacerait les
+  // préférences de notification, qui ont leur propre endpoint validé.
+  if (updates.preferences && typeof updates.preferences === 'object') {
+    const { notifications: _notifications, ...otherPreferences } = updates.preferences as Record<string, unknown>;
+    delete updates.preferences;
+    for (const [key, value] of Object.entries(otherPreferences)) {
+      updates[`preferences.${key}`] = value;
+    }
+  }
+
   const user = await User.findByIdAndUpdate(
     userId,
     { $set: updates },

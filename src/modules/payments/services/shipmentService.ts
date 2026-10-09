@@ -3,12 +3,7 @@ import Payment, { IPayment } from '../../../models/paymentModel';
 import { NotificationService } from '../../notifications/services/notificationService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
-import {
-  sendShipmentShippedEmail,
-  sendShipmentDeliveredEmail,
-  sendShipmentReminderEmail,
-  sendShipmentAutoConfirmedEmail
-} from '../../../commons/services/emailService';
+import { sendShipmentReminderEmail } from '../../../commons/services/emailService';
 import User, { IUser } from '../../../models/userModel';
 import { getTrackingProvider } from './tracking';
 import { forEachPaymentBatch } from './paymentBatches';
@@ -206,6 +201,8 @@ export async function markShipped({
   });
   await payment.save();
 
+  // L'email d'expédition (avec le suivi) part de cette notification, selon
+  // les préférences de l'acheteur : pas d'envoi direct en plus.
   await NotificationService.createNotification({
     recipientId: payment.buyer,
     type: 'order_status',
@@ -219,15 +216,6 @@ export async function markShipped({
       trackingUrl: resolvedUrl
     }
   });
-
-  await safeSendEmail(payment.buyer, (user) =>
-    sendShipmentShippedEmail(user, {
-      paymentId: payment._id.toString(),
-      carrier: carrierStr,
-      trackingNumber: trackingStr,
-      trackingUrl: resolvedUrl
-    })
-  );
 
   return payment.shipment;
 }
@@ -294,14 +282,6 @@ export async function confirmDelivery(userId: string, paymentId: string) {
       deliveredAt: payment.shipment.deliveredAt
     }
   });
-
-  await safeSendEmail(payment.seller, (user) =>
-    sendShipmentDeliveredEmail(user, {
-      paymentId: payment._id.toString(),
-      carrier: payment.shipment!.carrier,
-      trackingNumber: payment.shipment!.trackingNumber
-    })
-  );
 
   return payment.shipment;
 }
@@ -420,13 +400,12 @@ export async function autoConfirmStaleShipments(): Promise<{ confirmed: number }
     'shipment.status': SHIPMENT_STATUS.SHIPPED,
     'shipment.shippedAt': { $lte: threshold }
   }, async (stale) => {
-    const users = await loadUsersById(stale.flatMap((payment) => [payment.buyer, payment.seller]));
-
     for (const payment of stale) {
       try {
         await applyDelivery(payment, 'system');
         confirmed++;
 
+        // Les emails d'auto-confirmation partent de ces notifications.
         await Promise.all([
           NotificationService.createNotification({
             recipientId: payment.buyer,
@@ -444,23 +423,6 @@ export async function autoConfirmStaleShipments(): Promise<{ confirmed: number }
             link: `/account/sales/${payment._id}`,
             data: { paymentId: payment._id, autoConfirmed: true }
           })
-        ]);
-
-        await Promise.all([
-          safeSendEmailTo(users.get(payment.buyer.toString()), (user) =>
-            sendShipmentAutoConfirmedEmail(user, {
-              paymentId: payment._id.toString(),
-              role: 'buyer',
-              days: AUTO_CONFIRM_DAYS
-            })
-          ),
-          safeSendEmailTo(users.get(payment.seller.toString()), (user) =>
-            sendShipmentAutoConfirmedEmail(user, {
-              paymentId: payment._id.toString(),
-              role: 'seller',
-              days: AUTO_CONFIRM_DAYS
-            })
-          )
         ]);
       } catch (error) {
         logger.error('Erreur lors de l\'auto-confirmation', {
@@ -527,25 +489,9 @@ export async function sendStuckShipmentReminders(): Promise<{ sent: number }> {
 }
 
 /**
- * Envoie un email en chargeant l'utilisateur et en absorbant les erreurs :
- * un email qui plante ne doit jamais casser le flux de paiement/cron.
+ * Envoie un email à un utilisateur déjà chargé (lots des tâches planifiées) en
+ * absorbant les erreurs : un email qui plante ne doit jamais casser le cron.
  */
-async function safeSendEmail(
-  userId: mongoose.Types.ObjectId,
-  send: (user: IUser) => Promise<void>
-): Promise<void> {
-  try {
-    const user = await User.findById(userId);
-    await safeSendEmailTo(user ?? undefined, send);
-  } catch (error) {
-    logger.error('Erreur envoi email shipment', {
-      userId: userId?.toString(),
-      error: error instanceof Error ? error.message : String(error)
-    });
-  }
-}
-
-/** Variante de {@link safeSendEmail} pour un utilisateur déjà chargé (lots des tâches planifiées). */
 async function safeSendEmailTo(
   user: IUser | undefined,
   send: (user: IUser) => Promise<void>

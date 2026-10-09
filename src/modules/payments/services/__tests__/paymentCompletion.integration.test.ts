@@ -91,7 +91,8 @@ describe('finalisation d\'un paiement (integration)', () => {
     expect(completed).toMatchObject({ status: 'completed', captureId: CAPTURE_ID });
     expect(String(sold?.soldTo)).toBe(String(buyer._id));
     expect(sold?.soldAt).toEqual(soldAt);
-    expect(NotificationService.createNotification).toHaveBeenCalledTimes(1);
+    // Une seule annonce : vendeur + acheteur.
+    expect(NotificationService.createNotification).toHaveBeenCalledTimes(2);
   });
 
   it('deux finalisations simultanées : une seule fait la transition', async () => {
@@ -103,7 +104,8 @@ describe('finalisation d\'un paiement (integration)', () => {
     ]);
 
     expect(outcomes.sort()).toEqual(['already_completed', 'completed']);
-    expect(NotificationService.createNotification).toHaveBeenCalledTimes(1);
+    // Une seule annonce : vendeur + acheteur.
+    expect(NotificationService.createNotification).toHaveBeenCalledTimes(2);
   });
 
   it('webhook seul : finalise le paiement et vend le produit à l\'acheteur', async () => {
