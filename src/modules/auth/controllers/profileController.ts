@@ -12,7 +12,7 @@ import {
 
 function handleHttpError(res: Response, error: unknown): boolean {
   if (error instanceof HttpError) {
-    res.status(error.statusCode).json({ message: error.message });
+    res.status(error.statusCode).json({ message: error.message, code: error.code });
     return true;
   }
   return false;

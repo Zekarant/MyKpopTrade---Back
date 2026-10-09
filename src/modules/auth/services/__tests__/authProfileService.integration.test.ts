@@ -3,7 +3,8 @@
 // rendait cette suite instable (timeouts intermittents). Même mock que les
 // autres suites d'intégration.
 jest.mock('../../../../commons/services/emailService', () => ({
-  sendVerificationEmail: jest.fn().mockResolvedValue(undefined)
+  sendVerificationEmail: jest.fn().mockResolvedValue(undefined),
+  sendEmailChangedNotice: jest.fn().mockResolvedValue(undefined)
 }));
 
 import {
@@ -20,6 +21,7 @@ import {
   clearPayPalEmail
 } from '../authProfileService';
 import User from '../../../../models/userModel';
+import { sendEmailChangedNotice } from '../../../../commons/services/emailService';
 
 describe('authProfileService (integration)', () => {
   beforeAll(async () => {
@@ -98,12 +100,38 @@ describe('authProfileService (integration)', () => {
     it('change email, marque isEmailVerified=false et message verif', async () => {
       const user = await createTestUser({ isEmailVerified: true });
       const result = await updateProfileData(user._id.toString(), {
-        email: 'new_email_unique@test.com'
+        email: 'new_email_unique@test.com',
+        currentPassword: 'Password1!'
       });
 
       expect(result.user.email).toBe('new_email_unique@test.com');
       expect(result.user.isEmailVerified).toBe(false);
       expect(result.message).toContain('vérifier');
+    });
+
+    it('exige le mot de passe actuel pour changer d\'email', async () => {
+      const user = await createTestUser({ isEmailVerified: true });
+
+      await expect(
+        updateProfileData(user._id.toString(), { email: 'pirate@test.com' })
+      ).rejects.toMatchObject({ statusCode: 400, code: 'CURRENT_PASSWORD_REQUIRED' });
+      await expect(
+        updateProfileData(user._id.toString(), { email: 'pirate@test.com', currentPassword: 'Mauvais1!' })
+      ).rejects.toMatchObject({ statusCode: 401, code: 'CURRENT_PASSWORD_INVALID' });
+
+      const unchanged = await User.findById(user._id);
+      expect(unchanged?.email).toBe(user.email);
+    });
+
+    it('prévient l\'ancienne adresse du changement d\'email', async () => {
+      const user = await createTestUser({ isEmailVerified: true });
+
+      await updateProfileData(user._id.toString(), { email: 'nouvelle@test.com', currentPassword: 'Password1!' });
+
+      expect(sendEmailChangedNotice).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'nouvelle@test.com' }),
+        user.email
+      );
     });
 
     it('400 si email invalide', async () => {
@@ -117,7 +145,7 @@ describe('authProfileService (integration)', () => {
       await createTestUser({ email: 'taken_email@test.com' });
       const user = await createTestUser();
       await expect(
-        updateProfileData(user._id.toString(), { email: 'taken_email@test.com' })
+        updateProfileData(user._id.toString(), { email: 'taken_email@test.com', currentPassword: 'Password1!' })
       ).rejects.toMatchObject({ statusCode: 400 });
     });
 
@@ -174,6 +202,7 @@ describe('authProfileService (integration)', () => {
       const user = await createTestUser();
       const result = await updateProfileData(user._id.toString(), {
         email: 'combo_email@test.com',
+        currentPassword: 'Password1!',
         phoneNumber: '+33711223344'
       });
       expect(result.message).toContain('email');

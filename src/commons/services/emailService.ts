@@ -120,6 +120,29 @@ export const sendPasswordResetEmail = async (user: IUser, token: string): Promis
 };
 
 /**
+ * Prévient l'ancienne adresse qu'elle n'est plus celle du compte : si le
+ * changement n'est pas du fait du titulaire, c'est sa seule alerte.
+ */
+export const sendEmailChangedNotice = async (user: IUser, previousEmail: string): Promise<void> => {
+  const transporter = await createTransporter();
+
+  await transporter.sendMail({
+    from: `"MyKpopTrade" <${FROM_EMAIL}>`,
+    to: previousEmail,
+    subject: 'Votre adresse email a été modifiée',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2>Adresse email modifiée</h2>
+        <p>Bonjour ${user.username},</p>
+        <p>L'adresse email de votre compte MyKpopTrade vient d'être remplacée par <strong>${user.email}</strong>.</p>
+        <p>Si vous n'êtes pas à l'origine de ce changement, contactez immédiatement support@mykpoptrade.com.</p>
+        <p>Cordialement,<br/>L'équipe MyKpopTrade</p>
+      </div>
+    `
+  });
+};
+
+/**
  * Envoie un email de confirmation de suppression de compte
  */
 export const sendAccountDeletionEmail = async (user: IUser): Promise<void> => {

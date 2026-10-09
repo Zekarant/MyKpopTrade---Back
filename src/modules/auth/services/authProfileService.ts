@@ -1,6 +1,6 @@
 import User, { IUser } from '../../../models/userModel';
 import { validateEmail, normalizePhoneNumber, validateUsername } from '../../../commons/utils/validators';
-import { sendVerificationEmail } from '../../../commons/services/emailService';
+import { sendVerificationEmail, sendEmailChangedNotice } from '../../../commons/services/emailService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { eraseUserAccount } from '../../users/services/accountErasureService';
@@ -33,6 +33,21 @@ async function verifyPasswordIfProvided(userId: string, confirmPassword?: string
     if (error instanceof HttpError) throw error;
     logger.error('Erreur lors de la vérification du mot de passe:', error);
     throw new HttpError(500, 'Erreur lors de la vérification du mot de passe');
+  }
+}
+
+/**
+ * Ré-authentifie l'utilisateur avant une modification sensible.
+ * Un compte créé par OAuth n'a pas de mot de passe connu : il en définit un via
+ * « mot de passe oublié ».
+ */
+async function verifyCurrentPassword(userId: string, currentPassword: unknown) {
+  if (typeof currentPassword !== 'string' || !currentPassword) {
+    throw new HttpError(400, 'Mot de passe actuel requis pour changer d\'email', 'CURRENT_PASSWORD_REQUIRED');
+  }
+  const userWithPassword = await User.findById(userId).select('+password');
+  if (!userWithPassword || !(await userWithPassword.comparePassword(currentPassword))) {
+    throw new HttpError(401, 'Mot de passe actuel incorrect', 'CURRENT_PASSWORD_INVALID');
   }
 }
 
@@ -75,6 +90,8 @@ export interface ProfileUpdateInput {
   preferences?: IUser['preferences'];
   legalName?: string;
   address?: AddressInput | null | '';
+  /** Exigé pour changer d'email. */
+  currentPassword?: string;
 }
 
 export interface FirstProfileInput extends ProfileUpdateInput {
@@ -98,7 +115,8 @@ export async function updateProfileData(userId: string, body: ProfileUpdateInput
     socialLinks,
     preferences,
     legalName,
-    address
+    address,
+    currentPassword
   } = body;
 
   let emailUpdated = false;
@@ -119,20 +137,25 @@ export async function updateProfileData(userId: string, body: ProfileUpdateInput
     if (!validateEmail(email)) {
       throw new HttpError(400, 'Format d\'email invalide');
     }
+    // L'email sert à réinitialiser le mot de passe : le changer avec un simple
+    // jeton d'accès volé donnerait le compte pour de bon, 2FA comprise.
+    await verifyCurrentPassword(userId, currentPassword);
     const existing = await User.findOne({ email, _id: { $ne: userId } });
     if (existing) {
       throw new HttpError(400, 'Cet email est déjà utilisé');
     }
+    const previousEmail = user.email;
     user.email = email;
     user.isEmailVerified = false;
     const verificationToken = user.generateVerificationToken();
     await user.save();
     try {
       await sendVerificationEmail(user, verificationToken);
+      await sendEmailChangedNotice(user, previousEmail);
     } catch (error) {
       // L'utilisateur peut redemander un email de vérification via un autre endpoint
       // si l'envoi échoue ici (SMTP down, rate limit, etc.).
-      logger.error('Échec de l\'envoi de l\'email de vérification', {
+      logger.error('Échec de l\'envoi des emails de changement d\'adresse', {
         error: error instanceof Error ? error.message : String(error),
         userId
       });
