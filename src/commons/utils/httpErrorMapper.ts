@@ -31,13 +31,17 @@ export function asHttpError(error: unknown): HttpError | null {
  * renvoie la réponse correspondante et retourne la Response.
  * Sinon, retourne null — le caller doit enchaîner son fallback 500 habituel.
  *
- * Shape par défaut : `{ message }`. Pour les handlers qui utilisent d'autres shapes
- * (ex. `{ success: false, ... }` ou avec filler), gérer localement sans ce helper.
+ * Shape par défaut : `{ message, code? }` — le code permet au front de distinguer
+ * un refus métier (ex. BLOCKED) sans analyser le message. Pour les handlers qui
+ * utilisent d'autres shapes (ex. `{ success: false, ... }`), gérer localement.
  */
 export function mapHttpError(res: Response, error: unknown): Response | null {
   const httpError = asHttpError(error);
   if (httpError) {
-    return res.status(httpError.statusCode).json({ message: httpError.message });
+    return res.status(httpError.statusCode).json({
+      message: httpError.message,
+      ...(httpError.code ? { code: httpError.code } : {})
+    });
   }
   return null;
 }

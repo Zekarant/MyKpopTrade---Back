@@ -7,6 +7,8 @@ import SearchHistory from '../../../models/historicSearchModel';
 import PushSubscription from '../../../models/pushSubscriptionModel';
 import IdentityVerification from '../../../models/identityVerificationModel';
 import Follow from '../../follows/model';
+import SavedSearch from '../../savedSearches/model';
+import Block from '../../../models/blockModel';
 import { deleteSecureDocument } from '../../../commons/services/secureStorageService';
 import { invalidateAllUserRefreshTokens } from '../../../commons/services/tokenService';
 import { anonymizeBuyerPayments } from '../../payments/services/paymentAnonymizationService';
@@ -102,6 +104,8 @@ export async function eraseUserAccount(userId: string): Promise<{ pseudonym: str
     Notification.deleteMany({ recipient: userId }),
     Cart.deleteOne({ user: userId }),
     Follow.deleteMany({ $or: [{ follower: userId }, { following: userId }] }),
+    SavedSearch.deleteMany({ user: userId }),
+    Block.deleteMany({ $or: [{ blocker: userId }, { blocked: userId }] }),
     Product.updateMany({ seller: userId, isSold: { $ne: true } }, { $set: { isAvailable: false } }),
     anonymizeBuyerPayments(userId)
   ]);

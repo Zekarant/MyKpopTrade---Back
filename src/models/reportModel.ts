@@ -1,8 +1,8 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type ReportTargetType = 'rating' | 'product' | 'user' | 'post';
+export type ReportTargetType = 'rating' | 'product' | 'user' | 'post' | 'message';
 
-export const REPORT_TARGET_TYPES: ReportTargetType[] = ['rating', 'product', 'user', 'post'];
+export const REPORT_TARGET_TYPES: ReportTargetType[] = ['rating', 'product', 'user', 'post', 'message'];
 
 export const REPORT_REASONS = [
   'inappropriate_content',
@@ -25,6 +25,8 @@ export interface IReport extends Document {
   details?: string;
   status: 'pending' | 'reviewed' | 'resolved' | 'rejected';
   adminNotes?: string;
+  /** Message signalé : son texte au moment du signalement. */
+  reportedContent?: string;
   createdAt: Date;
   updatedAt: Date;
   resolvedAt?: Date;
@@ -66,6 +68,11 @@ const ReportSchema: Schema = new Schema({
   },
   resolvedAt: {
     type: Date
+  },
+  // Copie conservée parce que l'auteur peut supprimer son message après le
+  // signalement : le modérateur doit pouvoir lire ce qui a été signalé.
+  reportedContent: {
+    type: String
   }
 }, {
   timestamps: true

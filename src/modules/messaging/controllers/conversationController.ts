@@ -39,7 +39,7 @@ function handleControllerError(
   logContext: Record<string, unknown> = {}
 ) {
   if (error instanceof HttpError) {
-    return res.status(error.statusCode).json({ message: error.message });
+    return res.status(error.statusCode).json({ message: error.message, code: error.code });
   }
   logger.error(logMessage, { error, ...logContext });
   return res.status(500).json({
@@ -108,7 +108,7 @@ export const startConversation = asyncHandler(async (req: Request, res: Response
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res.status(error.statusCode).json({ message: error.message, code: error.code });
     }
 
     if (error instanceof Error) {
@@ -155,7 +155,7 @@ export const initiateNegotiation = asyncHandler(async (req: Request, res: Respon
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res.status(error.statusCode).json({ message: error.message, code: error.code });
     }
     logger.error('Erreur lors de l\'initiation d\'une négociation', {
       error: error instanceof Error ? error.message : 'Erreur inconnue',
@@ -193,7 +193,7 @@ export const respondToNegotiation = asyncHandler(async (req: Request, res: Respo
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res.status(error.statusCode).json({ message: error.message, code: error.code });
     }
     logger.error('Erreur lors de la réponse à une négociation', {
       error: error instanceof Error ? error.message : 'Erreur inconnue',
@@ -237,7 +237,7 @@ export const initiatePayWhatYouWant = asyncHandler(async (req: Request, res: Res
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res.status(error.statusCode).json({ message: error.message, code: error.code });
     }
     logger.error('Erreur lors de la configuration de Pay What You Want', {
       error: error instanceof Error ? error.message : String(error),
@@ -270,7 +270,7 @@ export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res:
     });
   } catch (error) {
     if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res.status(error.statusCode).json({ message: error.message, code: error.code });
     }
     logger.error('Erreur lors de la proposition d\'un prix PWYW', {
       error: error instanceof Error ? error.message : String(error),

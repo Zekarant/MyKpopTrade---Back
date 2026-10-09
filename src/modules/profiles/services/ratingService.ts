@@ -6,6 +6,7 @@ import User from '../../../models/userModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import { NotificationService } from '../../notifications/services/notificationService';
 import Payment from '../../../models/paymentModel';
+import { BlockedInteractionError, isBlockedBetween } from '../../users/services/userBlockService';
 
 const DUPLICATE_KEY_ERROR = 11000;
 const ALREADY_RATED_MESSAGE = 'Vous avez déjà évalué cette transaction.';
@@ -244,6 +245,12 @@ export async function createUserRating({
 
   if (reviewerId === recipientId) {
     fail(400, 'Vous ne pouvez pas vous auto-évaluer');
+  }
+
+  // Laisser un avis est une interaction : refusée entre membres bloqués, dans les deux sens.
+  if (await isBlockedBetween(reviewerId, recipientId)) {
+    cleanupRatingImages(images);
+    throw new BlockedInteractionError();
   }
 
   let paymentId: mongoose.Types.ObjectId;

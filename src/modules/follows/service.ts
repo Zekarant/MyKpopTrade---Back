@@ -2,6 +2,7 @@ import Follow from './model';
 import mongoose from 'mongoose';
 import User from '../../models/userModel';
 import { NotificationService } from '../notifications/services/notificationService';
+import { assertNotBlocked } from '../users/services/userBlockService';
 
 /** Code MongoDB d'une violation d'index unique. */
 const DUPLICATE_KEY_ERROR = 11000;
@@ -74,6 +75,8 @@ export class FollowService {
     if (!target || target.accountStatus === 'deleted') {
       throw new FollowTargetNotFoundError();
     }
+    // Se désabonner reste possible ; s'abonner est refusé entre membres bloqués.
+    await assertNotBlocked(followerId, followingId);
 
     try {
       await Follow.create({ follower: followerId, following: followingId });

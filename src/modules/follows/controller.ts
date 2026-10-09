@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { Request, Response } from 'express';
 import followService, { FollowTargetNotFoundError } from './service';
+import { BlockedInteractionError } from '../users/services/userBlockService';
 import { clampLimit } from '../../commons/utils/pagination';
 import logger from '../../commons/utils/logger';
 import { queryInt } from '../../commons/utils/query';
@@ -45,6 +46,9 @@ export const toggleFollow = async (req: Request, res: Response) => {
   } catch (error) {
     if (error instanceof FollowTargetNotFoundError) {
       return res.status(404).json({ message: error.message });
+    }
+    if (error instanceof BlockedInteractionError) {
+      return res.status(error.statusCode).json({ message: error.message, code: error.code });
     }
     return serverError(res, 'abonnement', error);
   }

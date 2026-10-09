@@ -5,6 +5,8 @@ import { createTestUser } from '../helpers/fixtures';
 import { generateAccessToken } from '../../commons/services/tokenService';
 import User from '../../models/userModel';
 import Report from '../../models/reportModel';
+import Conversation from '../../models/conversationModel';
+import Message from '../../models/messageModel';
 
 /** Signalements : entrées refusées proprement, doublons et inondation bloqués. */
 const app = createApp();
@@ -101,6 +103,75 @@ describe('HTTP — signalements', () => {
     expect(res.status).toBe(200);
     expect(res.body.reporterHistory).toEqual({ total: 3, resolved: 2, rejected: 0, pending: 1 });
     expect(res.body.targetHistory).toEqual({ totalReports: 1 });
+  });
+
+  describe('messages privés', () => {
+    /** Conversation entre alice et bob, avec un message d'alice. */
+    async function seedMessage() {
+      const alice = await createTestUser();
+      const bob = await createTestUser();
+      const conversation = await Conversation.create({ participants: [alice._id, bob._id], createdBy: alice._id });
+      const message = await Message.create({ conversation: conversation._id, sender: alice._id, content: 'Paie-moi hors site' });
+      return { alice, bob, message };
+    }
+
+    it('laisse l\'autre participant signaler un message et en garde le texte', async () => {
+      const { bob, message } = await seedMessage();
+
+      const res = await report(bob, { targetType: 'message', targetId: String(message._id), reason: 'fraud' });
+
+      expect(res.status).toBe(201);
+      const stored = await Report.findOne({ targetId: message._id });
+      expect(stored?.reportedContent).toBe('Paie-moi hors site');
+    });
+
+    it('refuse le signalement d\'un message par un non-participant (403)', async () => {
+      const { message } = await seedMessage();
+      const outsider = await createTestUser();
+
+      const res = await report(outsider, { targetType: 'message', targetId: String(message._id), reason: 'spam' });
+
+      expect(res.status).toBe(403);
+      expect(await Report.countDocuments()).toBe(0);
+    });
+
+    it('refuse de signaler son propre message (400)', async () => {
+      const { alice, message } = await seedMessage();
+
+      const res = await report(alice, { targetType: 'message', targetId: String(message._id), reason: 'spam' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('montre à l\'admin le texte du message signalé, même supprimé depuis', async () => {
+      const admin = await createTestUser({ role: 'admin' });
+      const { alice, bob, message } = await seedMessage();
+      const created = await report(bob, { targetType: 'message', targetId: String(message._id), reason: 'fraud' });
+      await Message.updateOne({ _id: message._id }, { isDeleted: true, content: '[Message supprimé]' });
+
+      const res = await request(app).get(`/api/reports/${created.body.report.id}`).set('Authorization', auth(admin));
+
+      expect(res.status).toBe(200);
+      expect(res.body.target).toMatchObject({ type: 'message', meta: { isDeleted: true } });
+      expect(res.body.target.owner.username).toBe(alice.username);
+      expect(res.body.report.reportedContent).toBe('Paie-moi hors site');
+    });
+  });
+
+  it('liste mes signalements avec leur statut, et seulement les miens', async () => {
+    const reporter = await createTestUser();
+    const other = await createTestUser();
+    const target = await createTestUser();
+    await Report.create([
+      { reporter: reporter._id, targetType: 'user', targetId: target._id, reason: 'spam', status: 'resolved' },
+      { reporter: other._id, targetType: 'user', targetId: target._id, reason: 'spam' }
+    ]);
+
+    const res = await request(app).get('/api/reports/me').set('Authorization', auth(reporter));
+
+    expect(res.status).toBe(200);
+    expect(res.body.reports).toHaveLength(1);
+    expect(res.body.reports[0]).toMatchObject({ targetType: 'user', status: 'resolved' });
   });
 
   it('répond 404, pas 500, pour un identifiant de signalement invalide', async () => {

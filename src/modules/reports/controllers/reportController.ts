@@ -10,6 +10,8 @@ import Report, {
 import Rating from '../../../models/ratingModel';
 import Product from '../../../models/productModel';
 import Post from '../../posts/model';
+import Message, { type IMessage } from '../../../models/messageModel';
+import Conversation from '../../../models/conversationModel';
 import User, { type IUser } from '../../../models/userModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import logger from '../../../commons/utils/logger';
@@ -46,7 +48,8 @@ const TARGET_TYPE_LABELS: Record<string, string> = {
   product: 'Produit',
   rating: 'Avis',
   user: 'Profil',
-  post: 'Publication'
+  post: 'Publication',
+  message: 'Message'
 };
 
 const EXCERPT_LENGTH = 400;
@@ -61,8 +64,22 @@ const findTarget = async (targetType: ReportTargetType, targetId: string) => {
   if (targetType === 'rating') return Rating.findById(targetId);
   if (targetType === 'product') return Product.findById(targetId);
   if (targetType === 'post') return Post.findById(targetId);
+  if (targetType === 'message') return Message.findById(targetId);
   return User.findById(targetId);
 };
+
+/**
+ * Un message privé n'est signalable que par l'autre participant de sa
+ * conversation : un tiers ne doit ni le désigner ni en exposer le contenu
+ * aux modérateurs. Renvoie le refus à répondre, ou null si le signalement est permis.
+ */
+async function messageReportRefusal(message: IMessage, reporterId: string) {
+  if (String(message.sender) === String(reporterId)) {
+    return { status: 400, message: 'Vous ne pouvez pas signaler votre propre message' };
+  }
+  const isParticipant = await Conversation.exists({ _id: message.conversation, participants: reporterId });
+  return isParticipant ? null : { status: 403, message: 'Vous ne participez pas à cette conversation' };
+}
 
 type ReportTargetSummary = {
   _id?: unknown;
@@ -78,6 +95,9 @@ const describeTarget = (targetType: string, target: ReportTargetSummary | null):
   if (targetType === 'rating') return `${target?.rating ?? '?'}/5 — ${excerpt(target?.review) || 'sans commentaire'}`;
   if (targetType === 'post') return excerpt(target?.content) || 'publication vide';
   if (targetType === 'user') return target?.username || 'profil inconnu';
+  // L'alerte part vers un service tiers (Discord) : le contenu d'un message
+  // privé n'y figure pas, il se lit dans le panneau d'administration.
+  if (targetType === 'message') return 'message privé (contenu dans le panneau d\'administration)';
   return String(target?._id ?? 'cible inconnue');
 };
 
@@ -130,6 +150,11 @@ export const createReport = asyncHandler(async (req: Request, res: Response) => 
     return res.status(404).json({ message: 'Cible du signalement non trouvée' });
   }
 
+  if (targetType === 'message') {
+    const refusal = await messageReportRefusal(target as IMessage, userId);
+    if (refusal) return res.status(refusal.status).json({ message: refusal.message });
+  }
+
   // Vérifier si l'utilisateur a déjà signalé cette cible
   const existingReport = await Report.findOne({
     reporter: userId,
@@ -151,7 +176,8 @@ export const createReport = asyncHandler(async (req: Request, res: Response) => 
     targetId,
     reason,
     details: details || '',
-    status: 'pending'
+    status: 'pending',
+    ...(targetType === 'message' && { reportedContent: (target as IMessage).content })
   });
 
   try {
@@ -372,6 +398,30 @@ const loadReportTarget = async (targetType: string, targetId: mongoose.Types.Obj
       owner: post.author,
       createdAt: post.createdAt,
       meta: { isReply: post.isReply, likesCount: post.likesCount, repliesCount: post.repliesCount }
+    };
+  }
+
+  if (targetType === 'message') {
+    const message = await Message.findById(targetId)
+      .select('content attachments isDeleted sender conversation createdAt')
+      .populate('sender', OWNER_FIELDS);
+    if (!message) return null;
+
+    return {
+      type: 'message',
+      id: message._id,
+      label: 'Message privé',
+      // Texte complet : le modérateur juge sur ce qui a réellement été écrit.
+      excerpt: message.content,
+      // Les pièces jointes restent privées (servies aux seuls participants) : seul leur nombre est montré.
+      images: [],
+      owner: message.sender,
+      createdAt: message.createdAt,
+      meta: {
+        conversationId: message.conversation,
+        attachmentsCount: message.attachments?.length ?? 0,
+        isDeleted: message.isDeleted
+      }
     };
   }
 

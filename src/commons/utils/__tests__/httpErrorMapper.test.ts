@@ -30,6 +30,14 @@ describe('mapHttpError', () => {
     expect(res.json).toHaveBeenCalledWith({ message: 'Not found' });
   });
 
+  it('transmet le code métier de l\'erreur quand elle en porte un', () => {
+    const res = createResMock();
+
+    mapHttpError(res, new HttpError(403, 'Bloqué', 'BLOCKED'));
+
+    expect(res.json).toHaveBeenCalledWith({ message: 'Bloqué', code: 'BLOCKED' });
+  });
+
   it('retourne null pour une Error standard', () => {
     const res = createResMock();
     const error = new Error('Generic error');
