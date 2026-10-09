@@ -10,9 +10,9 @@ import Post from '../../modules/posts/model';
 /** Publications du fil : images affichables, entrées validées, compteurs justes. */
 const app = createApp();
 
-// PNG 1×1 valide.
+// PNG 1×1 valide (les images envoyées sont décodées puis ré-encodées par l'API).
 const PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mN8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==',
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWNgYPj/HwADAgH/xCAAOgAAAABJRU5ErkJggg==',
   'base64'
 );
 

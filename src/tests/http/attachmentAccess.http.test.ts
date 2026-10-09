@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import request from 'supertest';
+import sharp from 'sharp';
 import { createApp } from '../../app';
 import {
   startInMemoryMongo,
@@ -94,6 +95,21 @@ describe('HTTP — confidentialité des pièces jointes de conversation', () => 
 
       expect(res.status).toBe(200);
       expect(res.body.toString()).toContain('image-publique-de-test');
+    });
+
+    it('isole les fichiers déposés (CSP sandbox) sans bloquer leur affichage sur un autre site', async () => {
+      const res = await request(app).get(`/uploads/products/${PUBLIC_FILE_NAME}`);
+
+      expect(res.headers['content-security-policy']).toBe("default-src 'none'; frame-ancestors 'none'; sandbox");
+      expect(res.headers['cross-origin-resource-policy']).toBeUndefined();
+    });
+  });
+
+  describe('en-têtes de sécurité', () => {
+    it('pose une CSP restrictive sur les réponses d\'API', async () => {
+      const res = await request(app).get('/health');
+
+      expect(res.headers['content-security-policy']).toBe("default-src 'none'; frame-ancestors 'none'");
     });
   });
 
@@ -222,15 +238,46 @@ describe('HTTP — confidentialité des pièces jointes de conversation', () => 
       }
     });
 
-    it('enregistre une pièce jointe avec l\'extension de son type, pas celle de son nom', async () => {
+    it('refuse (400) une pièce jointe déclarée image dont le contenu n\'en est pas une', async () => {
       const { alice, bob } = await seedConversation();
       const conversation = await Conversation.findOne({ participants: alice._id });
 
       const res = await request(app)
         .post(`/api/messaging/${conversation!._id}/messages`)
         .set('Authorization', `Bearer ${generateAccessToken(bob)}`)
-        .field('content', 'Regarde')
+        .field('content', 'Piège')
         .attach('attachments', Buffer.from('<script>alert(1)</script>'), {
+          filename: 'piege.html',
+          contentType: 'image/png'
+        });
+
+      expect(res.status).toBe(400);
+      expect(await Message.exists({ content: 'Piège' })).toBeNull();
+    });
+
+    it('refuse (400) un PDF dont la signature est absente', async () => {
+      const { alice, bob } = await seedConversation();
+      const conversation = await Conversation.findOne({ participants: alice._id });
+
+      const res = await request(app)
+        .post(`/api/messaging/${conversation!._id}/messages`)
+        .set('Authorization', `Bearer ${generateAccessToken(bob)}`)
+        .field('content', 'Contrat')
+        .attach('attachments', Buffer.from('<html></html>'), { filename: 'contrat.pdf', contentType: 'application/pdf' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('enregistre une pièce jointe avec l\'extension de son format, pas celle de son nom', async () => {
+      const { alice, bob } = await seedConversation();
+      const conversation = await Conversation.findOne({ participants: alice._id });
+      const png = await sharp({ create: { width: 1, height: 1, channels: 4, background: 'blue' } }).png().toBuffer();
+
+      const res = await request(app)
+        .post(`/api/messaging/${conversation!._id}/messages`)
+        .set('Authorization', `Bearer ${generateAccessToken(bob)}`)
+        .field('content', 'Regarde')
+        .attach('attachments', png, {
           filename: 'piege.html',
           contentType: 'image/png'
         });

@@ -1,50 +1,37 @@
-import { Request } from 'express';
-import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
 import crypto from 'crypto';
-import { sanitizedMulter } from '../../../commons/middlewares/sanitizedMulter';
+import { storedUpload, reencodeImage, PreparedUpload } from '../../../commons/middlewares/storedUpload';
+import { HttpError } from '../../../commons/utils/httpError';
 
 /**
- * Seuls types acceptés, avec l'extension enregistrée pour chacun. L'extension
- * ne vient jamais du nom envoyé par le client : `sendFile` déduit le
- * Content-Type de l'extension, et un `piege.html` déclaré `image/png` serait
- * servi en HTML au destinataire (XSS stockée sur le domaine de l'API).
+ * Seuls types acceptés. L'extension enregistrée ne vient jamais du nom envoyé
+ * par le client : `sendFile` déduit le Content-Type de l'extension, et un
+ * `piege.html` déclaré `image/png` serait servi en HTML au destinataire (XSS
+ * stockée sur le domaine de l'API). Les images sont ré-encodées (extension du
+ * format décodé), les PDF vérifiés sur leur signature.
  */
-const ATTACHMENT_EXTENSION_BY_MIME_TYPE = new Map([
-  ['image/jpeg', '.jpg'],
-  ['image/png', '.png'],
-  ['image/gif', '.gif'],
-  ['application/pdf', '.pdf']
-]);
+const PDF_MIME_TYPE = 'application/pdf';
+const ALLOWED_ATTACHMENT_TYPES = ['image/jpeg', 'image/png', 'image/gif', PDF_MIME_TYPE];
 
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const dir = path.join(process.cwd(), 'uploads', 'chat_attachments');
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    cb(null, dir);
-  },
-  filename: function (req, file, cb) {
-    const randomName = crypto.randomBytes(16).toString('hex');
-    const extension = ATTACHMENT_EXTENSION_BY_MIME_TYPE.get(file.mimetype) ?? '';
-    cb(null, `${randomName}${extension}`);
-  }
-});
+/** Tout PDF commence par `%PDF-`. */
+const PDF_SIGNATURE = Buffer.from('%PDF-');
 
-const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  if (ATTACHMENT_EXTENSION_BY_MIME_TYPE.has(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Type de fichier non pris en charge. Seuls JPEG, PNG, GIF et PDF sont autorisés.'));
-  }
-};
+const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024;
+const MAX_ATTACHMENTS_PER_MESSAGE = 5;
 
-export const upload = sanitizedMulter({
-  storage,
-  fileFilter,
-  limits: {
-    fileSize: 5 * 1024 * 1024
+async function preparePdf(file: Express.Multer.File): Promise<PreparedUpload> {
+  if (!file.buffer.subarray(0, PDF_SIGNATURE.length).equals(PDF_SIGNATURE)) {
+    throw new HttpError(400, 'Le fichier envoyé n\'est pas un PDF valide.', 'INVALID_PDF');
   }
+  return { buffer: file.buffer, extension: '.pdf', mimetype: PDF_MIME_TYPE };
+}
+
+export const upload = storedUpload({
+  directory: path.join(process.cwd(), 'uploads', 'chat_attachments'),
+  allowedMimeTypes: ALLOWED_ATTACHMENT_TYPES,
+  rejectedTypeMessage: 'Type de fichier non pris en charge. Seuls JPEG, PNG, GIF et PDF sont autorisés.',
+  maxFileSize: MAX_ATTACHMENT_SIZE,
+  maxFiles: MAX_ATTACHMENTS_PER_MESSAGE,
+  filename: (_req, extension) => `${crypto.randomBytes(16).toString('hex')}${extension}`,
+  prepare: (file) => (file.mimetype === PDF_MIME_TYPE ? preparePdf(file) : reencodeImage(file.buffer))
 });
