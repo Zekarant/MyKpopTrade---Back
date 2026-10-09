@@ -125,7 +125,8 @@ n'est requise. Les tests vivent dans `__tests__/` au plus près du code testé.
 | Mécanisme | Détail |
 | --- | --- |
 | Mot de passe | bcrypt |
-| Session | JWT 15 min + refresh token 7 jours, révocables |
+| Session | JWT 15 min + refresh token 7 jours, révocables ; le refresh token ne circule que dans un cookie `HttpOnly` (`mkt_refresh`, `SameSite=Lax`, chemin `/api/auth`) |
+| Changement d'email | mot de passe actuel exigé, l'ancienne adresse est prévenue |
 | Double authentification | TOTP (RFC 6238), optionnelle — voir ci-dessous |
 | Vérification du téléphone | code à 6 chiffres par SMS (Twilio), `crypto.randomInt` |
 | Rate limiting | par IP sur connexion / inscription / envoi d'emails, par utilisateur sur les SMS |

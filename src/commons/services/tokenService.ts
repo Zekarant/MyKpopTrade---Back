@@ -7,7 +7,7 @@ import env from '../../config/env';
 import logger from '../utils/logger';
 
 /** Durée de vie d'une session : un jeton renouvelé garde l'échéance d'origine. */
-const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
+export const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Délai de grâce après un échange : deux onglets peuvent renouveler en même

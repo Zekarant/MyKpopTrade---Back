@@ -4,6 +4,7 @@ import User, { IUser } from '../../../models/userModel';
 import { isTwoFactorEnabled, issueTwoFactorChallengeToken } from '../services/twoFactorService';
 import { issueOneTimeCode, consumeOneTimeCode } from '../services/oneTimeCodeService';
 import logger from '../../../commons/utils/logger';
+import { setRefreshTokenCookie } from '../services/refreshTokenCookie';
 
 /**
  * Gère la redirection après authentification sociale réussie.
@@ -46,10 +47,9 @@ export const oauthCallback = async (req: Request, res: Response): Promise<void> 
 
     if (responseMode === 'json') {
       const accessToken = generateAccessToken(user);
-      const refreshToken = await generateRefreshToken(userId);
+      setRefreshTokenCookie(req, res, await generateRefreshToken(userId));
       res.status(200).json({
         accessToken,
-        refreshToken,
         isNewUser,
         requiresProfileCompletion,
         user: {
@@ -105,9 +105,9 @@ export const exchangeOAuthCode = async (req: Request, res: Response): Promise<vo
       return;
     }
 
+    setRefreshTokenCookie(req, res, await generateRefreshToken(String(user._id)));
     res.status(200).json({
       accessToken: generateAccessToken(user),
-      refreshToken: await generateRefreshToken(String(user._id)),
       user: { id: user._id, username: user.username }
     });
   } catch (error) {

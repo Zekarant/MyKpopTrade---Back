@@ -40,9 +40,12 @@ describe('HTTP — codes à usage unique OAuth', () => {
       expect(first.status).toBe(200);
       expect(first.body).toMatchObject({
         accessToken: expect.any(String),
-        refreshToken: expect.any(String),
         user: { id: user._id.toString(), username: user.username }
       });
+      expect(first.body.refreshToken).toBeUndefined();
+      expect(first.headers['set-cookie']).toEqual(
+        expect.arrayContaining([expect.stringMatching(/^mkt_refresh=.+HttpOnly/)])
+      );
       expect(replay.status).toBe(401);
     });
 

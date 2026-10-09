@@ -5,6 +5,7 @@ import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import { mapHttpError } from '../../../commons/utils/httpErrorMapper';
 import logger from '../../../commons/utils/logger';
 import env from '../../../config/env';
+import { setRefreshTokenCookie } from '../services/refreshTokenCookie';
 import {
   generateAccessToken,
   generateRefreshToken
@@ -192,7 +193,7 @@ export const verifyChallenge = asyncHandler(async (req: Request, res: Response) 
     await user.save();
 
     const accessToken = generateAccessToken(user);
-    const refreshToken = await generateRefreshToken(user._id.toString());
+    setRefreshTokenCookie(req, res, await generateRefreshToken(user._id.toString()));
 
     logger.info('Connexion réussie après double authentification', {
       userId: user._id.toString().substring(0, 5) + '...',
@@ -202,7 +203,6 @@ export const verifyChallenge = asyncHandler(async (req: Request, res: Response) 
     return res.status(200).json({
       message: 'Connexion réussie',
       accessToken,
-      refreshToken,
       usedRecoveryCode,
       remainingRecoveryCodes,
       user: {

@@ -15,6 +15,11 @@ import {
   isTwoFactorEnabled,
   issueTwoFactorChallengeToken
 } from '../services/twoFactorService';
+import {
+  setRefreshTokenCookie,
+  clearRefreshTokenCookie,
+  readRefreshTokenCookie
+} from '../services/refreshTokenCookie';
 
 /**
  * Connexion utilisateur
@@ -85,7 +90,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
     // Génération des tokens
     const accessToken = generateAccessToken(user);
-    const refreshToken = await generateRefreshToken(user._id.toString());
+    setRefreshTokenCookie(req, res, await generateRefreshToken(user._id.toString()));
 
     // Journalisation de la connexion réussie (sans données sensibles)
     logger.info('Connexion réussie', {
@@ -96,7 +101,6 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     res.status(200).json({
       message: 'Connexion réussie',
       accessToken,
-      refreshToken,
       user: {
         id: user._id,
         username: user.username,
@@ -133,7 +137,7 @@ function isValidAccessToken(token: string): boolean {
  */
 export const logout = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { refreshToken } = req.body;
+    const refreshToken = readRefreshTokenCookie(req);
 
     // La route n'exige pas de session (un jeton d'accès expiré ne doit pas
     // bloquer la déconnexion) : seul un jeton authentique et valide est révoqué.
@@ -142,11 +146,11 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
       await revokeAccessToken(accessToken);
     }
 
-    // Invalider le refresh token (chaîne uniquement : un objet deviendrait un filtre Mongo)
-    if (typeof refreshToken === 'string' && refreshToken) {
+    if (refreshToken) {
       await invalidateRefreshToken(refreshToken);
     }
 
+    clearRefreshTokenCookie(res);
     res.status(200).json({ message: 'Déconnexion réussie' });
   } catch (error) {
     console.error('Erreur lors de la déconnexion:', error);
@@ -159,17 +163,18 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
  */
 export const refreshToken = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { refreshToken } = req.body;
-    
-    if (typeof refreshToken !== 'string' || !refreshToken) {
-      res.status(400).json({ message: 'Refresh token requis' });
+    const refreshToken = readRefreshTokenCookie(req);
+
+    if (!refreshToken) {
+      res.status(401).json({ message: 'Aucune session à renouveler' });
       return;
     }
-    
-    // Le jeton présenté est consommé : le client doit garder celui renvoyé.
+
+    // Le jeton présenté est consommé : le cookie reçoit celui qui le remplace.
     const rotated = await rotateRefreshToken(refreshToken);
 
     if (!rotated) {
+      clearRefreshTokenCookie(res);
       res.status(401).json({ message: 'Refresh token invalide ou expiré' });
       return;
     }
@@ -178,14 +183,13 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
 
     if (!user || user.accountStatus === 'deleted') {
       await invalidateAllUserRefreshTokens(rotated.userId);
+      clearRefreshTokenCookie(res);
       res.status(401).json({ message: 'Utilisateur non trouvé ou compte supprimé' });
       return;
     }
 
-    res.status(200).json({
-      accessToken: generateAccessToken(user),
-      refreshToken: rotated.refreshToken
-    });
+    setRefreshTokenCookie(req, res, rotated.refreshToken);
+    res.status(200).json({ accessToken: generateAccessToken(user) });
   } catch (error) {
     console.error('Erreur lors du rafraîchissement du token:', error);
     res.status(500).json({ message: 'Erreur lors du rafraîchissement du token' });
