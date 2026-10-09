@@ -118,6 +118,10 @@ export const envSchema = z.object({
   // son absence faisait échouer le démarrage sur une exception opaque.
   ENCRYPTION_KEY: z.string().min(32).optional(),
 
+  // Temps réel (SSE) : flux ouverts simultanément sur ce process, tous
+  // utilisateurs confondus. Chaque flux garde une socket ; au-delà, 503.
+  REALTIME_MAX_CONNECTIONS: z.coerce.number().int().positive().default(1000),
+
   // Logs
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
 }).superRefine((data, ctx) => {

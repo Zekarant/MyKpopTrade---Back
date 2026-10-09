@@ -11,6 +11,8 @@ import {
   formatOfferHistory
 } from '../types/conversationTypes';
 import { HttpError } from '../../../commons/utils/httpError';
+import { assertNotBlocked, getBlockStatus } from '../../users/services/userBlockService';
+import { realtimePublisher } from '../../realtime/services/realtimePublisher';
 
 export { HttpError };
 
@@ -50,10 +52,12 @@ const DEFAULT_CURRENCY = 'EUR';
 /**
  * Champs publics des participants dans le détail d'une conversation : ceux du
  * profil public (badges, ancienneté, statistiques), jamais email, téléphone,
- * adresse ni données de paiement.
+ * adresse ni données de paiement. Les préférences de notification restent
+ * privées : seules les préférences affichables sont exposées.
  */
+const PUBLIC_PREFERENCE_FIELDS = 'preferences.kpopGroups preferences.allowDirectMessages';
 const DETAIL_PARTICIPANT_FIELDS =
-  'username profilePicture location bio preferences socialLinks statistics createdAt isIdentityVerified isSellerVerified';
+  `username profilePicture location bio ${PUBLIC_PREFERENCE_FIELDS} socialLinks statistics createdAt isIdentityVerified isSellerVerified`;
 
 type LastMessageSummary = {
   _id: mongoose.Types.ObjectId;
@@ -136,6 +140,8 @@ export async function fetchConversation(
   const conversation = conversationRaw as LeanConversation & {
     isOwner?: boolean;
     otherParticipant?: unknown;
+    isBlocked?: boolean;
+    blockedByMe?: boolean;
     userMetadata?: { isArchived: boolean; isFavorited: boolean };
     formattedOfferHistory?: ReturnType<typeof formatOfferHistory>;
   };
@@ -145,6 +151,15 @@ export async function fetchConversation(
   conversation.otherParticipant = Array.isArray(participants) && participants.length === 2
     ? participants.find(p => p?._id?.toString() !== userId) ?? null
     : null;
+
+  // La conversation reste lisible après un blocage ; le front s'appuie sur ces
+  // indicateurs pour désactiver la saisie et proposer « Débloquer ».
+  const otherParticipantId = (conversation.otherParticipant as { _id?: mongoose.Types.ObjectId } | null)?._id;
+  const blockStatus = otherParticipantId
+    ? await getBlockStatus(userId, otherParticipantId)
+    : { isBlocked: false, blockedByMe: false };
+  conversation.isBlocked = blockStatus.isBlocked;
+  conversation.blockedByMe = blockStatus.blockedByMe;
 
   if (conversation.productId) {
     conversation.isOwner = conversation.productId.seller.toString() === userId;
@@ -297,7 +312,7 @@ export async function listUserConversations(
     .sort({ lastMessageAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
-    .populate('participants', 'username profilePicture location bio preferences socialLinks statistics')
+    .populate('participants', `username profilePicture location bio ${PUBLIC_PREFERENCE_FIELDS} socialLinks statistics`)
     .populate('productId', 'title price images currency')
     .lean();
 
@@ -376,6 +391,8 @@ export async function createConversationForUser({
     throw new HttpError(404, 'Destinataire non trouvé');
   }
 
+  await assertNotBlocked(userId, recipientId);
+
   if (productId) {
     const product = await Product.findById(productId);
     if (!product) {
@@ -421,6 +438,7 @@ export async function createConversationForUser({
         lastMessageAt: new Date()
       }
     );
+    realtimePublisher.publishNewMessages(conversation._id, [message._id]);
   }
 
   return await Conversation.findById(conversation._id)

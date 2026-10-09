@@ -84,6 +84,34 @@ L'API écoute sur <http://localhost:3000>.
 À brancher sur les sondes de l'orchestrateur : `/health` pour le redémarrage,
 `/ready` pour le routage du trafic.
 
+## Temps réel (Server-Sent Events)
+
+`GET /api/realtime/stream` ouvre un flux `text/event-stream` pour l'utilisateur
+connecté, authentifié par le token d'accès habituel (`Authorization: Bearer`).
+Le front le lit avec `fetch` (EventSource ne sait pas envoyer d'en-tête
+`Authorization`), cf. `src/services/realtime.ts` côté front.
+
+| Événement | Données |
+| --- | --- |
+| `message:new` | `{ conversationId, message }` — message peuplé (`sender.username`, `profilePicture`), envoyé à tous les participants, auteur compris |
+| `conversation:read` | `{ conversationId, readerId, readAt, messageIds? }` — `messageIds` absent : tout ce que le lecteur n'avait pas écrit |
+| `notification:new` | la notification créée, telle que renvoyée par `GET /api/notifications` |
+| `unread:update` | `{ messages, notifications }` — à l'ouverture du flux et après une lecture |
+
+- Un commentaire `: heartbeat` part toutes les 25 s pour que les proxys ne
+  coupent pas la connexion ; `X-Accel-Buffering: no` désactive le tampon nginx.
+- Le flux est fermé à l'expiration du token d'accès (15 min) : le client se
+  reconnecte avec un token frais. Les événements manqués ne sont pas rejoués,
+  `unread:update` à l'ouverture sert de resynchronisation.
+- Limites : 5 flux par compte (`429` au-delà), `REALTIME_MAX_CONNECTIONS` par
+  process (`503`). Un client qui ne lit plus son flux (> 1 Mio en attente) est coupé.
+- ⚠️ **Une seule instance.** Le hub (`modules/realtime/realtimeHub.ts`) vit en
+  mémoire : avec plusieurs instances de l'API, un événement publié sur l'une
+  n'atteint pas les clients connectés aux autres. Il faudra alors relayer les
+  publications par un pub/sub (Redis, change streams MongoDB).
+- À l'arrêt (SIGTERM), les flux sont fermés pour que `server.close()` ne reste
+  pas bloqué.
+
 ## Structure
 
 ```

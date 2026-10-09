@@ -6,6 +6,8 @@ import { NotificationService } from '../../notifications/services/notificationSe
 import { MessagingUtilsService } from './messagingUtilsService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import { assertNotBlockedInConversation } from '../../users/services/userBlockService';
+import { realtimePublisher } from '../../realtime/services/realtimePublisher';
 
 const ATTACHMENTS_DIR = () => path.join(process.cwd(), 'uploads', 'chat_attachments');
 
@@ -27,6 +29,8 @@ export async function sendMessageToConversation({
   }
 
   const conversation = await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+  // Conversation existante : elle reste lisible, mais plus aucun message n'y passe après un blocage.
+  await assertNotBlockedInConversation(userId, conversation.participants);
 
   let attachments: string[] = [];
   if (files && Array.isArray(files) && files.length > 0) {
@@ -74,13 +78,24 @@ export async function sendMessageToConversation({
     });
   }
 
+  realtimePublisher.publishNewMessages(conversationId, [newMessage._id]);
+
   return await Message.findById(newMessage._id)
     .populate('sender', 'username profilePicture');
 }
 
 export async function markConversationRead(userId: string, conversationId: string) {
-  await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
-  return await MessagingUtilsService.markConversationAsRead(conversationId, userId);
+  const conversation = await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+  const markedCount = await MessagingUtilsService.markConversationAsRead(conversationId, userId);
+  // Rien de nouveau lu : pas d'accusé de lecture à diffuser.
+  if (markedCount > 0) {
+    realtimePublisher.publishConversationRead({
+      conversationId,
+      readerId: userId,
+      participantIds: conversation.participants
+    });
+  }
+  return markedCount;
 }
 
 export async function markSingleMessageRead(userId: string, messageId: string) {
@@ -104,6 +119,12 @@ export async function markSingleMessageRead(userId: string, messageId: string) {
       messageId,
       { $addToSet: { readBy: userId } }
     );
+    realtimePublisher.publishConversationRead({
+      conversationId: message.conversation,
+      readerId: userId,
+      participantIds: conversation.participants,
+      messageIds: [messageId]
+    });
   }
 }
 

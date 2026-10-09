@@ -6,6 +6,8 @@ import { MessagingUtilsService } from './messagingUtilsService';
 import { LeanConversation } from '../types/conversationTypes';
 import { HttpError } from '../../../commons/utils/httpError';
 import { NotificationService } from '../../notifications/services/notificationService';
+import { assertNotBlocked, assertNotBlockedInConversation } from '../../users/services/userBlockService';
+import { realtimePublisher } from '../../realtime/services/realtimePublisher';
 
 const OFFER_STATUS = {
   PENDING: 'pending',
@@ -82,6 +84,7 @@ async function createOfferMessages(
     conversationId,
     { lastMessage: lastMessageId, lastMessageAt: new Date() }
   );
+  realtimePublisher.publishNewMessages(conversationId, [systemMessage._id, lastMessageId]);
 }
 
 function findOfferConversation(conversationId: ObjectIdLike) {
@@ -289,6 +292,8 @@ export async function initiateNegotiationFlow({
 
   const product = await Product.findById(productId);
   assertProductOfferable(product, userId);
+  // Couvre aussi les propositions de prix libre, qui passent par ce même circuit.
+  await assertNotBlocked(userId, product.seller);
   assertOfferInAcceptedRange(product, initialOffer);
 
   const existing = await Conversation.findOne({
@@ -468,6 +473,8 @@ export async function respondToNegotiationFlow({
   if (!conversation.participants.some(participant => participant.toString() === userId)) {
     throw new HttpError(403, 'Vous ne participez pas à cette négociation');
   }
+  // Accepter, refuser ou contrer écrit dans la conversation : refusé après un blocage.
+  await assertNotBlockedInConversation(userId, conversation.participants);
 
   const pendingOffer = conversation.offerHistory
     .filter(offer => offer.status === OFFER_STATUS.PENDING)
@@ -756,6 +763,7 @@ export async function cancelOfferFlow(userId: string, conversationId: string) {
     conversationId,
     { lastMessage: systemMessage._id, lastMessageAt: new Date() }
   );
+  realtimePublisher.publishNewMessages(conversationId, [systemMessage._id]);
 
   return {
     amount: userOffer.amount,

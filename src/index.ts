@@ -10,6 +10,8 @@ import { startShipmentTrackingTask } from './commons/tasks/shipmentTrackingTask'
 import { startSuspensionExpiryTask } from './commons/tasks/suspensionExpiryTask';
 import { startIdentityDocumentCleanupTask } from './commons/tasks/identityDocumentCleanupTask';
 import { startAccountDeletionTask } from './commons/tasks/accountDeletionTask';
+import { startSavedSearchAlertTask } from './commons/tasks/savedSearchAlertTask';
+import { realtimeHub } from './modules/realtime';
 
 /**
  * Délai laissé aux requêtes en cours avant sortie forcée. Inférieur aux 30 s
@@ -38,6 +40,7 @@ function startMaintenanceTasks(): void {
   startSuspensionExpiryTask();
   startIdentityDocumentCleanupTask();
   startAccountDeletionTask();
+  startSavedSearchAlertTask();
   logger.info('Tâches CRON de maintenance démarrées');
 }
 
@@ -48,6 +51,9 @@ async function stopScheduledTasks(): Promise<void> {
 function closeServer(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
+    // Après close() (plus de nouveau flux accepté) : un flux SSE ne se termine
+    // jamais de lui-même, server.close() l'attendrait jusqu'à l'arrêt forcé.
+    realtimeHub.closeAll();
   });
 }
 

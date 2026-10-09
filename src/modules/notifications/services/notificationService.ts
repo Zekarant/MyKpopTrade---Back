@@ -3,6 +3,22 @@ import User from '../../../models/userModel';
 import mongoose from 'mongoose';
 import logger from '../../../commons/utils/logger';
 import { sendToUser as sendPushToUser } from './pushService';
+import { sendNotificationEmail, type NotificationEmail } from '../../../commons/services/emailService';
+import { resolveDeliveryChannels } from '../notificationPreferences';
+import { realtimePublisher } from '../../realtime/services/realtimePublisher';
+
+const asOptionalString = (value: unknown): string | undefined =>
+  typeof value === 'string' && value ? value : undefined;
+
+/**
+ * Suivi de colis porté par la notification d'expédition (cf. shipmentService) :
+ * l'email l'affiche, ce qui évite un second email d'expédition dédié.
+ */
+function trackingFrom(data: Record<string, unknown>): NotificationEmail['tracking'] {
+  const number = asOptionalString(data.trackingNumber);
+  if (!number) return undefined;
+  return { carrier: asOptionalString(data.carrier), number, url: asOptionalString(data.trackingUrl) };
+}
 
 /**
  * Service pour la gestion des notifications
@@ -29,9 +45,11 @@ export class NotificationService {
     expiresInDays?: number;
   }) {
     try {
-      // Vérifier si le destinataire existe (sans charger tout son document :
-      // cette fonction est appelée à chaque action notifiée).
-      const recipient = await User.exists({ _id: recipientId });
+      // Seuls les champs utiles aux canaux externes sont chargés : cette
+      // fonction est appelée à chaque action notifiée.
+      const recipient = await User.findById(recipientId)
+        .select('email username preferences.notifications')
+        .lean();
       if (!recipient) {
         throw new Error(`Destinataire introuvable: ${recipientId}`);
       }
@@ -58,19 +76,46 @@ export class NotificationService {
         type
       });
 
-      // Push notification (web push) — fire-and-forget : un échec push
-      // ne doit pas bloquer la création de la notification in-app.
-      sendPushToUser(recipientId.toString(), {
-        title,
-        body: content,
-        link: link ?? undefined,
-        data: { ...data, notificationId: notification._id, type }
-      }).catch((error) => {
-        logger.warn('Erreur push notification', {
-          recipientId: recipientId.toString(),
-          error: error instanceof Error ? error.message : String(error)
+      // Onglets ouverts du destinataire (SSE) : la cloche se met à jour sans rechargement.
+      realtimePublisher.publishNotification(recipientId, notification.toJSON());
+
+      // Point unique de décision des canaux externes : le type donne la
+      // catégorie, les préférences du destinataire tranchent (l'in-app reste
+      // toujours créé ci-dessus).
+      const channels = resolveDeliveryChannels(type, recipient.preferences?.notifications);
+
+      // Push et email — fire-and-forget : un échec d'envoi ne doit ni
+      // bloquer ni faire échouer l'opération métier qui notifie.
+      if (channels.push) {
+        sendPushToUser(recipientId.toString(), {
+          title,
+          body: content,
+          link: link ?? undefined,
+          data: { ...data, notificationId: notification._id, type }
+        }).catch((error) => {
+          logger.warn('Erreur push notification', {
+            recipientId: recipientId.toString(),
+            error: error instanceof Error ? error.message : String(error)
+          });
         });
-      });
+      }
+
+      if (channels.email && recipient.email) {
+        sendNotificationEmail({
+          to: recipient.email,
+          username: recipient.username,
+          title,
+          content,
+          link,
+          tracking: trackingFrom(data)
+        }).catch((error) => {
+          logger.warn('Erreur email de notification', {
+            recipientId: recipientId.toString(),
+            type,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        });
+      }
 
       return notification;
     } catch (error) {

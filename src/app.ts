@@ -30,6 +30,8 @@ import disputeRoutes from './modules/disputes/routes';
 import cartRoutes from './modules/cart/routes';
 import faqRoutes from './modules/faqs/routes';
 import contactRoutes from './modules/contact/routes';
+import savedSearchRoutes from './modules/savedSearches/routes';
+import { realtimeRoutes } from './modules/realtime';
 
 /**
  * Crée l'application Express configurée (middlewares + routes + handlers).
@@ -121,6 +123,8 @@ export function createApp(): express.Express {
   app.use('/api/cart', cartRoutes);
   app.use('/api/faqs', faqRoutes);
   app.use('/api/contact', contactRoutes);
+  app.use('/api/saved-searches', savedSearchRoutes);
+  app.use('/api/realtime', realtimeRoutes);
 
   // Routes SEO publiques (sitemap, robots) servies à la racine pour les crawlers
   app.use('/', seoRoutes);
