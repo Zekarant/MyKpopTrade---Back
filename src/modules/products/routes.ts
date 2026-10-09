@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as productController from './controllers/productController';
 import * as inventoryController from './controllers/inventoryController';
-import { authenticateJWT, requireAdmin } from '../../commons/middlewares/authMiddleware';
+import { authenticateJWT, optionalAuthenticateJWT, requireAdmin } from '../../commons/middlewares/authMiddleware';
 import * as productImageController from './controllers/productImageController';
 import { productImagesUpload } from '../profiles/middleware/fileUploaderMiddleware';
 import * as productAdminController from './controllers/productAdminController';
@@ -58,6 +58,7 @@ router.post(
   productAdminController.reviewFlaggedProduct
 );
 
-router.get('/:productId', authenticateJWT, productController.getProductById);
+// Public (lien partageable /products/:id) ; connecté, on compte la vue et le favori.
+router.get('/:productId', optionalAuthenticateJWT, productController.getProductById);
 
 export default router;

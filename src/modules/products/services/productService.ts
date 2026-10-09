@@ -239,12 +239,26 @@ export async function fetchProductById(productId: string, userId?: string) {
     throw new HttpError(404, 'Produit non trouvé');
   }
 
+  const isOwner = userId === product.seller._id.toString();
+
+  // Comme dans l'inventaire public : une annonce retirée sans avoir été vendue
+  // (en pause, archivée, suspendue par la modération) ne regarde que son vendeur.
+  if (!isOwner && !product.isAvailable && !product.isSold) {
+    throw new HttpError(404, 'Produit non trouvé');
+  }
+
   const [enrichedProduct] = await withKpopNames([product]);
 
   const opts: Partial<IProduct['shippingOptions']> = enrichedProduct.shippingOptions || {};
   enrichedProduct.shippingPrice = opts.nationalCost ?? opts.shippingCost ?? null;
 
-  if (userId && userId !== product.seller._id.toString()) {
+  if (!isOwner) {
+    // Données internes : analyse de modération et identité de l'acheteur.
+    delete enrichedProduct.moderationFlag;
+    delete enrichedProduct.soldTo;
+  }
+
+  if (userId && !isOwner) {
     // $inc atomique : aucune vue concurrente perdue, et pas de validation
     // complète du document à chaque consultation.
     await Product.updateOne({ _id: product._id }, { $inc: { views: 1 } });
