@@ -7,30 +7,80 @@ import { HttpError } from '../../../commons/utils/httpError';
 import { NotificationService } from '../../notifications/services/notificationService';
 import Payment from '../../../models/paymentModel';
 
+const DUPLICATE_KEY_ERROR = 11000;
+const ALREADY_RATED_MESSAGE = 'Vous avez déjà évalué cette transaction.';
+
 /**
- * « Achat vérifié » seulement si un paiement terminé lie les deux utilisateurs
- * pour ce produit (le front envoie l'ID du produit comme `transactionId`).
+ * Paiement terminé sur lequel porte une évaluation : sans lui, n'importe qui
+ * pourrait noter n'importe qui, autant de fois qu'il le veut.
+ *
+ * `type` est le rôle du destinataire dans la transaction : `seller` quand
+ * l'acheteur note son vendeur, `buyer` à l'inverse. `transactionId` désigne le
+ * paiement ou son produit (le front envoie l'ID du produit) ; absent, c'est le
+ * paiement terminé le plus récent entre les deux membres, pas encore évalué.
+ *
+ * @throws HttpError 403 sans paiement terminé entre eux, 409 s'ils sont tous déjà évalués.
  */
-async function isCompletedPurchaseBetween(
-  transactionId: string | undefined,
-  reviewerId: string,
-  recipientId: string
-): Promise<boolean> {
-  if (!transactionId || !mongoose.isValidObjectId(transactionId)) return false;
-  const payment = await Payment.exists({
-    $and: [
-      { $or: [{ product: transactionId }, { _id: transactionId }] },
-      {
-        $or: [
-          { buyer: reviewerId, seller: recipientId },
-          { buyer: recipientId, seller: reviewerId }
-        ]
-      }
-    ],
-    status: 'completed'
-  });
-  return Boolean(payment);
+async function findRatablePayment({
+  reviewerId,
+  recipientId,
+  type,
+  transactionId
+}: {
+  reviewerId: string;
+  recipientId: string;
+  type: 'buyer' | 'seller';
+  transactionId?: string;
+}): Promise<mongoose.Types.ObjectId> {
+  if (transactionId && !mongoose.isValidObjectId(transactionId)) {
+    throw new HttpError(400, 'Identifiant de transaction invalide');
+  }
+
+  const parties = type === 'seller'
+    ? { buyer: reviewerId, seller: recipientId }
+    : { buyer: recipientId, seller: reviewerId };
+  const payments = await Payment.find({
+    ...parties,
+    status: 'completed',
+    ...(transactionId ? { $or: [{ _id: transactionId }, { product: transactionId }] } : {})
+  })
+    .sort({ completedAt: -1, createdAt: -1 })
+    .select('_id product')
+    .lean<{ _id: mongoose.Types.ObjectId; product: mongoose.Types.ObjectId }[]>();
+
+  if (payments.length === 0) {
+    throw new HttpError(
+      403,
+      'Vous ne pouvez évaluer qu\'un membre avec qui vous avez conclu une transaction payée.',
+      'NO_COMPLETED_TRANSACTION'
+    );
+  }
+
+  // Les avis antérieurs à cette règle référencent le produit, pas le paiement.
+  const existing = await Rating.find({
+    reviewer: reviewerId,
+    transaction: { $in: payments.flatMap((payment) => [payment._id, payment.product]) }
+  }).select('transaction').lean<{ transaction?: mongoose.Types.ObjectId }[]>();
+  const ratedIds = new Set(existing.map((rating) => String(rating.transaction)));
+
+  const unrated = payments.find(
+    (payment) => !ratedIds.has(String(payment._id)) && !ratedIds.has(String(payment.product))
+  );
+  if (!unrated) {
+    throw new HttpError(409, ALREADY_RATED_MESSAGE, 'ALREADY_RATED');
+  }
+  return unrated._id;
 }
+
+/**
+ * Avis comptés dans la note d'un membre : visibles et adossés à un paiement
+ * terminé. Les anciens avis non vérifiés restent affichés mais ne comptent pas.
+ */
+const countedRatingsOf = (userId: string) => ({
+  recipient: new mongoose.Types.ObjectId(userId),
+  isHidden: false,
+  isVerifiedPurchase: true
+});
 
 const EMPTY_DISTRIBUTION = { '5': 0, '4': 0, '3': 0, '2': 0, '1': 0 };
 
@@ -51,7 +101,7 @@ const STAR_KEY_BY_RATING: Record<number, string> = {
  */
 export const updateUserAverageRating = async (userId: string): Promise<void> => {
   const result = await Rating.aggregate([
-    { $match: { recipient: new mongoose.Types.ObjectId(userId), isHidden: false } },
+    { $match: countedRatingsOf(userId) },
     {
       $group: {
         _id: null,
@@ -113,7 +163,7 @@ export async function getUserRatingsWithStats(
   }
 
   const stats = await Rating.aggregate<Record<string, number>>([
-    { $match: { recipient: new mongoose.Types.ObjectId(userId), isHidden: false } },
+    { $match: countedRatingsOf(userId) },
     {
       $group: {
         _id: null,
@@ -196,15 +246,17 @@ export async function createUserRating({
     fail(400, 'Vous ne pouvez pas vous auto-évaluer');
   }
 
-  if (transactionId) {
-    const existingRating = await Rating.findOne({
-      reviewer: reviewerId,
-      transaction: transactionId
+  let paymentId: mongoose.Types.ObjectId;
+  try {
+    paymentId = await findRatablePayment({
+      reviewerId,
+      recipientId,
+      type: type as 'buyer' | 'seller',
+      transactionId: transactionId || undefined
     });
-
-    if (existingRating) {
-      fail(400, 'Vous avez déjà laissé une évaluation pour cette transaction');
-    }
+  } catch (error) {
+    cleanupRatingImages(images);
+    throw error;
   }
 
   const newRating = new Rating({
@@ -213,12 +265,20 @@ export async function createUserRating({
     rating,
     review,
     type,
-    transaction: transactionId,
-    isVerifiedPurchase: await isCompletedPurchaseBetween(transactionId, reviewerId, recipientId),
+    transaction: paymentId,
+    isVerifiedPurchase: true,
     images
   });
 
-  await newRating.save();
+  try {
+    await newRating.save();
+  } catch (error) {
+    // Index unique (reviewer, transaction) : deux envois simultanés du même avis.
+    if ((error as { code?: unknown }).code === DUPLICATE_KEY_ERROR) {
+      fail(409, ALREADY_RATED_MESSAGE);
+    }
+    throw error;
+  }
 
   await updateUserAverageRating(recipientId);
 

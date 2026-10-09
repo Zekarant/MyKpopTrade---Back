@@ -2,7 +2,7 @@ import { Router } from 'express';
 import * as profileController from './controllers/profileController';
 import * as ratingController from './controllers/ratingController';
 import * as verificationController from './controllers/verificationController';
-import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
+import { authenticateJWT, optionalAuthenticateJWT } from '../../commons/middlewares/authMiddleware';
 import { profilePictureUpload, ratingImageUpload, profileBannerUpload } from './middleware/fileUploaderMiddleware';
 
 const router = Router();
@@ -48,7 +48,8 @@ router.delete(
 );
 
 // Routes de preuves de transaction
-router.get('/proofs/:userId', verificationController.getUserProofs);
+// Public ; `includeAll` n'est honoré que pour l'auteur des preuves ou un admin.
+router.get('/proofs/:userId', optionalAuthenticateJWT, verificationController.getUserProofs);
 router.post('/proofs', authenticateJWT, verificationController.addTransactionProof);
 router.get('/verification-stats/:userId', verificationController.getUserVerificationStats);
 

@@ -7,16 +7,28 @@ import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 import { queryInt } from '../../../commons/utils/query';
 
 /**
+ * Les preuves en attente ou refusées ne regardent que leur auteur et les
+ * administrateurs (rôle relu en base, comme requireAdmin).
+ */
+async function canSeeUnverifiedProofs(viewerId: string | undefined, ownerId: string): Promise<boolean> {
+  if (!viewerId) return false;
+  if (viewerId === ownerId) return true;
+  const viewer = await User.findById(viewerId).select('role').lean<{ role?: string } | null>();
+  return viewer?.role === 'admin';
+}
+
+/**
  * Récupérer les preuves de transaction d'un utilisateur
  */
 export const getUserProofs = asyncHandler(async (req: Request, res: Response) => {
-  const { userId } = req.params;
+  const userId = req.params.userId as string;
   const page = queryInt(req.query.page) || 1;
   const limit = clampLimit(req.query.limit, 10, MAX_PAGE_SIZE);
-  
+  const includeAll = Boolean(req.query.includeAll) && await canSeeUnverifiedProofs(req.user?.id, userId);
+
   const filter: QueryFilter<ITransactionProof> = {
     user: userId,
-    status: req.query.includeAll ? { $in: ['pending', 'verified', 'rejected'] } : 'verified'
+    status: includeAll ? { $in: ['pending', 'verified', 'rejected'] } : 'verified'
   };
   
   const [proofs, count] = await Promise.all([
