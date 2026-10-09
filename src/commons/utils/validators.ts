@@ -1,10 +1,16 @@
+/** Longueur maximale d'une adresse email (RFC 5321). */
+const EMAIL_MAX_LENGTH = 254;
+
+const EMAIL_PATTERN = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
 /**
  * Valide un email
+ *
+ * La longueur est bornée avant la regex : son coût, quadratique sur le domaine,
+ * reste ainsi négligeable quelle que soit la taille du corps de requête.
  */
-export const validateEmail = (email: string): boolean => {
-  const re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-  return re.test(email);
-};
+export const validateEmail = (email: string): boolean =>
+  typeof email === 'string' && email.length <= EMAIL_MAX_LENGTH && EMAIL_PATTERN.test(email);
 
 /**
  * Normalise un numéro de téléphone au format E.164, le seul que Twilio accepte.

@@ -13,4 +13,12 @@ describe('userModel', () => {
 
     await expect(user.validate(['role'])).rejects.toMatchObject({ errors: { role: expect.anything() } });
   });
+
+  it('refuse sans délai un email conçu pour faire backtracker la regex', async () => {
+    const user = new User({ username: 'mina', email: `${'a'.repeat(40)}!@b.co`, password: 'Password1!' });
+
+    const startedAt = Date.now();
+    await expect(user.validate(['email'])).rejects.toMatchObject({ errors: { email: expect.anything() } });
+    expect(Date.now() - startedAt).toBeLessThan(100);
+  });
 });

@@ -1,4 +1,14 @@
-import { normalizePhoneNumber } from '../validators';
+import { normalizePhoneNumber, validateEmail } from '../validators';
+
+describe('validateEmail', () => {
+  it.each(['mina@test.com', 'jean.dupont+kpop@mail.example.fr'])('accepte %p', (email) => {
+    expect(validateEmail(email)).toBe(true);
+  });
+
+  it.each(['mina', 'mina@test', '@test.com', `${'a'.repeat(250)}@b.co`])('refuse %p', (email) => {
+    expect(validateEmail(email)).toBe(false);
+  });
+});
 
 describe('normalizePhoneNumber', () => {
   it.each([

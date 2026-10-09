@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import { validateEmail } from '../commons/utils/validators';
 
 export interface IUser extends Document {
   username: string;
@@ -193,7 +194,9 @@ const UserSchema: Schema = new Schema({
     type: String,
     required: [true, 'Veuillez fournir un email'],
     unique: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Veuillez fournir un email valide']
+    // L'ancienne regex, `^\w+([.-]?\w+)*@…`, backtrackait exponentiellement :
+    // une seule inscription gelait l'API.
+    validate: [validateEmail, 'Veuillez fournir un email valide']
   },
   password: {
     type: String,
