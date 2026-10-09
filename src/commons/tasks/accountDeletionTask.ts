@@ -16,5 +16,5 @@ export const startAccountDeletionTask = () => {
         error: error instanceof Error ? error.message : String(error)
       });
     }
-  }, { timezone: 'Europe/Paris' });
+  }, { timezone: 'Europe/Paris', noOverlap: true });
 };

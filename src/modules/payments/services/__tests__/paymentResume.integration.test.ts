@@ -1,15 +1,14 @@
-jest.mock('axios');
 jest.mock('../paypalClient', () => ({
   PayPalClient: {
     getAccessToken: jest.fn().mockResolvedValue('platform-token'),
     checkPaymentStatus: jest.fn().mockResolvedValue('CREATED')
   },
-  paypalApiBaseUrl: 'https://paypal.test',
+  paypalHttp: { get: jest.fn(), post: jest.fn() },
   partnerHeaders: () => ({}),
   extractDebugId: () => undefined
 }));
 
-import axios from 'axios';
+import { paypalHttp } from '../paypalClient';
 import { Types } from 'mongoose';
 import {
   startInMemoryMongo,
@@ -22,8 +21,8 @@ import Product from '../../../../models/productModel';
 import { PayPalPaymentService } from '../paypalPaymentService';
 import { PayPalPartnerService } from '../paypalPartnerService';
 
-const mockedPost = axios.post as jest.Mock;
-const mockedGet = axios.get as jest.Mock;
+const mockedPost = paypalHttp.post as jest.Mock;
+const mockedGet = paypalHttp.get as jest.Mock;
 const PICKUP = { shippingOptions: { worldwide: false, nationalOnly: false, localPickup: true } };
 
 describe('reprise d\'un paiement PayPal en attente (integration)', () => {

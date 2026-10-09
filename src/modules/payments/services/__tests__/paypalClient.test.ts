@@ -7,8 +7,36 @@ process.env.PAYPAL_WEBHOOK_ID = 'WH-TEST-1';
 import axios from 'axios';
 import { buildAuthAssertion, partnerHeaders, PayPalClient } from '../paypalClient';
 
-jest.mock('axios');
-const mockedAxios = jest.mocked(axios);
+// paypalClient crée son instance axios à l'import : on renvoie une instance simulée.
+jest.mock('axios', () => {
+  const instance = { get: jest.fn(), post: jest.fn() };
+  return { __esModule: true, default: { create: jest.fn(() => instance) } };
+});
+const createInstance = jest.mocked(axios.create);
+// Capturés avant tout jest.clearAllMocks().
+const [createOptions] = createInstance.mock.calls[0];
+const mockedHttp = createInstance.mock.results[0].value as { get: jest.Mock; post: jest.Mock };
+
+const TOKEN_PATH = '/v1/oauth2/token';
+
+/** Répond au token avec `tokenData`, et aux autres POST avec `otherResponse`. */
+function mockPost(tokenData: object, otherResponse?: () => Promise<unknown>) {
+  mockedHttp.post.mockImplementation(async (url: string) =>
+    url === TOKEN_PATH ? { data: tokenData } : otherResponse?.()
+  );
+}
+
+const tokenCalls = () => mockedHttp.post.mock.calls.filter(([url]) => url === TOKEN_PATH);
+const nonTokenCalls = () => mockedHttp.post.mock.calls.filter(([url]) => url !== TOKEN_PATH);
+
+describe('client HTTP PayPal', () => {
+  it('borne chaque appel par un délai, sur l\'URL de l\'environnement', () => {
+    expect(createOptions).toEqual({
+      baseURL: 'https://api-m.sandbox.paypal.com',
+      timeout: 10_000
+    });
+  });
+});
 
 function decodeSegment(segment: string) {
   return JSON.parse(Buffer.from(segment, 'base64url').toString('utf8'));
@@ -69,34 +97,28 @@ describe('PayPalClient.getAccessToken', () => {
   });
 
   it('réutilise le token en cache au lieu de le redemander', async () => {
-    mockedAxios.mockResolvedValue({
-      data: { access_token: 'cached-token', expires_in: 3600 }
-    });
+    mockPost({ access_token: 'cached-token', expires_in: 3600 });
 
     const first = await PayPalClient.getAccessToken();
     const second = await PayPalClient.getAccessToken();
 
     expect(first).toBe('cached-token');
     expect(second).toBe('cached-token');
-    expect(mockedAxios).toHaveBeenCalledTimes(1);
+    expect(tokenCalls()).toHaveLength(1);
   });
 
   it('redemande un token quand la marge d\'expiration est dépassée', async () => {
     // expires_in de 60s : sous la marge de 5 minutes, donc jamais mis en cache.
-    mockedAxios.mockResolvedValue({
-      data: { access_token: 'short-lived', expires_in: 60 }
-    });
+    mockPost({ access_token: 'short-lived', expires_in: 60 });
 
     await PayPalClient.getAccessToken();
     await PayPalClient.getAccessToken();
 
-    expect(mockedAxios).toHaveBeenCalledTimes(2);
+    expect(tokenCalls()).toHaveLength(2);
   });
 
   it('ne lance qu\'une requête pour des appels concurrents', async () => {
-    mockedAxios.mockResolvedValue({
-      data: { access_token: 'shared-token', expires_in: 3600 }
-    });
+    mockPost({ access_token: 'shared-token', expires_in: 3600 });
 
     const tokens = await Promise.all([
       PayPalClient.getAccessToken(),
@@ -105,7 +127,7 @@ describe('PayPalClient.getAccessToken', () => {
     ]);
 
     expect(tokens).toEqual(['shared-token', 'shared-token', 'shared-token']);
-    expect(mockedAxios).toHaveBeenCalledTimes(1);
+    expect(tokenCalls()).toHaveLength(1);
   });
 });
 
@@ -118,16 +140,15 @@ describe('PayPalClient.verifyWebhookSignature', () => {
     'paypal-transmission-time': '2026-07-31T20:00:00Z'
   };
 
+  const TOKEN = { access_token: 'token', expires_in: 3600 };
+
   beforeEach(() => {
     jest.clearAllMocks();
     PayPalClient.resetTokenCache();
-    mockedAxios.mockResolvedValue({
-      data: { access_token: 'token', expires_in: 3600 }
-    });
   });
 
   it('accepte un événement dont PayPal confirme la signature', async () => {
-    mockedAxios.post.mockResolvedValue({ data: { verification_status: 'SUCCESS' } });
+    mockPost(TOKEN, async () => ({ data: { verification_status: 'SUCCESS' } }));
 
     await expect(
       PayPalClient.verifyWebhookSignature(SIGNED_HEADERS, { event_type: 'PAYMENT.CAPTURE.COMPLETED' })
@@ -135,7 +156,7 @@ describe('PayPalClient.verifyWebhookSignature', () => {
   });
 
   it('rejette un événement dont la signature est invalide', async () => {
-    mockedAxios.post.mockResolvedValue({ data: { verification_status: 'FAILURE' } });
+    mockPost(TOKEN, async () => ({ data: { verification_status: 'FAILURE' } }));
 
     await expect(
       PayPalClient.verifyWebhookSignature(SIGNED_HEADERS, { event_type: 'PAYMENT.CAPTURE.COMPLETED' })
@@ -143,14 +164,16 @@ describe('PayPalClient.verifyWebhookSignature', () => {
   });
 
   it('rejette sans appeler PayPal quand les headers de signature manquent', async () => {
+    mockPost(TOKEN);
+
     await expect(
       PayPalClient.verifyWebhookSignature({}, { event_type: 'PAYMENT.CAPTURE.COMPLETED' })
     ).resolves.toBe(false);
-    expect(mockedAxios.post).not.toHaveBeenCalled();
+    expect(nonTokenCalls()).toHaveLength(0);
   });
 
   it('rejette quand PayPal est injoignable, plutôt que de laisser passer', async () => {
-    mockedAxios.post.mockRejectedValue(new Error('network down'));
+    mockPost(TOKEN, async () => { throw new Error('network down'); });
 
     await expect(
       PayPalClient.verifyWebhookSignature(SIGNED_HEADERS, { event_type: 'PAYMENT.CAPTURE.COMPLETED' })

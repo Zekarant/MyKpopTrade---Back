@@ -1,4 +1,3 @@
-jest.mock('axios');
 jest.mock('../../../notifications/services/notificationService', () => ({
   NotificationService: { createNotification: jest.fn().mockResolvedValue(undefined) }
 }));
@@ -7,12 +6,12 @@ jest.mock('../paypalClient', () => ({
     getAccessToken: jest.fn().mockResolvedValue('platform-token'),
     checkPaymentStatus: jest.fn().mockResolvedValue('COMPLETED')
   },
-  paypalApiBaseUrl: 'https://paypal.test',
+  paypalHttp: { get: jest.fn(), post: jest.fn() },
   partnerHeaders: () => ({}),
   extractDebugId: () => undefined
 }));
 
-import axios from 'axios';
+import { paypalHttp } from '../paypalClient';
 import {
   startInMemoryMongo,
   stopInMemoryMongo,
@@ -32,7 +31,7 @@ import { captureDirectPayment } from '../paymentService';
  * produit n'est encaissé qu'une fois, par le premier qui capture.
  */
 
-const mockedPost = axios.post as jest.Mock;
+const mockedPost = paypalHttp.post as jest.Mock;
 let orderCounter = 0;
 
 const LOCAL_PICKUP = { shippingMethod: 'localPickup' };

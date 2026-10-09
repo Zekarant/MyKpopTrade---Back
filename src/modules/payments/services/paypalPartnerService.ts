@@ -1,8 +1,7 @@
-import axios from 'axios';
 import { randomUUID } from 'crypto';
 import User, { IUser } from '../../../models/userModel';
 import {
-  paypalApiBaseUrl,
+  paypalHttp,
   PayPalClient,
   PayPalLink,
   partnerHeaders,
@@ -261,8 +260,8 @@ export class PayPalPartnerService {
     }
 
     try {
-      const response = await axios.post<{ links?: PayPalLink[] }>(
-        `${paypalApiBaseUrl}/v2/customer/partner-referrals`,
+      const response = await paypalHttp.post<{ links?: PayPalLink[] }>(
+        '/v2/customer/partner-referrals',
         body,
         { headers: partnerHeaders({ accessToken }) }
       );
@@ -309,8 +308,8 @@ export class PayPalPartnerService {
     const accessToken = await PayPalClient.getAccessToken();
 
     try {
-      const response = await axios.get<PayPalMerchantIntegration>(
-        `${paypalApiBaseUrl}/v1/customer/partners/${partnerId}/merchant-integrations/${merchantId}`,
+      const response = await paypalHttp.get<PayPalMerchantIntegration>(
+        `/v1/customer/partners/${partnerId}/merchant-integrations/${merchantId}`,
         { headers: partnerHeaders({ accessToken }) }
       );
 
@@ -387,64 +386,46 @@ export class PayPalPartnerService {
   }
 
   /**
-   * Enregistre le merchant ID renvoyé par PayPal au retour d'onboarding, puis
-   * vérifie le statut réel côté API.
+   * Vérifie auprès de PayPal le merchant ID reçu en fin d'onboarding, puis
+   * l'enregistre sur le vendeur.
    *
-   * Les query params du retour ne sont pas dignes de confiance (l'URL transite
-   * par le navigateur du vendeur) : seul l'appel « show seller status » fait foi.
-   * `expectedTrackingId` est passé par ce retour navigateur : si PayPal rattache
-   * le marchand à une autre referral, c'est le compte d'un tiers et on annule.
+   * Le merchant ID du retour navigateur (ou du webhook) n'est pas digne de
+   * confiance : seul « show seller status » fait foi. Rien n'est enregistré tant
+   * que PayPal n'a pas confirmé que ce marchand a été inscrit par une referral
+   * de CE vendeur (son `tracking_id`) — sinon un vendeur pourrait se rattacher
+   * le compte PayPal d'un tiers en forgeant l'URL de retour. Lève une erreur si
+   * la vérification échoue ou ne peut pas être faite ; le webhook
+   * MERCHANT.ONBOARDING.COMPLETED et un nouveau lien d'onboarding restent
+   * possibles pour réessayer.
    */
   static async completeOnboarding(
     sellerId: string,
     merchantIdInPayPal: string,
     expectedTrackingId?: string
-  ): Promise<SellerStatus | null> {
+  ): Promise<SellerStatus> {
     const seller = await User.findById(sellerId);
     if (!seller) {
       throw new Error('Vendeur non trouvé');
     }
-    const previousMerchantId = seller.paypalMerchantId;
-    const previousConnected = seller.paypalConnected;
 
-    // Le merchant ID est persisté AVANT d'interroger PayPal, et l'échec de
-    // l'interrogation n'est pas propagé. PayPal ne communique cet identifiant
-    // qu'une seule fois (retour d'onboarding + webhook) et ne permet pas de le
-    // retrouver ensuite : le perdre obligerait le vendeur à refaire tout son
-    // parcours. Le statut, lui, se rattrape à tout moment.
-    seller.paypalMerchantId = merchantIdInPayPal;
-    seller.paypalConnected = false;
-    await seller.save();
-
-    let status: SellerStatus | null;
-    try {
-      status = await PayPalPartnerService.fetchSellerStatus(merchantIdInPayPal);
-    } catch (error) {
-      logger.error('Merchant ID enregistré mais statut PayPal non vérifiable', {
-        sellerId: sellerId.substring(0, 5) + '...',
-        error: error instanceof Error ? error.message : String(error)
-      });
-      return null;
-    }
-
+    const status = await PayPalPartnerService.fetchSellerStatus(merchantIdInPayPal);
     if (!status) {
-      logger.warn('Retour d\'onboarding avec un merchant ID inconnu de PayPal', {
+      logger.warn('Fin d\'onboarding avec un merchant ID inconnu de PayPal', {
         sellerId: sellerId.substring(0, 5) + '...'
       });
-      return null;
+      throw new Error('Compte PayPal inconnu de PayPal : inscription non enregistrée');
     }
 
     // Un tracking_id vaut `${sellerId}-<aléa>` : on accepte toute referral de
     // CE vendeur (reconnexion du même compte PayPal via un nouveau lien), pas
-    // celle d'un autre vendeur.
+    // celle d'un autre vendeur. Sans tracking_id côté PayPal, on ne peut pas
+    // prouver ce rattachement : on refuse.
     const belongsToThisSeller = (id: string) =>
       id === expectedTrackingId || id.startsWith(`${sellerId}-`);
-    if (expectedTrackingId && status.trackingId && !belongsToThisSeller(status.trackingId)) {
-      seller.paypalMerchantId = previousMerchantId;
-      seller.paypalConnected = previousConnected;
-      await seller.save();
-      logger.warn('Retour d\'onboarding : merchant ID rattaché à une autre referral, ignoré', {
-        sellerId: sellerId.substring(0, 5) + '...'
+    if (!status.trackingId || !belongsToThisSeller(status.trackingId)) {
+      logger.warn('Fin d\'onboarding : merchant ID non rattaché à une referral de ce vendeur, ignoré', {
+        sellerId: sellerId.substring(0, 5) + '...',
+        trackingIdKnown: Boolean(status.trackingId)
       });
       throw new Error('Le compte PayPal ne correspond pas à cette inscription');
     }

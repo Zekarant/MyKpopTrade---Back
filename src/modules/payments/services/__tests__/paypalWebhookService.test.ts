@@ -1,20 +1,20 @@
 import { PayPalWebhookService } from '../paypalWebhookService';
 import Payment from '../../../../models/paymentModel';
 import Product from '../../../../models/productModel';
-import Conversation from '../../../../models/conversationModel';
 import { NotificationService } from '../../../notifications/services/notificationService';
+import { dispatchAdminAlert } from '../../../../commons/services/adminAlertService';
+import { completePayment } from '../paymentCompletion';
 
 jest.mock('../../../../models/paymentModel');
 jest.mock('../../../../models/productModel');
-jest.mock('../../../../models/conversationModel');
-jest.mock('../../../../models/messageModel');
 jest.mock('../../../../models/userModel');
 jest.mock('../../../notifications/services/notificationService');
 jest.mock('../../../../commons/services/adminAlertService');
+jest.mock('../paymentCompletion');
 
 const mockedPayment = Payment as jest.Mocked<typeof Payment>;
 
-function fakePayment(overrides: { status?: string; captureId?: string } = {}) {
+function fakePayment(overrides: { status?: string; captureId?: string; amount?: number } = {}) {
   return {
     _id: 'pay1',
     product: 'prod1',
@@ -48,8 +48,8 @@ function captureCompletedEvent() {
 beforeEach(() => {
   jest.clearAllMocks();
   (Product.findByIdAndUpdate as jest.Mock).mockResolvedValue(undefined);
-  (Conversation.findOne as jest.Mock).mockResolvedValue(null);
   (NotificationService.createNotification as jest.Mock).mockResolvedValue(undefined);
+  (completePayment as jest.Mock).mockResolvedValue('completed');
 });
 
 describe('PAYMENT.CAPTURE.COMPLETED', () => {
@@ -62,35 +62,42 @@ describe('PAYMENT.CAPTURE.COMPLETED', () => {
     expect(mockedPayment.findOne).toHaveBeenCalledWith({ paymentIntentId: ORDER_ID });
   });
 
-  it('enregistre le captureId — sans lui aucun remboursement n\'est possible', async () => {
+  it('finalise le paiement avec le captureId — sans lui aucun remboursement n\'est possible', async () => {
     const payment = fakePayment();
     (mockedPayment.findOne as jest.Mock).mockResolvedValue(payment);
 
     await PayPalWebhookService.handleWebhook(captureCompletedEvent());
 
-    expect(payment.captureId).toBe(CAPTURE_ID);
-    expect(payment.status).toBe('completed');
+    expect(completePayment).toHaveBeenCalledWith('pay1', CAPTURE_ID);
   });
 
-  it('enregistre le captureId même si le paiement est déjà completed', async () => {
-    // Cas réel : la capture synchrone a déjà basculé le statut, puis le webhook
-    // arrive. Sans ce rattrapage, le captureId reste vide définitivement.
-    const payment = fakePayment({ status: 'completed' });
+  it.each([
+    ['un montant différent', { value: '20.00', currency_code: 'EUR' }],
+    ['une autre devise', { value: '27.00', currency_code: 'USD' }],
+    ['aucun montant', undefined]
+  ])('ne finalise pas une capture portant %s, et alerte un admin', async (_label, amount) => {
+    const payment = fakePayment();
     (mockedPayment.findOne as jest.Mock).mockResolvedValue(payment);
+    const event = captureCompletedEvent();
 
-    await PayPalWebhookService.handleWebhook(captureCompletedEvent());
+    await PayPalWebhookService.handleWebhook({ ...event, resource: { ...event.resource, amount } });
 
-    expect(payment.captureId).toBe(CAPTURE_ID);
-    expect(payment.save).toHaveBeenCalled();
+    expect(completePayment).not.toHaveBeenCalled();
+    expect(dispatchAdminAlert).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'payment.capture_amount_mismatch', severity: 'critical' })
+    );
   });
 
-  it('ne réécrit pas un captureId déjà à jour', async () => {
-    const payment = fakePayment({ status: 'completed', captureId: CAPTURE_ID });
-    (mockedPayment.findOne as jest.Mock).mockResolvedValue(payment);
+  it('accepte un montant capturé égal à la commande malgré l\'écriture décimale', async () => {
+    (mockedPayment.findOne as jest.Mock).mockResolvedValue(fakePayment({ amount: 27.5 }));
+    const event = captureCompletedEvent();
 
-    await PayPalWebhookService.handleWebhook(captureCompletedEvent());
+    await PayPalWebhookService.handleWebhook({
+      ...event,
+      resource: { ...event.resource, amount: { value: '27.50', currency_code: 'EUR' } }
+    });
 
-    expect(payment.save).not.toHaveBeenCalled();
+    expect(completePayment).toHaveBeenCalled();
   });
 });
 

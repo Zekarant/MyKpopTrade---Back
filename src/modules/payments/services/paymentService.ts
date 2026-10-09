@@ -3,12 +3,12 @@ import { PayPalService } from './paypalService';
 import { PayPalRefundError } from './paypalRefundService';
 import { applyRefundToPayment, notifyRefund, remainingRefundable } from './refundLedger';
 import { SELLER_BLOCK_MESSAGES, SellerBlockReason } from './paypalPartnerService';
-import { SellerNotReadyError } from './paypalPaymentService';
+import { OrderNotApprovedError, SellerNotReadyError } from './paypalPaymentService';
+import { completePayment } from './paymentCompletion';
 import Payment, { IPayment } from '../../../models/paymentModel';
 import Product from '../../../models/productModel';
 import User, { IUser } from '../../../models/userModel';
 import { EncryptionService } from '../../../commons/utils/encryptionService';
-import { NotificationService } from '../../notifications/services/notificationService';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
@@ -29,7 +29,8 @@ const PAYPAL_STATUS = {
 const ERROR_CODES = {
   SELLER_UNAVAILABLE: 'SELLER_UNAVAILABLE',
   PAYMENT_ACCESS_DENIED: 'PAYMENT_ACCESS_DENIED',
-  REFUND_PERMISSION_DENIED: 'REFUND_PERMISSION_DENIED'
+  REFUND_PERMISSION_DENIED: 'REFUND_PERMISSION_DENIED',
+  ORDER_NOT_APPROVED: 'ORDER_NOT_APPROVED'
 } as const;
 
 const USER_ID_LOG_PREFIX_LENGTH = 5;
@@ -71,18 +72,6 @@ async function assertPaymentAccess<T>(
     'Vous n\'êtes pas autorisé à accéder à ce paiement',
     ERROR_CODES.PAYMENT_ACCESS_DENIED
   );
-}
-
-async function markProductAsSold(
-  productId: mongoose.Types.ObjectId,
-  buyerId: mongoose.Types.ObjectId
-): Promise<void> {
-  await Product.findByIdAndUpdate(productId, {
-    isAvailable: false,
-    isSold: true,
-    soldAt: new Date(),
-    soldTo: buyerId
-  });
 }
 
 export function decryptPaymentMetadata(
@@ -354,27 +343,17 @@ export async function captureDirectPayment(userId: string, orderId: string) {
         { $set: { isAvailable: true, isSold: false }, $unset: { soldAt: 1, soldTo: 1 } }
       );
     }
+    // L'acheteur n'a pas (encore) validé sur PayPal : le front le renvoie vers
+    // la page d'approbation de l'ordre.
+    if (error instanceof OrderNotApprovedError) {
+      const notApproved = new HttpError(400, error.message, ERROR_CODES.ORDER_NOT_APPROVED);
+      notApproved.details = { approvalUrl: payment.approvalUrl || null };
+      throw notApproved;
+    }
     throw error;
   }
 
-  payment.status = PAYMENT_STATUS.COMPLETED;
-  payment.completedAt = new Date();
-  payment.captureId = captureResult.captureId;
-  await payment.save();
-
-  await NotificationService.createNotification({
-    recipientId: payment.seller,
-    type: 'system',
-    title: 'Nouveau paiement reçu',
-    content: `Votre produit a été acheté pour ${payment.amount} ${payment.currency}.`,
-    link: `/account/sales/${payment._id}`,
-    data: {
-      paymentId: payment._id,
-      productId: payment.product,
-      amount: payment.amount,
-      currency: payment.currency
-    }
-  });
+  await completePayment(payment._id, captureResult.captureId);
 
   return {
     id: payment._id,
@@ -415,13 +394,7 @@ export async function resolveConfirmPayment(orderId: unknown): Promise<ConfirmPa
   }
 
   if (paymentStatus === PAYPAL_STATUS.COMPLETED) {
-    if (payment.status !== PAYMENT_STATUS.COMPLETED) {
-      payment.status = PAYMENT_STATUS.COMPLETED;
-      payment.completedAt = new Date();
-      await payment.save();
-
-      await markProductAsSold(payment.product, payment.buyer);
-    }
+    await completePayment(payment._id);
     return { kind: 'completed', paymentId: payment._id };
   }
 

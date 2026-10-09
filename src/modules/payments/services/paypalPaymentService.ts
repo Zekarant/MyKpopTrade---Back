@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { Types } from 'mongoose';
 import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
@@ -7,7 +6,7 @@ import {
   PayPalClient,
   PayPalLink,
   PayPalMoney,
-  paypalApiBaseUrl,
+  paypalHttp,
   partnerHeaders,
   extractDebugId,
   paypalErrorBody,
@@ -78,6 +77,17 @@ export class SellerNotReadyError extends Error {
     super(SELLER_BLOCK_MESSAGES[reason]);
     this.name = 'SellerNotReadyError';
     this.code = reason;
+  }
+}
+
+/**
+ * Erreur métier : l'acheteur n'a toujours pas approuvé l'ordre sur PayPal
+ * après les tentatives de capture. L'appelant le renvoie vers PayPal.
+ */
+export class OrderNotApprovedError extends Error {
+  constructor(readonly orderId: string) {
+    super('Le paiement n\'a pas encore été approuvé sur PayPal : l\'acheteur doit le valider.');
+    this.name = 'OrderNotApprovedError';
   }
 }
 
@@ -169,8 +179,8 @@ export class PayPalPaymentService {
         if (paymentStatus === 'CREATED' || paymentStatus === 'APPROVED') {
           const accessToken = await PayPalClient.getAccessToken();
 
-          const response = await axios.get<PayPalOrder>(
-            `${paypalApiBaseUrl}/v2/checkout/orders/${existingPayment.paymentIntentId}`,
+          const response = await paypalHttp.get<PayPalOrder>(
+            `/v2/checkout/orders/${existingPayment.paymentIntentId}`,
             { headers: partnerHeaders({ accessToken }) }
           );
 
@@ -267,8 +277,8 @@ export class PayPalPaymentService {
         };
       }
 
-      const response = await axios.post<PayPalOrder>(
-        `${paypalApiBaseUrl}/v2/checkout/orders`,
+      const response = await paypalHttp.post<PayPalOrder>(
+        '/v2/checkout/orders',
         {
           intent: 'CAPTURE',
           purchase_units: [purchaseUnit],
@@ -371,11 +381,11 @@ export class PayPalPaymentService {
     }
 
     const accessToken = await PayPalClient.getAccessToken();
-    const captureUrl = `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}/capture`;
-    const orderUrl = `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}`;
+    const captureUrl = `/v2/checkout/orders/${orderId}/capture`;
+    const orderUrl = `/v2/checkout/orders/${orderId}`;
 
     const fetchExistingCapture = async () => {
-      const orderDetails = await axios.get<PayPalOrder>(orderUrl, {
+      const orderDetails = await paypalHttp.get<PayPalOrder>(orderUrl, {
         headers: partnerHeaders({ accessToken })
       });
       const captureInfo = orderDetails.data.purchase_units[0]?.payments?.captures?.[0];
@@ -400,7 +410,7 @@ export class PayPalPaymentService {
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        const response = await axios.post<PayPalOrder>(captureUrl, undefined, {
+        const response = await paypalHttp.post<PayPalOrder>(captureUrl, undefined, {
           headers: partnerHeaders({
             accessToken,
             // Même clé d'idempotence sur toutes les tentatives : si PayPal a
@@ -445,6 +455,9 @@ export class PayPalPaymentService {
             error: paypalErrorMessage(err),
             debugId: extractDebugId(err)
           });
+          if (isRetryable) {
+            throw new OrderNotApprovedError(orderId);
+          }
           throw err;
         }
 

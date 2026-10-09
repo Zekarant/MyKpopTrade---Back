@@ -16,7 +16,6 @@ import {
   resolveConfirmPayment,
   fetchPaymentStatus,
   listUserPayments,
-  fetchPaymentDetails,
   processRefund
 } from '../services/paymentService';
 import {
@@ -47,10 +46,11 @@ function replyHttpError(
   error: HttpError,
   options: { withSuccess?: boolean } = {}
 ) {
-  const body: { success?: boolean; message?: string; code?: string } = {};
+  const body: Record<string, unknown> = {};
   if (options.withSuccess) body.success = false;
   body.message = error.message;
   if (error.code) body.code = error.code;
+  if (error.details) Object.assign(body, error.details);
   return res.status(error.statusCode).json(body);
 }
 
@@ -112,8 +112,8 @@ export const handleOnboardingReturn = asyncHandler(async (req: Request, res: Res
       return res.redirect(`${frontendSettings}?paypal_error=unknown_tracking_id`);
     }
 
-    // Le merchant ID est enregistré même si la vérification de statut échoue —
-    // la page de paramètres affichera l'état réel et proposera de rafraîchir.
+    // Rien n'est enregistré si PayPal ne confirme pas ce marchand : l'erreur
+    // renvoie le vendeur vers ses paramètres avec `paypal_error`.
     await PayPalService.completeOnboarding(
       seller._id.toString(),
       merchantIdInPayPal,
@@ -255,18 +255,6 @@ export const capturePayPalPayment = asyncHandler(async (req: Request, res: Respo
       orderId,
       userId: truncatedUserId(userId)
     });
-
-    // Si l'ordre n'est pas approuvé, renvoyer l'approvalUrl pour re-rediriger
-    const errorMsg = error instanceof Error ? error.message : '';
-    if (errorMsg.includes('non approuvé')) {
-      const Payment = (await import('../../../models/paymentModel')).default;
-      const payment = await Payment.findOne({ paymentIntentId: orderId }).select('approvalUrl');
-      return res.status(400).json({
-        message: 'Une erreur est survenue lors de la capture du paiement',
-        error: devErrorDetails(error),
-        approvalUrl: payment?.approvalUrl || null
-      });
-    }
 
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la capture du paiement',
@@ -603,41 +591,6 @@ export const fetchShipment = asyncHandler(async (req: Request, res: Response) =>
     return res.status(500).json({
       success: false,
       message: 'Une erreur est survenue lors de la récupération de l\'expédition'
-    });
-  }
-});
-
-/**
- * Récupère les détails d'un paiement spécifique
- * @route GET /api/payments/:paymentId
- * @access Private - Limité à l'acheteur, au vendeur et aux administrateurs
- */
-export const getPayment = asyncHandler(async (req: Request, res: Response) => {
-  const { paymentId } = req.params;
-  const userId = req.user!.id;
-
-  if (!userId) {
-    return res.status(401).json({
-      success: false,
-      message: 'Authentification requise'
-    });
-  }
-
-  try {
-    const payment = await fetchPaymentDetails(userId, String(paymentId));
-
-    return res.status(200).json({
-      success: true,
-      payment
-    });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error, { withSuccess: true });
-    }
-    GdprLogger.logPaymentError(error, userId, { action: 'get_payment_details', paymentId });
-    return res.status(500).json({
-      success: false,
-      message: 'Une erreur est survenue lors de la récupération du paiement'
     });
   }
 });

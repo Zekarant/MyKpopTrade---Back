@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import Payment, { IPayment } from '../../../models/paymentModel';
+import { forEachPaymentBatch } from './paymentBatches';
 
 /** Durée de conservation des données personnelles d'un paiement (politique de confidentialité). */
 const PERSONAL_DATA_RETENTION_YEARS = 3;
@@ -16,14 +17,32 @@ const CLOSED_PAYMENT_FILTER: mongoose.QueryFilter<IPayment> = {
  * Efface les données personnelles d'un paiement en gardant ce que la
  * comptabilité exige (montants, dates, statut, références PayPal).
  */
-function erasePersonalData(payment: IPayment): void {
-  payment.ipAddress = '0.0.0.0';
-  payment.userAgent = 'anonymized';
-  payment.shippingAddress = undefined;
-  for (const event of payment.shipment?.events ?? []) {
-    event.location = undefined;
+function erasePersonalDataOperation(payment: IPayment): mongoose.AnyBulkWriteOperation<IPayment> {
+  const $unset: Record<string, 1> = { shippingAddress: 1 };
+  // `$[]` échoue si le tableau n'existe pas : on ne le vise que s'il y a des événements.
+  if (payment.shipment?.events?.length) {
+    $unset['shipment.events.$[].location'] = 1;
   }
-  payment.anonymized = true;
+  return {
+    updateOne: {
+      filter: { _id: payment._id },
+      update: { $set: { ipAddress: '0.0.0.0', userAgent: 'anonymized', anonymized: true }, $unset }
+    }
+  };
+}
+
+/** Anonymise par lots, une écriture groupée par lot plutôt qu'un save() par paiement. */
+async function anonymizePayments(filter: mongoose.QueryFilter<IPayment>): Promise<number> {
+  let anonymized = 0;
+  await forEachPaymentBatch(
+    { ...filter, anonymized: { $ne: true } },
+    async (payments) => {
+      const result = await Payment.bulkWrite(payments.map(erasePersonalDataOperation), { ordered: false });
+      anonymized += result.modifiedCount;
+    },
+    { select: '_id shipment.events' }
+  );
+  return anonymized;
 }
 
 /** Anonymise les paiements terminés depuis plus de 3 ans (tâche planifiée). */
@@ -31,17 +50,10 @@ export async function anonymizeExpiredPayments(now = new Date()): Promise<number
   const cutoffDate = new Date(now);
   cutoffDate.setFullYear(cutoffDate.getFullYear() - PERSONAL_DATA_RETENTION_YEARS);
 
-  const payments = await Payment.find({
+  return anonymizePayments({
     status: { $in: ['completed', 'refunded', 'partially_refunded'] },
-    updatedAt: { $lt: cutoffDate },
-    anonymized: { $ne: true }
-  }).select('+ipAddress +userAgent');
-
-  for (const payment of payments) {
-    erasePersonalData(payment);
-    await payment.save();
-  }
-  return payments.length;
+    updatedAt: { $lt: cutoffDate }
+  });
 }
 
 /**
@@ -50,15 +62,5 @@ export async function anonymizeExpiredPayments(now = new Date()): Promise<number
  * anonymisée par la tâche planifiée une fois close.
  */
 export async function anonymizeBuyerPayments(buyerId: string): Promise<number> {
-  const payments = await Payment.find({
-    buyer: buyerId,
-    anonymized: { $ne: true },
-    ...CLOSED_PAYMENT_FILTER
-  }).select('+ipAddress +userAgent');
-
-  for (const payment of payments) {
-    erasePersonalData(payment);
-    await payment.save();
-  }
-  return payments.length;
+  return anonymizePayments({ buyer: buyerId, ...CLOSED_PAYMENT_FILTER });
 }

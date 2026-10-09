@@ -11,6 +11,7 @@ import {
 } from '../../../commons/services/emailService';
 import User, { IUser } from '../../../models/userModel';
 import { getTrackingProvider } from './tracking';
+import { forEachPaymentBatch } from './paymentBatches';
 import { TrackingEventStatus } from './tracking/types';
 
 const SHIPMENT_STATUS = {
@@ -382,25 +383,26 @@ export async function pollShipment(payment: IPayment): Promise<boolean> {
  * erreurs individuelles (un colis cassé ne stoppe pas le batch).
  */
 export async function pollPendingShipments(): Promise<{ checked: number; updated: number }> {
-  const pending = await Payment.find({
-    'shipment.status': SHIPMENT_STATUS.SHIPPED
+  let checked = 0;
+  let updated = 0;
+
+  await forEachPaymentBatch({ 'shipment.status': SHIPMENT_STATUS.SHIPPED }, async (pending) => {
+    for (const payment of pending) {
+      checked++;
+      try {
+        const wasDelivered = await pollShipment(payment);
+        if (wasDelivered) updated++;
+      } catch (error) {
+        logger.error('Erreur lors du polling shipment', {
+          paymentId: payment._id?.toString(),
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
   });
 
-  let updated = 0;
-  for (const payment of pending) {
-    try {
-      const wasDelivered = await pollShipment(payment);
-      if (wasDelivered) updated++;
-    } catch (error) {
-      logger.error('Erreur lors du polling shipment', {
-        paymentId: payment._id?.toString(),
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
-  }
-
-  logger.info('Polling shipments terminé', { checked: pending.length, updated });
-  return { checked: pending.length, updated };
+  logger.info('Polling shipments terminé', { checked, updated });
+  return { checked, updated };
 }
 
 /**
@@ -412,59 +414,62 @@ export async function pollPendingShipments(): Promise<{ checked: number; updated
 export async function autoConfirmStaleShipments(): Promise<{ confirmed: number }> {
   const threshold = new Date(Date.now() - AUTO_CONFIRM_DAYS * MS_PER_DAY);
 
-  const stale = await Payment.find({
+  let confirmed = 0;
+
+  await forEachPaymentBatch({
     'shipment.status': SHIPMENT_STATUS.SHIPPED,
     'shipment.shippedAt': { $lte: threshold }
-  });
+  }, async (stale) => {
+    const users = await loadUsersById(stale.flatMap((payment) => [payment.buyer, payment.seller]));
 
-  let confirmed = 0;
-  for (const payment of stale) {
-    try {
-      await applyDelivery(payment, 'system');
-      confirmed++;
+    for (const payment of stale) {
+      try {
+        await applyDelivery(payment, 'system');
+        confirmed++;
 
-      await Promise.all([
-        NotificationService.createNotification({
-          recipientId: payment.buyer,
-          type: 'order_status',
-          title: 'Livraison auto-confirmée',
-          content: `Sans confirmation après ${AUTO_CONFIRM_DAYS} jours, la livraison a été automatiquement validée. Contactez le support si le colis n'est pas arrivé.`,
-          link: `/account/purchases/${payment._id}`,
-          data: { paymentId: payment._id, autoConfirmed: true }
-        }),
-        NotificationService.createNotification({
-          recipientId: payment.seller,
-          type: 'order_status',
-          title: 'Livraison auto-confirmée',
-          content: `Le délai de ${AUTO_CONFIRM_DAYS} jours est dépassé : la livraison a été automatiquement confirmée.`,
-          link: `/account/sales/${payment._id}`,
-          data: { paymentId: payment._id, autoConfirmed: true }
-        })
-      ]);
-
-      await Promise.all([
-        safeSendEmail(payment.buyer, (user) =>
-          sendShipmentAutoConfirmedEmail(user, {
-            paymentId: payment._id.toString(),
-            role: 'buyer',
-            days: AUTO_CONFIRM_DAYS
+        await Promise.all([
+          NotificationService.createNotification({
+            recipientId: payment.buyer,
+            type: 'order_status',
+            title: 'Livraison auto-confirmée',
+            content: `Sans confirmation après ${AUTO_CONFIRM_DAYS} jours, la livraison a été automatiquement validée. Contactez le support si le colis n'est pas arrivé.`,
+            link: `/account/purchases/${payment._id}`,
+            data: { paymentId: payment._id, autoConfirmed: true }
+          }),
+          NotificationService.createNotification({
+            recipientId: payment.seller,
+            type: 'order_status',
+            title: 'Livraison auto-confirmée',
+            content: `Le délai de ${AUTO_CONFIRM_DAYS} jours est dépassé : la livraison a été automatiquement confirmée.`,
+            link: `/account/sales/${payment._id}`,
+            data: { paymentId: payment._id, autoConfirmed: true }
           })
-        ),
-        safeSendEmail(payment.seller, (user) =>
-          sendShipmentAutoConfirmedEmail(user, {
-            paymentId: payment._id.toString(),
-            role: 'seller',
-            days: AUTO_CONFIRM_DAYS
-          })
-        )
-      ]);
-    } catch (error) {
-      logger.error('Erreur lors de l\'auto-confirmation', {
-        paymentId: payment._id?.toString(),
-        error: error instanceof Error ? error.message : String(error)
-      });
+        ]);
+
+        await Promise.all([
+          safeSendEmailTo(users.get(payment.buyer.toString()), (user) =>
+            sendShipmentAutoConfirmedEmail(user, {
+              paymentId: payment._id.toString(),
+              role: 'buyer',
+              days: AUTO_CONFIRM_DAYS
+            })
+          ),
+          safeSendEmailTo(users.get(payment.seller.toString()), (user) =>
+            sendShipmentAutoConfirmedEmail(user, {
+              paymentId: payment._id.toString(),
+              role: 'seller',
+              days: AUTO_CONFIRM_DAYS
+            })
+          )
+        ]);
+      } catch (error) {
+        logger.error('Erreur lors de l\'auto-confirmation', {
+          paymentId: payment._id?.toString(),
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
     }
-  }
+  });
 
   logger.info('Auto-confirmation terminée', { confirmed });
   return { confirmed };
@@ -480,39 +485,42 @@ export async function sendStuckShipmentReminders(): Promise<{ sent: number }> {
   const reminderThreshold = new Date(now - REMINDER_DAYS * MS_PER_DAY);
   const cooldownThreshold = new Date(now - REMINDER_COOLDOWN_DAYS * MS_PER_DAY);
 
-  const candidates = await Payment.find({
+  let sent = 0;
+
+  await forEachPaymentBatch({
     'shipment.status': SHIPMENT_STATUS.SHIPPED,
     'shipment.shippedAt': { $lte: reminderThreshold },
     $or: [
       { 'shipment.lastReminderAt': { $exists: false } },
       { 'shipment.lastReminderAt': { $lte: cooldownThreshold } }
     ]
-  });
+  }, async (candidates) => {
+    const buyers = await loadUsersById(candidates.map((payment) => payment.buyer));
 
-  let sent = 0;
-  for (const payment of candidates) {
-    try {
-      await safeSendEmail(payment.buyer, (user) =>
-        sendShipmentReminderEmail(user, {
-          paymentId: payment._id.toString(),
-          carrier: payment.shipment!.carrier,
-          trackingNumber: payment.shipment!.trackingNumber,
-          trackingUrl: payment.shipment!.trackingUrl,
-          daysSinceShipped: Math.floor(
-            (now - new Date(payment.shipment!.shippedAt).getTime()) / MS_PER_DAY
-          )
-        })
-      );
-      payment.shipment!.lastReminderAt = new Date();
-      await payment.save();
-      sent++;
-    } catch (error) {
-      logger.error('Erreur lors de la relance shipment', {
-        paymentId: payment._id?.toString(),
-        error: error instanceof Error ? error.message : String(error)
-      });
+    for (const payment of candidates) {
+      try {
+        await safeSendEmailTo(buyers.get(payment.buyer.toString()), (user) =>
+          sendShipmentReminderEmail(user, {
+            paymentId: payment._id.toString(),
+            carrier: payment.shipment!.carrier,
+            trackingNumber: payment.shipment!.trackingNumber,
+            trackingUrl: payment.shipment!.trackingUrl,
+            daysSinceShipped: Math.floor(
+              (now - new Date(payment.shipment!.shippedAt).getTime()) / MS_PER_DAY
+            )
+          })
+        );
+        payment.shipment!.lastReminderAt = new Date();
+        await payment.save();
+        sent++;
+      } catch (error) {
+        logger.error('Erreur lors de la relance shipment', {
+          paymentId: payment._id?.toString(),
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
     }
-  }
+  });
 
   logger.info('Relances shipment envoyées', { sent });
   return { sent };
@@ -528,12 +536,33 @@ async function safeSendEmail(
 ): Promise<void> {
   try {
     const user = await User.findById(userId);
-    if (!user || !user.email) return;
-    await send(user);
+    await safeSendEmailTo(user ?? undefined, send);
   } catch (error) {
     logger.error('Erreur envoi email shipment', {
       userId: userId?.toString(),
       error: error instanceof Error ? error.message : String(error)
     });
   }
+}
+
+/** Variante de {@link safeSendEmail} pour un utilisateur déjà chargé (lots des tâches planifiées). */
+async function safeSendEmailTo(
+  user: IUser | undefined,
+  send: (user: IUser) => Promise<void>
+): Promise<void> {
+  if (!user?.email) return;
+  try {
+    await send(user);
+  } catch (error) {
+    logger.error('Erreur envoi email shipment', {
+      userId: user._id.toString(),
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+/** Charge en une requête les destinataires d'un lot, plutôt qu'un findById par paiement. */
+async function loadUsersById(userIds: mongoose.Types.ObjectId[]): Promise<Map<string, IUser>> {
+  const users = await User.find({ _id: { $in: userIds } });
+  return new Map(users.map((user) => [user._id.toString(), user]));
 }

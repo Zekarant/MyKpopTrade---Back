@@ -1,12 +1,12 @@
-import Payment from '../../../models/paymentModel';
+import Payment, { IPayment } from '../../../models/paymentModel';
 import Product from '../../../models/productModel';
-import Conversation from '../../../models/conversationModel';
-import Message from '../../../models/messageModel';
 import User from '../../../models/userModel';
 import { PayPalPartnerService } from './paypalPartnerService';
 import { applyRefundToPayment, notifyRefund } from './refundLedger';
+import { completePayment } from './paymentCompletion';
 import { NotificationService } from '../../notifications/services/notificationService';
 import logger from '../../../commons/utils/logger';
+import { toCents } from '../../../commons/utils/moneyMath';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { PayPalLink, PayPalMoney } from './paypalClient';
 
@@ -28,6 +28,49 @@ interface PayPalWebhookResource {
 export interface PayPalWebhookEvent {
   event_type: string;
   resource: PayPalWebhookResource;
+}
+
+/**
+ * La capture porte-t-elle exactement le montant et la devise de la commande ?
+ * Un écart (ordre modifié côté PayPal, rapprochement sur le mauvais paiement)
+ * ne doit jamais vendre le produit pour une somme qu'on n'a pas facturée.
+ */
+function isCapturedAmountExpected(
+  captured: PayPalMoney | undefined,
+  payment: Pick<IPayment, 'amount' | 'currency'>
+): boolean {
+  const capturedValue = Number.parseFloat(captured?.value ?? '');
+  return Number.isFinite(capturedValue) &&
+    captured?.currency_code === payment.currency &&
+    toCents(capturedValue) === toCents(payment.amount);
+}
+
+function alertCapturedAmountMismatch(
+  payment: Pick<IPayment, '_id' | 'amount' | 'currency'>,
+  captured: PayPalMoney | undefined,
+  orderId: string
+): void {
+  const capturedLabel = captured ? `${captured.value} ${captured.currency_code}` : 'absent';
+  logger.error('Webhook de capture ignoré : montant capturé différent du paiement', {
+    paymentId: payment._id,
+    orderId,
+    expected: `${payment.amount} ${payment.currency}`,
+    captured: capturedLabel
+  });
+
+  dispatchAdminAlert({
+    event: 'payment.capture_amount_mismatch',
+    severity: 'critical',
+    title: 'Montant capturé par PayPal différent de la commande',
+    summary: `PayPal a encaissé ${capturedLabel} au lieu de ${payment.amount} ${payment.currency} : le paiement n'a pas été finalisé, vérifiez la transaction.`,
+    adminTab: 'audit',
+    fields: [
+      { name: 'Attendu', value: `${payment.amount} ${payment.currency}`, inline: true },
+      { name: 'Capturé', value: capturedLabel, inline: true },
+      { name: 'Order PayPal', value: orderId, inline: true }
+    ],
+    data: { paymentId: payment._id, orderId }
+  });
 }
 
 /**
@@ -120,68 +163,12 @@ export class PayPalWebhookService {
         return;
       }
 
-      // Le captureId est enregistré même si le paiement est déjà « completed »
-      // (capture faite en synchrone par l'API puis webhook redélivré) : sans
-      // lui, le vendeur ne peut plus rembourser.
-      if (captureId && payment.captureId !== captureId) {
-        payment.captureId = captureId;
-        await payment.save();
+      if (!isCapturedAmountExpected(resource.amount, payment)) {
+        alertCapturedAmountMismatch(payment, resource.amount, orderId);
+        return;
       }
 
-      if (payment.status !== 'completed') {
-        payment.status = 'completed';
-        payment.completedAt = new Date();
-
-        await payment.save();
-
-        await Product.findByIdAndUpdate(payment.product, {
-          isAvailable: false,
-          isSold: true,
-          soldAt: new Date(),
-          soldTo: payment.buyer
-        });
-
-        await NotificationService.createNotification({
-          recipientId: payment.seller,
-          type: 'system',
-          title: 'Nouveau paiement reçu',
-          content: `Un acheteur a payé ${payment.amount} ${payment.currency} pour votre produit.`,
-          link: `/account/sales/${payment._id}`,
-          data: {
-            paymentId: payment._id,
-            productId: payment.product,
-            amount: payment.amount,
-            currency: payment.currency
-          }
-        });
-
-        const conversation = await Conversation.findOne({
-          productId: payment.product,
-          participants: { $all: [payment.buyer, payment.seller] },
-          isActive: true
-        });
-
-        if (conversation) {
-          await Message.create({
-            conversation: conversation._id,
-            sender: payment.seller,
-            content: 'Paiement validé ☑️ — nous vous laissons organiser l\'envoi du colis avec le vendeur.',
-            contentType: 'system_notification',
-            isSystemMessage: true,
-            readBy: []
-          });
-
-          await Conversation.updateOne(
-            { _id: conversation._id },
-            { lastMessageAt: new Date() }
-          );
-        } else {
-          logger.warn('Aucune conversation trouvée pour poster le message de paiement validé', {
-            paymentId: payment._id,
-            productId: payment.product
-          });
-        }
-      }
+      await completePayment(payment._id, captureId);
     } catch (error) {
       logger.error('Erreur lors du traitement de l\'événement de paiement complété', { error });
       throw error;
@@ -273,10 +260,11 @@ export class PayPalWebhookService {
 
     const status = await PayPalPartnerService.completeOnboarding(
       seller._id.toString(),
-      merchantId
+      merchantId,
+      trackingId
     );
 
-    if (status && PayPalPartnerService.isReady(status)) {
+    if (PayPalPartnerService.isReady(status)) {
       await NotificationService.createNotification({
         recipientId: seller._id,
         type: 'system',
