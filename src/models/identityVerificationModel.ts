@@ -56,5 +56,7 @@ const IIdentityVerificationSchema: Schema = new Schema({
 // simultanées passaient toutes les deux le contrôle d'unicité et créaient
 // chacune une alerte Discord distincte pour le même utilisateur.
 IIdentityVerificationSchema.index({ user: 1 }, { unique: true, partialFilterExpression: { status: 'pending' } });
+// Expiration des dossiers en attente (tâche de nettoyage) et file d'attente admin par statut.
+IIdentityVerificationSchema.index({ status: 1, expiresAt: 1 });
 
 export default (mongoose.models.IIdentityVerification as mongoose.Model<IIdentityVerification>) || mongoose.model<IIdentityVerification>('IIdentityVerification', IIdentityVerificationSchema);

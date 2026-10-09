@@ -83,6 +83,26 @@ describe('HTTP — signalements', () => {
     expect(res.body.pagination.limit).toBe(50);
   });
 
+  it('compte l\'historique du signaleur par statut dans le détail admin', async () => {
+    const admin = await createTestUser({ role: 'admin' });
+    const reporter = await createTestUser();
+    const [first, second, third] = await User.insertMany(
+      Array.from({ length: 3 }, (_, i) => ({ username: `cible_${i}`, email: `cible_${i}@test.com`, password: 'Password1!' }))
+    );
+    const base = { reporter: reporter._id, targetType: 'user', reason: 'spam' };
+    const [pending] = await Report.insertMany([
+      { ...base, targetId: first._id, status: 'pending' },
+      { ...base, targetId: second._id, status: 'resolved' },
+      { ...base, targetId: third._id, status: 'resolved' }
+    ]);
+
+    const res = await request(app).get(`/api/reports/${pending._id}`).set('Authorization', auth(admin));
+
+    expect(res.status).toBe(200);
+    expect(res.body.reporterHistory).toEqual({ total: 3, resolved: 2, rejected: 0, pending: 1 });
+    expect(res.body.targetHistory).toEqual({ totalReports: 1 });
+  });
+
   it('répond 404, pas 500, pour un identifiant de signalement invalide', async () => {
     const admin = await createTestUser({ role: 'admin' });
 

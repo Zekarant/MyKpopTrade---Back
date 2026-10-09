@@ -436,21 +436,29 @@ export const getReportDetail = asyncHandler(async (req: Request, res: Response) 
     return res.status(404).json({ message: 'Signalement non trouvé' });
   }
 
-  const [target, reporterReports, targetReports] = await Promise.all([
+  // `reporter` est peuplé : l'agrégation ne caste pas, il faut l'ObjectId d'origine.
+  const reporterId = report.populated('reporter') ?? report.reporter;
+
+  // Compter côté base : un signaleur prolifique ne doit pas faire charger
+  // tous ses signalements en mémoire pour afficher quatre compteurs.
+  const [target, reporterStatusCounts, targetReports] = await Promise.all([
     loadReportTarget(report.targetType, report.targetId),
-    Report.find({ reporter: report.reporter }).select('status'),
+    Report.aggregate<{ _id: IReport['status']; count: number }>([
+      { $match: { reporter: reporterId } },
+      { $group: { _id: '$status', count: { $sum: 1 } } }
+    ]),
     Report.countDocuments({ targetType: report.targetType, targetId: report.targetId })
   ]);
 
   const countByStatus = (status: string) =>
-    reporterReports.filter((r) => r.status === status).length;
+    reporterStatusCounts.find((bucket) => bucket._id === status)?.count ?? 0;
 
   return res.status(200).json({
     report,
     reasonLabel: REASON_LABELS[report.reason] || report.reason,
     target,
     reporterHistory: {
-      total: reporterReports.length,
+      total: reporterStatusCounts.reduce((sum, bucket) => sum + bucket.count, 0),
       resolved: countByStatus('resolved'),
       rejected: countByStatus('rejected'),
       pending: countByStatus('pending')

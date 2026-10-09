@@ -73,5 +73,9 @@ const ReportSchema: Schema = new Schema({
 
 // Empêcher les doublons de signalements par le même utilisateur
 ReportSchema.index({ reporter: 1, targetType: 1, targetId: 1 }, { unique: true });
+// File de modération admin : filtre par statut, tri par date.
+ReportSchema.index({ status: 1, createdAt: 1 });
+// Historique des signalements d'une cible (détail admin) ; sert aussi au filtre par type.
+ReportSchema.index({ targetType: 1, targetId: 1 });
 
 export default (mongoose.models.Report as mongoose.Model<IReport>) || mongoose.model<IReport>('Report', ReportSchema);

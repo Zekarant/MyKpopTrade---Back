@@ -186,14 +186,6 @@ export async function fetchAlbumsByGroup(groupId: string) {
   return { albums: albumsWithProducts, empty: false };
 }
 
-export async function fetchRecentAlbums(limit: number) {
-  return await Album.find({})
-    .sort({ releaseDate: -1 })
-    .limit(limit)
-    .populate('artistId', 'name profileImage')
-    .lean();
-}
-
 export async function searchAlbumsByQuery({
   query,
   limit
@@ -276,15 +268,4 @@ export async function deleteAlbumById(albumId: string) {
     artistName: album.artistName,
     spotifyId: album.spotifyId
   });
-}
-
-export async function fetchAlbumBySpotifyId(spotifyId: string) {
-  const album = await Album.findOne({ spotifyId })
-    .populate('artistId', 'name description profileImage');
-
-  if (!album) {
-    throw new HttpError(404, 'Album non trouvé');
-  }
-
-  return album;
 }

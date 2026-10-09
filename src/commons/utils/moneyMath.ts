@@ -31,10 +31,6 @@ export function formatForPayPal(amount: number): string {
   return (toCents(amount) / SCALE).toFixed(DECIMALS);
 }
 
-export function leq(a: number, b: number): boolean {
-  return toCents(a) <= toCents(b);
-}
-
 export function gt(a: number, b: number): boolean {
   return toCents(a) > toCents(b);
 }

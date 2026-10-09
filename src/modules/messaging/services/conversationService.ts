@@ -23,6 +23,21 @@ const CONVERSATION_TYPE = {
   NEGOTIATION: 'negotiation'
 } as const;
 
+/**
+ * Filtres Mongo par type de média, alignés sur la classification par
+ * extension de MessagingUtilsService.formatConversationMedia.
+ */
+const IMAGE_ATTACHMENT = /\.(jpe?g|png|gif|webp)$/i;
+const PDF_ATTACHMENT = /\.pdf$/i;
+const IMAGE_OR_PDF_ATTACHMENT = /\.(jpe?g|png|gif|webp|pdf)$/i;
+// Map et non objet littéral : `type` vient de la query string, une clé comme
+// « constructor » ne doit pas tomber sur le prototype.
+const MEDIA_TYPE_FILTERS = new Map<string, Record<string, unknown>>([
+  ['image', { attachments: IMAGE_ATTACHMENT }],
+  ['document', { attachments: PDF_ATTACHMENT }],
+  ['other', { attachments: { $not: IMAGE_OR_PDF_ATTACHMENT } }]
+]);
+
 const CONVERSATION_FILTER = {
   UNREAD: 'unread',
   ARCHIVED: 'archived',
@@ -429,31 +444,56 @@ export async function fetchConversationMedia({
 }) {
   await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
 
-  const mediaMessages = await Message.find({
-    conversation: conversationId,
-    attachments: { $exists: true, $ne: [] },
-    isDeleted: false
-  })
-    .select('attachments createdAt sender')
-    .populate('sender', 'username profilePicture')
-    .sort({ createdAt: -1 })
-    .skip((page - 1) * limit)
-    .limit(limit)
-    .lean();
-
-  let media = MessagingUtilsService.formatConversationMedia(mediaMessages);
-
-  if (type && type !== 'all') {
-    media = media.filter(item => item.type === type);
+  const typeFilter = type && type !== 'all' ? MEDIA_TYPE_FILTERS.get(type) : {};
+  // Type inconnu : aucun média ne peut correspondre (comportement historique).
+  if (!typeFilter) {
+    return { media: [], pagination: { total: 0, page, limit, pages: 0 } };
   }
+
+  // La pagination porte sur les pièces jointes, pas sur les messages : un
+  // message peut en contenir plusieurs, et le filtre par type doit s'appliquer
+  // AVANT le découpage en pages, sinon les pages sont incomplètes et le total
+  // ne reflète que la page courante.
+  const [result] = await Message.aggregate<{
+    items: { _id: mongoose.Types.ObjectId; attachment: string; createdAt: Date; sender: unknown }[];
+    total: { count: number }[];
+  }>([
+    {
+      $match: {
+        conversation: new mongoose.Types.ObjectId(conversationId),
+        attachments: { $exists: true, $ne: [] },
+        isDeleted: false
+      }
+    },
+    { $unwind: { path: '$attachments', includeArrayIndex: 'attachmentIndex' } },
+    { $match: typeFilter },
+    { $sort: { createdAt: -1, _id: -1, attachmentIndex: 1 } },
+    {
+      $facet: {
+        items: [
+          { $skip: (page - 1) * limit },
+          { $limit: limit },
+          { $project: { attachment: '$attachments', createdAt: 1, sender: 1 } }
+        ],
+        total: [{ $count: 'count' }]
+      }
+    }
+  ]);
+
+  await Message.populate(result.items, { path: 'sender', select: 'username profilePicture' });
+
+  const media = MessagingUtilsService.formatConversationMedia(
+    result.items.map(({ attachment, ...item }) => ({ ...item, attachments: [attachment] }))
+  );
+  const total = result.total[0]?.count ?? 0;
 
   return {
     media,
     pagination: {
-      total: media.length,
+      total,
       page,
       limit,
-      pages: Math.ceil(media.length / limit)
+      pages: Math.ceil(total / limit)
     }
   };
 }

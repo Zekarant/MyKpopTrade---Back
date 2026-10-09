@@ -7,11 +7,9 @@ import {
   listAlbums,
   fetchAlbumById,
   fetchAlbumsByGroup,
-  fetchRecentAlbums,
   searchAlbumsByQuery,
   updateAlbumById,
-  deleteAlbumById,
-  fetchAlbumBySpotifyId
+  deleteAlbumById
 } from '../services/albumsService';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 
@@ -115,28 +113,6 @@ export const getAlbumsByGroup = asyncHandler(async (req: Request, res: Response)
 });
 
 /**
- * Récupérer les albums les plus récents
- */
-export const getRecentAlbums = asyncHandler(async (req: Request, res: Response) => {
-  const limit = clampLimit(req.query.limit, 50, MAX_PAGE_SIZE);
-
-  try {
-    const albums = await fetchRecentAlbums(limit);
-    return res.status(200).json({
-      albums,
-      message: `${albums.length} albums les plus récents`
-    });
-  } catch (error) {
-    logger.error('Erreur lors de la récupération des albums récents', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la récupération des albums récents'
-    });
-  }
-});
-
-/**
  * Recherche d'albums par nom ou artiste
  */
 export const searchAlbums = asyncHandler(async (req: Request, res: Response) => {
@@ -207,29 +183,6 @@ export const deleteAlbum = asyncHandler(async (req: Request, res: Response) => {
     });
     return res.status(500).json({
       message: 'Une erreur est survenue lors de la suppression de l\'album'
-    });
-  }
-});
-
-/**
- * Récupérer un album par son Spotify ID
- */
-export const getAlbumBySpotifyId = asyncHandler(async (req: Request, res: Response) => {
-  const { spotifyId } = req.params;
-
-  try {
-    const album = await fetchAlbumBySpotifyId(String(spotifyId));
-    return res.status(200).json({ album });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la récupération de l\'album par Spotify ID', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      spotifyId
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la récupération de l\'album'
     });
   }
 });

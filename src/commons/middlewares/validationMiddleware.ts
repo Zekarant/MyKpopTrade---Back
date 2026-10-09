@@ -18,10 +18,6 @@ export const validateRefundRequest = (req: Request, res: Response, next: NextFun
       if (numAmount <= 0) {
         errors.push('Le montant du remboursement doit être positif');
       }
-      // Vérifier qu'il n'a pas trop de décimales
-      // if (numAmount.toFixed(2) !== String(numAmount)) {
-      //   errors.push('Le montant ne peut pas avoir plus de 2 décimales');
-      // }
     }
   }
   
