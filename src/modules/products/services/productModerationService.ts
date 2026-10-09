@@ -4,6 +4,7 @@ import logger from '../../../commons/utils/logger';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { isAiChatConfigured, aiChatJson } from '../../../commons/services/aiChatClient';
 import { NotificationService } from '../../notifications/services/notificationService';
+import { dispatchSavedSearchAlerts } from '../../savedSearches/alertService';
 import { findSuspectKeywords } from './suspectKeywords';
 import { buildModerationPrompt } from './productModerationPrompt';
 import { parseModerationResult } from './productModerationParser';
@@ -51,6 +52,13 @@ export const dispatchProductModeration = (productId: string): void => {
   });
 };
 
+/**
+ * Vrai si la modération IA va analyser cette annonce : son verdict peut la
+ * mettre en pause, les alertes « nouvelle annonce » doivent donc l'attendre.
+ */
+export const awaitsModerationVerdict = (product: Pick<IProduct, 'title' | 'description'>): boolean =>
+  isAiChatConfigured() && findSuspectKeywords(product.title, product.description).length > 0;
+
 const runModeration = async (productId: string): Promise<void> => {
   if (!mongoose.Types.ObjectId.isValid(productId)) return;
 
@@ -78,6 +86,8 @@ const runModeration = async (productId: string): Promise<void> => {
       error: error instanceof Error ? error.message : String(error)
     });
     alertAnalysisFailed(product, matchedKeywords);
+    // L'annonce reste publiée : les alertes différées partent maintenant.
+    dispatchSavedSearchAlerts(productId);
     return;
   }
 
@@ -92,6 +102,7 @@ const runModeration = async (productId: string): Promise<void> => {
       error: error instanceof Error ? error.message : String(error)
     });
     alertAnalysisFailed(product, matchedKeywords);
+    dispatchSavedSearchAlerts(productId);
     return;
   }
 
@@ -113,7 +124,11 @@ const runModeration = async (productId: string): Promise<void> => {
     model
   });
 
-  if (!result.suspect) return;
+  if (!result.suspect) {
+    // Verdict favorable : les alertes retenues à la création peuvent partir.
+    dispatchSavedSearchAlerts(productId);
+    return;
+  }
 
   notifySeller(fresh, result);
   alertAdmins(fresh, result);

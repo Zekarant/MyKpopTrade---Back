@@ -89,6 +89,14 @@ export async function fetchUserInventory({
   };
 }
 
+/** Raison pour laquelle un favori n'est plus achetable, `null` s'il l'est encore. */
+function favoriteUnavailableReason(
+  product: Pick<IProduct, 'isAvailable' | 'isSold'>
+): 'sold' | 'withdrawn' | null {
+  if (product.isSold) return 'sold';
+  return product.isAvailable ? null : 'withdrawn';
+}
+
 export async function fetchUserFavorites(userId: string, page: number, limit: number) {
   const user = await User.findById(userId, { favorites: 1 });
 
@@ -101,17 +109,23 @@ export async function fetchUserFavorites(userId: string, page: number, limit: nu
 
   const favoriteIds = user.favorites;
 
+  // Une annonce supprimée disparaît d'elle-même (plus de document). Celles
+  // vendues ou retirées restent listées, signalées, pour que le membre puisse
+  // les retirer de ses favoris au lieu d'ouvrir une fiche introuvable.
   const [products, total] = await Promise.all([
     Product.find({ _id: { $in: favoriteIds } })
+      // Données internes : analyse de modération et identité de l'acheteur.
+      .select('-moderationFlag -soldTo')
       .populate('seller', 'username profilePicture')
-      .sort('-createdAt')
+      .sort({ isAvailable: -1, createdAt: -1 })
       .skip((page - 1) * limit)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     Product.countDocuments({ _id: { $in: favoriteIds } })
   ]);
 
   return {
-    products,
+    products: products.map((product) => ({ ...product, unavailableReason: favoriteUnavailableReason(product) })),
     pagination: {
       page,
       limit,

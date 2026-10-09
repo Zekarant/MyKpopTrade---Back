@@ -7,6 +7,7 @@ import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { CSV_EXPORT_ROW_LIMIT, sendCsvDownload, wantsCsv } from '../../../commons/utils/csv';
 import { NotificationService } from '../../notifications/services/notificationService';
+import { dispatchSavedSearchAlerts } from '../../savedSearches/alertService';
 import logger from '../../../commons/utils/logger';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
@@ -206,10 +207,16 @@ export const reviewFlaggedProduct = asyncHandler(async (req: Request, res: Respo
   product.moderationFlag.reviewedBy = new mongoose.Types.ObjectId(adminId);
   product.moderationFlag.reviewedAt = new Date();
   product.moderationFlag.reviewDecision = approve ? 'approved' : 'rejected';
+  // Seule une annonce retenue par la modération devient visible ici : ses
+  // alertes de recherches sauvegardées avaient été différées jusqu'à la revue.
+  const isRepublished = approve && !product.isAvailable && !product.isSold;
   if (approve) {
     product.isAvailable = true;
   }
   await product.save();
+  if (isRepublished) {
+    dispatchSavedSearchAlerts(productId);
+  }
 
   await recordAuditLog({
     adminId,
