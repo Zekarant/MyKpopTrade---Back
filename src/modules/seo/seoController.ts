@@ -1,11 +1,9 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../commons/middlewares/errorMiddleware';
 import Product from '../../models/productModel';
-import KpopGroup from '../../models/kpopGroupModel';
 
 const FRONTEND_URL = (process.env.FRONTEND_URL || 'https://www.mykpoptrade.com').replace(/\/$/, '');
 const SITEMAP_PRODUCT_LIMIT = 5000;
-const SITEMAP_GROUP_LIMIT = 1000;
 
 /**
  * Échappe une valeur pour XML. Les URLs peuvent contenir des `&` (params)
@@ -46,8 +44,8 @@ ${urls}
  * Sitemap dynamique. On y inclut :
  *   - les pages publiques statiques
  *   - les produits encore disponibles (limite SITEMAP_PRODUCT_LIMIT)
- *   - les groupes K-Pop indexés
  *
+ * Pas de groupes K-Pop : le front n'a pas de page /groups/:id.
  * Renvoyé en cache 1h pour limiter la charge DB.
  */
 export const sitemapXml = asyncHandler(async (_req: Request, res: Response) => {
@@ -58,17 +56,11 @@ export const sitemapXml = asyncHandler(async (_req: Request, res: Response) => {
     { loc: `${FRONTEND_URL}/contact`, changefreq: 'monthly', priority: 0.4 }
   ];
 
-  const [products, groups] = await Promise.all([
-    Product.find({ isAvailable: true, isSold: { $ne: true } })
-      .sort('-updatedAt')
-      .limit(SITEMAP_PRODUCT_LIMIT)
-      .select('_id updatedAt')
-      .lean(),
-    KpopGroup.find({})
-      .limit(SITEMAP_GROUP_LIMIT)
-      .select('_id updatedAt')
-      .lean()
-  ]);
+  const products = await Product.find({ isAvailable: true, isSold: { $ne: true } })
+    .sort('-updatedAt')
+    .limit(SITEMAP_PRODUCT_LIMIT)
+    .select('_id updatedAt')
+    .lean();
 
   const productEntries: SitemapEntry[] = products.map((p) => ({
     loc: `${FRONTEND_URL}/products/${p._id}`,
@@ -77,14 +69,7 @@ export const sitemapXml = asyncHandler(async (_req: Request, res: Response) => {
     priority: 0.7
   }));
 
-  const groupEntries: SitemapEntry[] = groups.map((g) => ({
-    loc: `${FRONTEND_URL}/groups/${g._id}`,
-    lastmod: g.updatedAt,
-    changefreq: 'weekly',
-    priority: 0.6
-  }));
-
-  const xml = renderSitemap([...staticPages, ...productEntries, ...groupEntries]);
+  const xml = renderSitemap([...staticPages, ...productEntries]);
 
   res.set('Content-Type', 'application/xml; charset=utf-8');
   res.set('Cache-Control', 'public, max-age=3600');
@@ -93,15 +78,23 @@ export const sitemapXml = asyncHandler(async (_req: Request, res: Response) => {
 
 /**
  * robots.txt minimal : autorise le crawl public, bloque les routes privées
- * et expose le sitemap.
+ * (chemins réels du routeur front) et expose le sitemap. Les profils publics
+ * /adherents/profile/:id restent indexables.
  */
 export const robotsTxt = asyncHandler(async (_req: Request, res: Response) => {
   const body = `User-agent: *
 Allow: /
-Disallow: /account
-Disallow: /admin
-Disallow: /payments
-Disallow: /messages
+Disallow: /adherents/admin
+Disallow: /adherents/payments
+Disallow: /adherents/messages
+Disallow: /adherents/settings
+Disallow: /adherents/new
+Disallow: /adherents/modify
+Disallow: /adherents/review
+Disallow: /cart
+Disallow: /disputes
+Disallow: /negotiate
+Disallow: /payment/
 Disallow: /api/
 
 Sitemap: ${FRONTEND_URL}/sitemap.xml
