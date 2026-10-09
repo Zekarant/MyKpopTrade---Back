@@ -3,6 +3,7 @@ import { createApp } from '../../app';
 import { startInMemoryMongo, stopInMemoryMongo, clearAllCollections } from '../helpers/mongoMemory';
 import { createTestUser, createTestProduct } from '../helpers/fixtures';
 import KpopGroup from '../../models/kpopGroupModel';
+import KpopAlbum from '../../models/albumModel';
 
 /** Sitemap et robots.txt : n'annoncer aux moteurs que des pages qui existent côté front. */
 const app = createApp();
@@ -21,19 +22,34 @@ describe('HTTP — SEO', () => {
   });
 
   describe('GET /sitemap.xml', () => {
-    it('liste les annonces en vente, pas les annonces retirées ni les groupes (sans page front)', async () => {
+    it('liste les annonces en vente, pas les annonces retirées', async () => {
       const seller = await createTestUser();
       const listed = await createTestProduct(seller._id);
       const withdrawn = await createTestProduct(seller._id, { isAvailable: false });
-      const group = await KpopGroup.create({ name: 'BTS', isActive: true });
 
       const res = await request(app).get('/sitemap.xml');
 
       expect(res.status).toBe(200);
       expect(res.text).toContain(`/products/${listed._id}</loc>`);
       expect(res.text).not.toContain(String(withdrawn._id));
-      expect(res.text).not.toContain('/groups/');
-      expect(res.text).not.toContain(String(group._id));
+    });
+
+    it('liste les pages des groupes actifs et de leurs albums, pas celles des groupes désactivés', async () => {
+      const [active, inactive] = await KpopGroup.create([
+        { name: 'BTS', isActive: true },
+        { name: 'Groupe dissous', isActive: false }
+      ]);
+      const [album, hiddenAlbum] = await KpopAlbum.create([
+        { name: 'BE', artistId: active._id, artistName: active.name },
+        { name: 'Dernier album', artistId: inactive._id, artistName: inactive.name }
+      ]);
+
+      const res = await request(app).get('/sitemap.xml');
+
+      expect(res.text).toContain(`/groups/${active._id}</loc>`);
+      expect(res.text).toContain(`/albums/${album._id}</loc>`);
+      expect(res.text).not.toContain(String(inactive._id));
+      expect(res.text).not.toContain(String(hiddenAlbum._id));
     });
   });
 

@@ -208,7 +208,9 @@ export async function fetchPopularGroups(limit: number) {
 export async function fetchGroupWithStats(groupId: string) {
   assertValidGroupId(groupId);
 
-  const group = await KpopGroup.findById(groupId);
+  // Route publique (page /groups/:id) : la liste des abonnés, non bornée,
+  // exposerait l'identifiant de chaque membre qui suit le groupe.
+  const group = await KpopGroup.findById(groupId).select('-followers');
 
   if (!group) {
     throw new HttpError(404, 'Groupe non trouvé');

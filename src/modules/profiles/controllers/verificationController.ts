@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { QueryFilter } from 'mongoose';
+import { QueryFilter, isValidObjectId } from 'mongoose';
 import TransactionProof, { ITransactionProof } from '../../../models/transactionProofModel';
 import User from '../../../models/userModel';
 import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
@@ -92,7 +92,12 @@ export const addTransactionProof = asyncHandler(async (req: Request, res: Respon
  */
 export const getUserVerificationStats = asyncHandler(async (req: Request, res: Response) => {
   const { userId } = req.params;
-  
+
+  // Un id mal formé ferait lever un CastError (500) : c'est un utilisateur inconnu.
+  if (!isValidObjectId(userId)) {
+    return res.status(404).json({ message: 'Utilisateur non trouvé' });
+  }
+
   // Vérifier que l'utilisateur existe
   const user = await User.findById(userId, {
     username: 1,

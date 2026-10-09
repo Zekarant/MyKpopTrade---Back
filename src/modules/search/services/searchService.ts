@@ -5,6 +5,7 @@ import Album from '../../../models/albumModel';
 import SearchHistory from '../../../models/historicSearchModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
+import { buildCatalogClauses, parseCatalogCriteria } from '../../products/services/productCatalogService';
 
 export interface SearchFilters {
   query?: string;
@@ -21,6 +22,12 @@ export interface SearchFilters {
   era?: string;
   company?: string;
   currency?: string;
+  /** Métadonnées structurées (identifiants de groupe / album) : validées par `parseCatalogCriteria`. */
+  group?: unknown;
+  member?: unknown;
+  album?: unknown;
+  version?: unknown;
+  isOfficial?: unknown;
 }
 
 function buildProductFilters({
@@ -105,6 +112,10 @@ export async function runAdvancedSearch({
   const { query, groups, members, albums, priceRange, condition, type, albumType, era, company } = filters;
 
   const searchFilters = buildProductFilters({ filters, userId, includeOwnProducts });
+  const catalogCriteria = parseCatalogCriteria({ ...filters });
+  const catalogClauses = await buildCatalogClauses(catalogCriteria);
+  // `$and` plutôt que `$or` : la recherche texte occupe déjà le `$or` racine.
+  if (catalogClauses.length) searchFilters.$and = [...(searchFilters.$and ?? []), ...catalogClauses];
 
   const [products, total] = await Promise.all([
     Product.find(searchFilters)
@@ -140,7 +151,7 @@ export async function runAdvancedSearch({
     },
     searchMetadata: {
       query: query?.trim(),
-      appliedFilters: { groups, members, albums, priceRange, condition, type, albumType, era, company },
+      appliedFilters: { groups, members, albums, priceRange, condition, type, albumType, era, company, ...catalogCriteria },
       resultCount: total,
       sortBy,
       excludedOwnProducts: Boolean(userId) && !includeOwnProducts

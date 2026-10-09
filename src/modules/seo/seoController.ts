@@ -1,10 +1,16 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../commons/middlewares/errorMiddleware';
 import Product from '../../models/productModel';
+import KpopGroup from '../../models/kpopGroupModel';
+import KpopAlbum from '../../models/albumModel';
 import env from '../../config/env';
 
 const FRONTEND_URL = env.FRONTEND_URL.replace(/\/$/, '');
 const SITEMAP_PRODUCT_LIMIT = 5000;
+// Bornes des pages catalogue : le sitemap reste sous la limite de 50 000 URLs
+// d'un seul fichier, annonces comprises.
+const SITEMAP_GROUP_LIMIT = 2000;
+const SITEMAP_ALBUM_LIMIT = 5000;
 
 /**
  * Échappe une valeur pour XML. Les URLs peuvent contenir des `&` (params)
@@ -45,8 +51,9 @@ ${urls}
  * Sitemap dynamique. On y inclut :
  *   - les pages publiques statiques
  *   - les produits encore disponibles (limite SITEMAP_PRODUCT_LIMIT)
+ *   - les pages /groups/:id des groupes actifs et /albums/:id de leurs albums
+ *     (un groupe désactivé n'a plus de page à faire indexer)
  *
- * Pas de groupes K-Pop : le front n'a pas de page /groups/:id.
  * Renvoyé en cache 1h pour limiter la charge DB.
  */
 export const sitemapXml = asyncHandler(async (_req: Request, res: Response) => {
@@ -70,7 +77,33 @@ export const sitemapXml = asyncHandler(async (_req: Request, res: Response) => {
     priority: 0.7
   }));
 
-  const xml = renderSitemap([...staticPages, ...productEntries]);
+  const groups = await KpopGroup.find({ isActive: true })
+    .sort('-updatedAt')
+    .limit(SITEMAP_GROUP_LIMIT)
+    .select('_id updatedAt')
+    .lean();
+  const albums = await KpopAlbum.find({ artistId: { $in: groups.map((g) => g._id) } })
+    .sort('-updatedAt')
+    .limit(SITEMAP_ALBUM_LIMIT)
+    .select('_id updatedAt')
+    .lean();
+
+  const catalogEntries: SitemapEntry[] = [
+    ...groups.map((g): SitemapEntry => ({
+      loc: `${FRONTEND_URL}/groups/${g._id}`,
+      lastmod: g.updatedAt,
+      changefreq: 'weekly',
+      priority: 0.6
+    })),
+    ...albums.map((a): SitemapEntry => ({
+      loc: `${FRONTEND_URL}/albums/${a._id}`,
+      lastmod: a.updatedAt,
+      changefreq: 'weekly',
+      priority: 0.5
+    }))
+  ];
+
+  const xml = renderSitemap([...staticPages, ...productEntries, ...catalogEntries]);
 
   res.set('Content-Type', 'application/xml; charset=utf-8');
   res.set('Cache-Control', 'public, max-age=3600');

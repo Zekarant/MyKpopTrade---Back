@@ -212,4 +212,12 @@ describe('HTTP — profils', () => {
       expect(res.body.proofs).toHaveLength(3);
     });
   });
+
+  describe('GET /api/profiles/verification-stats/:userId', () => {
+    it('répond 404, et non 500, pour un identifiant mal formé', async () => {
+      const res = await request(app).get('/api/profiles/verification-stats/pas-un-id');
+
+      expect(res.status).toBe(404);
+    });
+  });
 });

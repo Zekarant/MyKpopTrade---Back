@@ -32,6 +32,11 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
     era,
     company,
     currency,
+    group,
+    member,
+    album,
+    version,
+    isOfficial,
     page = 1,
     limit = DEFAULT_SEARCH_LIMIT,
     sortBy = 'relevance',
@@ -49,7 +54,8 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
     const result = await runAdvancedSearch({
       filters: {
         query, groups, members, albums, priceRange,
-        condition, type, albumType, era, company, currency
+        condition, type, albumType, era, company, currency,
+        group, member, album, version, isOfficial
       },
       userId,
       includeOwnProducts,

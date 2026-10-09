@@ -11,7 +11,9 @@ import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 import { queryInt, queryString } from '../../../commons/utils/query';
 import { validateProductData, validateProductUpdate } from './productValidationService';
 import { notifyWishlistPriceDrop, notifyWishlistUnavailable } from './wishlistAlertService';
-import { dispatchProductModeration } from './productModerationService';
+import { dispatchProductModeration, awaitsModerationVerdict } from './productModerationService';
+import { dispatchSavedSearchAlerts } from '../../savedSearches/alertService';
+import { assertCatalogConsistency, buildCatalogClauses, parseCatalogCriteria } from './productCatalogService';
 
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = MAX_PAGE_SIZE;
@@ -33,8 +35,10 @@ const ALLOWED_LIST_SORTS = new Set([
 const ALLOWED_PRODUCT_UPDATES = [
   'title', 'description', 'price', 'currency', 'condition',
   'category', 'type', 'kpopGroup', 'kpopMember', 'albumName',
+  'group', 'member', 'album', 'version', 'era', 'pob', 'isOfficial',
   'isAvailable', 'shippingOptions', 'allowOffers'
 ];
+const CATALOG_REFERENCE_FIELDS = ['group', 'member', 'album'] as const;
 /** Paiements qui font d'un article une vente encaissée. */
 const PAID_SALE_STATUSES: IPayment['status'][] = ['completed', 'partially_refunded'];
 
@@ -102,19 +106,23 @@ function cleanupUploadedFiles(files?: Express.Multer.File[]) {
 }
 
 async function withKpopNames(products: IProduct[]): Promise<EnrichedProduct[]> {
+  // La référence structurée prime ; les anciennes annonces n'ont que le champ libre.
+  const groupKey = (product: IProduct) => product.group?.toString() ?? product.kpopGroup;
+  const albumKey = (product: IProduct) => product.album?.toString() ?? product.albumName;
   const [groups, albums] = await Promise.all([
-    loadKpopEntities(KpopGroup, products.map((product) => product.kpopGroup)),
-    loadKpopEntities(KpopAlbum, products.map((product) => product.albumName))
+    loadKpopEntities(KpopGroup, products.map(groupKey)),
+    loadKpopEntities(KpopAlbum, products.map(albumKey))
   ]);
 
   return products.map((product) => {
     const enriched: EnrichedProduct = product.toObject();
-    const group = groups.get(product.kpopGroup);
+    const group = groups.get(groupKey(product));
     if (group) {
       enriched.kpopGroupName = group.name;
       enriched.kpopGroupId = group._id.toString();
     }
-    const album = product.albumName ? albums.get(product.albumName) : undefined;
+    const albumIdentifier = albumKey(product);
+    const album = albumIdentifier ? albums.get(albumIdentifier) : undefined;
     if (album) {
       enriched.albumNameStr = album.name;
       enriched.albumId = album._id.toString();
@@ -220,6 +228,13 @@ export async function createProductForSeller({
     throw new HttpError(400, error);
   }
 
+  try {
+    await assertCatalogConsistency(value);
+  } catch (catalogError) {
+    cleanupUploadedFiles(uploadedFiles);
+    throw catalogError;
+  }
+
   const product = new Product({
     ...value,
     seller: sellerId,
@@ -237,6 +252,12 @@ export async function createProductForSeller({
   // Modération IA (mots-clés suspects -> analyse Mistral). Fire-and-forget :
   // ne retarde jamais la publication, l'annonce est déjà visible.
   dispatchProductModeration(product._id.toString());
+
+  // Alertes des recherches sauvegardées, après la réponse. Une annonce que la
+  // modération va analyser attend son verdict : c'est elle qui les déclenche.
+  if (!awaitsModerationVerdict(product)) {
+    dispatchSavedSearchAlerts(product._id.toString());
+  }
 
   return product;
 }
@@ -325,6 +346,9 @@ export async function listProducts(query: Record<string, unknown>) {
     filter.$text = { $search: search };
   }
 
+  const catalogClauses = await buildCatalogClauses(parseCatalogCriteria(query));
+  if (catalogClauses.length) filter.$and = [...(filter.$and ?? []), ...catalogClauses];
+
   const [products, total] = await Promise.all([
     Product.find(filter)
       .populate('seller', 'username profilePicture isIdentityVerified')
@@ -371,6 +395,16 @@ export async function updateProductForOwner({
   const { error, value: updates } = validateProductUpdate(allowedUpdates);
   if (error !== undefined) {
     throw new HttpError(400, error);
+  }
+
+  // Un champ absent de la mise à jour garde sa valeur : la cohérence se juge
+  // sur l'annonce telle qu'elle sera après écriture.
+  if (CATALOG_REFERENCE_FIELDS.some((field) => field in updates)) {
+    await assertCatalogConsistency({
+      group: 'group' in updates ? updates.group : product.group?.toString(),
+      member: 'member' in updates ? updates.member : product.member,
+      album: 'album' in updates ? updates.album : product.album?.toString()
+    });
   }
 
   // Une annonce mise en pause par la modération IA et pas encore validée par

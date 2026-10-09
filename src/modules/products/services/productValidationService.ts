@@ -29,6 +29,28 @@ const fromBooleanString = (value: unknown) => {
 const booleanField = (label: string) =>
   z.preprocess(fromBooleanString, z.boolean({ error: `${label} doit être un booléen` }));
 
+/**
+ * Champ facultatif laissé vide : le multipart l'envoie en "", ce qui vaut
+ * « non renseigné » (null), comme un null en JSON.
+ */
+const fromEmptyString = (value: unknown) =>
+  typeof value === 'string' && value.trim() === '' ? null : value;
+
+const OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
+
+/** Référence au catalogue (groupe, album) : son existence est vérifiée par le service. */
+const catalogRefField = (message: string) =>
+  z.preprocess(fromEmptyString, z.string({ error: message }).regex(OBJECT_ID_PATTERN, message).nullable()).optional();
+
+const optionalTextField = (label: string, maxLength: number) =>
+  z.preprocess(
+    fromEmptyString,
+    z.string({ error: `${label} doit être un texte` })
+      .trim()
+      .max(maxLength, `${label} ne peut pas dépasser ${maxLength} caractères`)
+      .nullable()
+  ).optional();
+
 const shippingCostField = z
   .preprocess(
     fromNumericString,
@@ -75,6 +97,20 @@ const productFields = {
   kpopMember: z.string({ error: 'Le membre doit être un texte' }).nullish(),
 
   albumName: z.string({ error: 'L\'album doit être un texte' }).nullish(),
+
+  group: catalogRefField('Identifiant de groupe invalide'),
+
+  member: optionalTextField('Le membre', 100),
+
+  album: catalogRefField('Identifiant d\'album invalide'),
+
+  version: optionalTextField('La version', 50),
+
+  era: optionalTextField('L\'ère', 100),
+
+  pob: optionalTextField('Le POB', 100),
+
+  isOfficial: booleanField('isOfficial').optional(),
 
   allowOffers: booleanField('allowOffers'),
 

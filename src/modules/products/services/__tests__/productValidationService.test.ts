@@ -64,6 +64,45 @@ describe('validateProductData', () => {
   });
 });
 
+describe('validateProductData — métadonnées photocard', () => {
+  const groupId = '507f1f77bcf86cd799439011';
+
+  it('accepte les métadonnées structurées envoyées en texte par le formulaire', () => {
+    const { value, error } = validateProductData(multipartProduct({
+      group: groupId,
+      member: ' Jungkook ',
+      album: '507f1f77bcf86cd799439012',
+      version: 'Ver. A',
+      era: 'Butter',
+      pob: 'Weverse Shop',
+      isOfficial: 'true'
+    }));
+
+    expect(error).toBeUndefined();
+    expect(value).toMatchObject({ group: groupId, member: 'Jungkook', version: 'Ver. A', isOfficial: true });
+  });
+
+  it('traite un champ laissé vide comme non renseigné', () => {
+    const { value, error } = validateProductData(multipartProduct({ group: '', album: '', version: '' }));
+
+    expect(error).toBeUndefined();
+    expect(value).toMatchObject({ group: null, album: null, version: null });
+  });
+
+  it('reste valide sans aucune métadonnée (anciens clients)', () => {
+    expect(validateProductData(multipartProduct()).error).toBeUndefined();
+  });
+
+  it.each([
+    ['group', 'BTS', 'Identifiant de groupe invalide'],
+    ['album', { $ne: null }, 'Identifiant d\'album invalide'],
+    ['version', 'x'.repeat(51), 'La version ne peut pas dépasser 50 caractères'],
+    ['isOfficial', 'peut-être', 'isOfficial doit être un booléen']
+  ])('refuse un %s invalide', (field, input, message) => {
+    expect(validateProductData(multipartProduct({ [field]: input })).error).toBe(message);
+  });
+});
+
 describe('validateProductUpdate', () => {
   it('accepte une mise à jour partielle sans y ajouter de valeur par défaut', () => {
     expect(validateProductUpdate({ isAvailable: true })).toEqual({ value: { isAvailable: true } });
