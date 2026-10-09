@@ -18,6 +18,7 @@ import addressRoutes from './modules/addresses/routes';
 import { errorHandler, notFoundHandler } from './commons/middlewares/errorMiddleware';
 import { stripMongoOperatorsFromBody } from './commons/middlewares/mongoOperatorMiddleware';
 import { securityHeaders } from './commons/middlewares/securityHeaders';
+import { requestIdMiddleware } from './commons/middlewares/requestIdMiddleware';
 import { initializePassport } from './config/passport';
 import logger, { logAPIRequest } from './commons/utils/logger';
 import { verificationRoutes } from './modules/verification';
@@ -39,6 +40,10 @@ import contactRoutes from './modules/contact/routes';
  */
 export function createApp(): express.Express {
   const app = express();
+
+  // En premier : tout log émis pendant la requête, y compris par les
+  // middlewares suivants, doit porter son identifiant de corrélation.
+  app.use(requestIdMiddleware);
 
   // req.ip doit refléter l'IP réelle du client : le rate limiting par IP en dépend.
   // 0 en local, 1 derrière un unique reverse proxy (nginx, Heroku, Render...).
@@ -147,6 +152,3 @@ export function createApp(): express.Express {
 
   return app;
 }
-
-// App par défaut pour les cas simples (compat ascendante avec import app from './app')
-export default createApp();

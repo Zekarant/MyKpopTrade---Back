@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import logger from '../utils/logger';
 import { asHttpError } from '../utils/httpErrorMapper';
+import env from '../../config/env';
+import { REQUEST_ID_HEADER } from './requestIdMiddleware';
 
 // Interface pour les erreurs avec des codes personnalisés
 export interface AppError extends Error {
@@ -37,14 +39,17 @@ export const errorHandler = (
   // qu'on ne divulgue pas en production.
   const isServerError = statusCode >= 500;
   const clientMessage =
-    isServerError && process.env.NODE_ENV === 'production'
+    isServerError && env.NODE_ENV === 'production'
       ? 'Une erreur interne est survenue. Veuillez réessayer plus tard.'
       : message;
 
   res.status(statusCode).json({
     error: {
       message: clientMessage,
-      code
+      code,
+      // Sur un bug serveur, l'identifiant permet au support de retrouver les
+      // logs exacts de la requête à partir de ce que l'utilisateur rapporte.
+      ...(isServerError && { requestId: res.get(REQUEST_ID_HEADER) })
     }
   });
 };

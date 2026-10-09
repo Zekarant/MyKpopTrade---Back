@@ -1,6 +1,7 @@
 import winston from 'winston';
 import { MESSAGE } from 'triple-beam';
 import logger from '../logger';
+import { runWithRequestId } from '../requestContext';
 
 /**
  * Ces tests verrouillent la sanitisation des logs.
@@ -155,6 +156,18 @@ describe('logger — sanitisation des données sensibles', () => {
 
     expect(line).not.toContain('203.0.113.42');
     expect(line).toContain('203.0.113.0');
+  });
+
+  it('ajoute l\'identifiant de la requête en cours à chaque ligne', () => {
+    const line = runWithRequestId('req-123', () => serialize('produit créé', {}));
+
+    expect(JSON.parse(line).requestId).toBe('req-123');
+  });
+
+  it('n\'ajoute pas d\'identifiant hors requête (tâche CRON, démarrage)', () => {
+    const line = serialize('tâche exécutée', {});
+
+    expect(JSON.parse(line)).not.toHaveProperty('requestId');
   });
 
   it('laisse intactes les données non sensibles', () => {
