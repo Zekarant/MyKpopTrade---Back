@@ -84,8 +84,14 @@ export const getProductById = asyncHandler(async (req: Request, res: Response) =
  * Récupérer la liste des produits avec filtres et pagination
  */
 export const getProducts = asyncHandler(async (req: Request, res: Response) => {
-  const result = await listProducts(req.query);
-  return res.status(200).json(result);
+  try {
+    const result = await listProducts(req.query);
+    return res.status(200).json(result);
+  } catch (error) {
+    const mapped = mapHttpError(res, error);
+    if (mapped) return mapped;
+    throw error;
+  }
 });
 
 /**

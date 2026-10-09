@@ -7,16 +7,28 @@ import Payment, { IPayment } from '../../../models/paymentModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import KpopAlbum from '../../../models/albumModel';
 import { HttpError } from '../../../commons/utils/httpError';
-import { clampLimit } from '../../../commons/utils/pagination';
+import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 import { queryInt, queryString } from '../../../commons/utils/query';
-import { validateProductData } from './productValidationService';
+import { validateProductData, validateProductUpdate } from './productValidationService';
 import { notifyWishlistPriceDrop, notifyWishlistUnavailable } from './wishlistAlertService';
 import { dispatchProductModeration } from './productModerationService';
 
 const DEFAULT_LIST_LIMIT = 20;
-const MAX_LIST_LIMIT = 500;
+const MAX_LIST_LIMIT = MAX_PAGE_SIZE;
 const DEFAULT_LIST_PAGE = 1;
 const DEFAULT_LIST_SORT = '-createdAt';
+
+/**
+ * Tris proposés sur le catalogue public. Un tri libre laissait trier sur
+ * n'importe quel champ, y compris internes (modération, acheteur), et sur des
+ * champs non indexés.
+ */
+const ALLOWED_LIST_SORTS = new Set([
+  'createdAt', '-createdAt',
+  'price', '-price',
+  'views', '-views',
+  'favorites', '-favorites'
+]);
 
 const ALLOWED_PRODUCT_UPDATES = [
   'title', 'description', 'price', 'currency', 'condition',
@@ -203,9 +215,9 @@ export async function createProductForSeller({
   }
 
   const { error, value } = validateProductData(productData);
-  if (error) {
+  if (error !== undefined) {
     cleanupUploadedFiles(uploadedFiles);
-    throw new HttpError(400, error.details[0].message);
+    throw new HttpError(400, error);
   }
 
   const product = new Product({
@@ -279,6 +291,9 @@ export async function listProducts(query: Record<string, unknown>) {
   const page = queryInt(query.page) || DEFAULT_LIST_PAGE;
   const limit = clampLimit(query.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
   const sort = queryString(query.sort) || DEFAULT_LIST_SORT;
+  if (!ALLOWED_LIST_SORTS.has(sort)) {
+    throw new HttpError(400, `Tri non supporté. Valeurs acceptées : ${[...ALLOWED_LIST_SORTS].join(', ')}`);
+  }
 
   const filter: mongoose.QueryFilter<IProduct> = { isAvailable: true };
 
@@ -344,11 +359,18 @@ export async function updateProductForOwner({
   const product = await findProductOr404(productId);
   assertOwnership(product, userId, 'Vous n\'êtes pas autorisé à modifier ce produit');
 
-  const updates: Record<string, unknown> = {};
+  const allowedUpdates: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
     if (ALLOWED_PRODUCT_UPDATES.includes(key)) {
-      updates[key] = value;
+      allowedUpdates[key] = value;
     }
+  }
+
+  // Mêmes règles qu'à la création : sinon un PUT contournait la validation
+  // (titre vide, prix négatif, état inconnu…).
+  const { error, value: updates } = validateProductUpdate(allowedUpdates);
+  if (error !== undefined) {
+    throw new HttpError(400, error);
   }
 
   // Une annonce mise en pause par la modération IA et pas encore validée par
@@ -444,8 +466,16 @@ export async function markAsSold({
   const product = await findProductOr404(productId);
   assertOwnership(product, userId, 'Vous n\'êtes pas autorisé à modifier ce produit');
 
-  if (buyerId && !mongoose.Types.ObjectId.isValid(buyerId)) {
+  // Le front transmet l'identifiant du vendeur lui-même quand il ne connaît pas
+  // l'acheteur : la vente est alors enregistrée sans acheteur.
+  const declaredBuyerId = buyerId && buyerId !== userId ? buyerId : undefined;
+  // Le corps JSON n'est pas typé : un tableau ou un objet ne passe pas.
+  if (declaredBuyerId && (typeof declaredBuyerId !== 'string' || !mongoose.Types.ObjectId.isValid(declaredBuyerId))) {
     throw new HttpError(400, 'ID d\'acheteur invalide');
+  }
+  // Un identifiant fantôme fausserait `soldTo` (avis, litiges) sans compter d'achat à personne.
+  if (declaredBuyerId && !(await User.exists({ _id: declaredBuyerId, accountStatus: { $ne: 'deleted' } }))) {
+    throw new HttpError(400, 'Acheteur introuvable');
   }
   // Sinon chaque clic compterait une vente de plus dans les statistiques.
   if (product.isSold) {
@@ -458,11 +488,10 @@ export async function markAsSold({
   product.isSold = true;
   product.soldAt = new Date();
 
-  // Le front transmet parfois l'identifiant du vendeur : un vendeur n'est
-  // jamais son propre acheteur, ses achats ne doivent pas en être gonflés.
-  if (buyerId && buyerId !== userId) {
-    product.soldTo = new mongoose.Types.ObjectId(buyerId);
-    await User.findByIdAndUpdate(buyerId, {
+  // Un vendeur n'est jamais son propre acheteur : ses achats ne doivent pas en être gonflés.
+  if (declaredBuyerId) {
+    product.soldTo = new mongoose.Types.ObjectId(declaredBuyerId);
+    await User.findByIdAndUpdate(declaredBuyerId, {
       $inc: { 'statistics.totalPurchases': 1 }
     });
   }

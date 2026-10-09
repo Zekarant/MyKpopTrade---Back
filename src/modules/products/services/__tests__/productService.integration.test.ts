@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import {
   startInMemoryMongo,
   stopInMemoryMongo,
@@ -178,6 +179,62 @@ describe('productService (integration)', () => {
       expect(updated?.isPayWhatYouWant).toBe(false);
       expect(updated?.pwywMinPrice).toBeUndefined();
     });
+
+    it.each([
+      ['un titre trop court', { title: 'ab' }],
+      ['un prix négatif', { price: -5 }],
+      ['un état inconnu', { condition: 'cassé' }],
+      ['une devise non supportée', { currency: 'BTC' }],
+      ['des frais de port négatifs', { shippingOptions: { nationalOnly: true, nationalCost: -1 } }],
+      ['un titre qui n\'est pas du texte', { title: { $gt: '' } }]
+    ])('refuse (400) %s, comme à la création', async (_label, body) => {
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id);
+
+      await expect(updateProductForOwner({
+        productId: product._id.toString(),
+        userId: seller._id.toString(),
+        body
+      })).rejects.toMatchObject({ statusCode: 400 });
+      expect((await Product.findById(product._id))?.title).toBe(product.title);
+    });
+
+    it('n\'ajoute aucune valeur par défaut aux champs absents d\'une mise à jour partielle', async () => {
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id, { currency: 'USD', allowOffers: true });
+
+      const updated = await updateProductForOwner({
+        productId: product._id.toString(),
+        userId: seller._id.toString(),
+        body: { price: '15' }
+      });
+
+      expect(updated?.price).toBe(15);
+      expect(updated?.currency).toBe('USD');
+      expect(updated?.allowOffers).toBe(true);
+    });
+  });
+
+  describe('listProducts', () => {
+    it('plafonne la taille de page à 100', async () => {
+      const result = await listProducts({ limit: '500' });
+
+      expect(result.pagination.limit).toBe(100);
+    });
+
+    it('accepte un tri de la liste autorisée', async () => {
+      const seller = await createTestUser();
+      await createTestProduct(seller._id, { price: 30 });
+      await createTestProduct(seller._id, { price: 10 });
+
+      const result = await listProducts({ sort: 'price' });
+
+      expect(result.products.map((product) => product.price)).toEqual([10, 30]);
+    });
+
+    it('refuse (400) un tri hors liste', async () => {
+      await expect(listProducts({ sort: 'moderationFlag.suspect' })).rejects.toMatchObject({ statusCode: 400 });
+    });
   });
 
   describe('markAsSold', () => {
@@ -224,6 +281,29 @@ describe('productService (integration)', () => {
 
       await expect(markAsSold(sale)).rejects.toMatchObject({ statusCode: 409 });
       expect((await User.findById(seller._id))?.statistics?.totalSales).toBe(1);
+    });
+
+    it('refuse (400) un acheteur qui n\'existe pas, sans marquer l\'article vendu', async () => {
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id);
+
+      await expect(markAsSold({
+        productId: product._id.toString(),
+        userId: seller._id.toString(),
+        buyerId: new Types.ObjectId().toString()
+      })).rejects.toMatchObject({ statusCode: 400 });
+      expect((await Product.findById(product._id))?.isSold).toBeFalsy();
+    });
+
+    it('refuse (400) un acheteur qui n\'est pas une chaîne', async () => {
+      const seller = await createTestUser();
+      const product = await createTestProduct(seller._id);
+
+      await expect(markAsSold({
+        productId: product._id.toString(),
+        userId: seller._id.toString(),
+        buyerId: [seller._id.toString()] as unknown as string
+      })).rejects.toMatchObject({ statusCode: 400 });
     });
   });
 
