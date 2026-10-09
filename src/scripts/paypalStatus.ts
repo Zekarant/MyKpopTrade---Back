@@ -11,7 +11,7 @@ import { paymentConfig } from '../config/paymentConfig';
  * Diagnostic PayPal : affiche l'état d'onboarding de chaque vendeur et
  * interroge PayPal en direct pour dire ce qui bloque.
  *
- * Usage: npx ts-node src/scripts/paypalStatus.ts [email]
+ * Usage: npx tsx src/scripts/paypalStatus.ts [email]
  */
 
 const YES = '\x1b[32m✓\x1b[0m';

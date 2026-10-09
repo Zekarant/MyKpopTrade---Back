@@ -45,7 +45,7 @@ type SeededProduct = Awaited<ReturnType<typeof seedProducts>>[number];
  * d'auteur). Tout le reste (albums, merch, avatars, bannières, groupes, posts)
  * est généré localement avec `canvas`.
  *
- * Usage : npx ts-node src/scripts/seedTestData.ts --yes
+ * Usage : npx tsx src/scripts/seedTestData.ts --yes
  */
 
 // TLD volontairement en 3 lettres : le validateur e-mail du modèle User
@@ -944,7 +944,7 @@ async function seedConversations(usersByName: Record<string, UserDoc>, products:
 async function main() {
   if (!process.argv.includes('--yes')) {
     console.error('Ajoutez --yes pour confirmer l\'insertion des données de test.');
-    console.error('Usage : npx ts-node src/scripts/seedTestData.ts --yes');
+    console.error('Usage : npx tsx src/scripts/seedTestData.ts --yes');
     process.exit(1);
   }
   if (process.env.NODE_ENV === 'production') {

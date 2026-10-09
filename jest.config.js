@@ -12,6 +12,16 @@ module.exports = {
   testTimeout: 15000,
   testPathIgnorePatterns: ['/node_modules/', '/dist/', '/\\.claude/'],
   modulePathIgnorePatterns: ['/\\.claude/'],
+  // Couverture mesurée sur tout le code applicatif, y compris les fichiers
+  // qu'aucun test n'importe (sinon ils n'apparaissent pas et le chiffre ment).
+  collectCoverageFrom: [
+    'src/**/*.ts',
+    '!src/**/__tests__/**',
+    '!src/tests/**',
+    '!src/scripts/**',
+    '!src/types/**',
+    '!src/**/*.d.ts'
+  ],
   moduleNameMapper: {
     '^isomorphic-dompurify$': '<rootDir>/src/tests/__mocks__/isomorphic-dompurify.ts'
   }

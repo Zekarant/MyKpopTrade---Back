@@ -48,7 +48,7 @@ Variables obligatoires en production, sans valeur par défaut acceptée :
 
 ```sh
 docker-compose up -d   # MongoDB
-npm run dev            # développement (ts-node)
+npm run dev            # développement (tsx watch, rechargement à chaud)
 ```
 
 En production :

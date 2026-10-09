@@ -1,18 +1,21 @@
 {
   "name": "mykpoptrade---back",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
+    "dev": "tsx watch src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "paypal:status": "ts-node src/scripts/paypalStatus.ts",
-    "fix:post-images": "ts-node src/scripts/fixPostImagePaths.ts",
-    "migrate:manual-sales": "ts-node src/scripts/backfillManualSales.ts",
-    "migrate:legacy-fields": "ts-node src/scripts/dropLegacyFields.ts",
-    "seed:test": "ts-node src/scripts/seedTestData.ts --yes",
+    "paypal:status": "tsx src/scripts/paypalStatus.ts",
+    "fix:post-images": "tsx src/scripts/fixPostImagePaths.ts",
+    "migrate:manual-sales": "tsx src/scripts/backfillManualSales.ts",
+    "migrate:legacy-fields": "tsx src/scripts/dropLegacyFields.ts",
+    "seed:test": "tsx src/scripts/seedTestData.ts --yes",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
@@ -38,7 +41,6 @@
     "dotenv": "^18.0.4",
     "express": "^5.2.1",
     "isomorphic-dompurify": "^4.4.0",
-    "joi": "^18.2.9",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^9.10.3",
     "multer": "^2.4.0",
@@ -84,7 +86,7 @@
     "mongodb-memory-server": "^11.0.1",
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.9",
-    "ts-node": "^10.9.2",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.0"
   }

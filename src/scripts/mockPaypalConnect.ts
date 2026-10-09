@@ -15,7 +15,7 @@ dotenv.config({ path: '.env.local', quiet: true });
  * le premier paiement déclenchera un vrai « show seller status », donc ce
  * raccourci ne peut pas faire passer pour encaissable un compte qui ne l'est pas.
  *
- * Usage: npx ts-node src/scripts/mockPaypalConnect.ts <email_vendeur> <merchant_id>
+ * Usage: npx tsx src/scripts/mockPaypalConnect.ts <email_vendeur> <merchant_id>
  */
 async function mockPaypalConnect(email: string, merchantId: string) {
   try {
@@ -53,7 +53,7 @@ async function mockPaypalConnect(email: string, merchantId: string) {
 }
 
 if (process.argv.length < 4) {
-  console.log('Usage: npx ts-node src/scripts/mockPaypalConnect.ts <email_vendeur> <merchant_id>');
+  console.log('Usage: npx tsx src/scripts/mockPaypalConnect.ts <email_vendeur> <merchant_id>');
   process.exit(1);
 }
 
