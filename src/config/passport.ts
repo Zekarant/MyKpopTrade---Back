@@ -16,6 +16,7 @@ import User, { IUser } from '../models/userModel';
 import crypto from 'crypto';
 import env from './env';
 import { CookieStateStore } from './oauthStateStore';
+import { invalidateAllUserRefreshTokens } from '../commons/services/tokenService';
 import {
   generateUniqueUsername,
   splitDisplayName
@@ -51,6 +52,24 @@ function fillMissingIdentity(
   if (!hasCustomPicture && identity.picture) {
     user.profilePicture = identity.picture;
   }
+}
+
+/**
+ * Prépare un compte existant, trouvé par email, à recevoir un fournisseur OAuth.
+ *
+ * Un compte dont l'email n'a jamais été vérifié a pu être créé par un tiers qui
+ * a déclaré l'adresse de la victime sans la posséder. Le fournisseur prouve
+ * maintenant que l'adresse appartient à quelqu'un d'autre : le mot de passe, la
+ * 2FA et les sessions posés par ce tiers sont révoqués, sinon il garderait
+ * l'accès au compte que le vrai propriétaire vient de vérifier.
+ */
+async function claimAccountByVerifiedEmail(user: IUser): Promise<void> {
+  if (!user.isEmailVerified) {
+    user.password = generateUnusablePassword();
+    user.twoFactor = { enabled: false };
+    await invalidateAllUserRefreshTokens(String(user._id));
+  }
+  user.isEmailVerified = true;
 }
 
 /**
@@ -161,7 +180,7 @@ export const initializePassport = (): void => {
                     email,
                     name: profile.displayName
                   };
-                  user.isEmailVerified = true;
+                  await claimAccountByVerifiedEmail(user);
                   fillMissingIdentity(user, {
                     firstName: profile.name?.givenName,
                     lastName: profile.name?.familyName,
@@ -235,7 +254,17 @@ export const initializePassport = (): void => {
               return done(new Error('Email non fourni par Facebook'), false);
             }
 
-            let user = await User.findOne({ email });
+            // Comme pour Google : un Facebook déjà lié désigne son compte, quel
+            // que soit l'email qu'il déclare aujourd'hui.
+            let user = await User.findOne({ 'socialAuth.facebook.id': profile.id });
+
+            if (!user) {
+              user = await User.findOne({ email });
+            }
+
+            if (user?.socialAuth?.facebook?.id && user.socialAuth.facebook.id !== profile.id) {
+              return done(null, false, { message: 'email_linked_other_facebook' });
+            }
 
             if (user) {
               if (!user.socialAuth?.facebook?.id) {
@@ -245,13 +274,12 @@ export const initializePassport = (): void => {
                   email,
                   name: profile.displayName
                 };
-                user.isEmailVerified = true;
+                await claimAccountByVerifiedEmail(user);
                 fillMissingIdentity(user, {
                   firstName: profile.name?.givenName,
                   lastName: profile.name?.familyName,
                   picture: profile.photos?.[0]?.value
                 });
-                await user.save({ validateBeforeSave: false });
               }
             } else {
               const { firstName, lastName } = splitDisplayName(profile.displayName);
@@ -370,7 +398,7 @@ export const initializePassport = (): void => {
                     email,
                     username: profile.username
                   };
-                  user.isEmailVerified = true;
+                  await claimAccountByVerifiedEmail(user);
                   // Auto-fill socialLinks.discord
                   user.socialLinks = user.socialLinks || {};
                   if (!user.socialLinks.discord) {
