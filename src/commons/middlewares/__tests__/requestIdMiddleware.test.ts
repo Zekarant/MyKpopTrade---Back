@@ -3,6 +3,7 @@ import request from 'supertest';
 import { requestIdMiddleware } from '../requestIdMiddleware';
 import { errorHandler } from '../errorMiddleware';
 import { getRequestId } from '../../utils/requestContext';
+import { HttpError } from '../../utils/httpError';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -18,7 +19,7 @@ function anApp() {
     throw new Error('bug');
   });
   app.get('/bad', () => {
-    throw Object.assign(new Error('entrée invalide'), { statusCode: 400 });
+    throw new HttpError(400, 'entrée invalide');
   });
   app.use(errorHandler);
   return app;
@@ -62,13 +63,13 @@ describe('requestIdMiddleware', () => {
     const res = await request(anApp()).get('/boom').set('X-Request-Id', 'incident-42');
 
     expect(res.status).toBe(500);
-    expect(res.body.error.requestId).toBe('incident-42');
+    expect(res.body.requestId).toBe('incident-42');
   });
 
   it('ne l\'ajoute pas aux erreurs client (4xx)', async () => {
     const res = await request(anApp()).get('/bad');
 
     expect(res.status).toBe(400);
-    expect(res.body.error).not.toHaveProperty('requestId');
+    expect(res.body).not.toHaveProperty('requestId');
   });
 });

@@ -23,10 +23,34 @@ export function asHttpError(error: unknown): HttpError | null {
   if (isDuplicateKeyError(error)) {
     return new HttpError(409, 'Cet élément existe déjà', 'DUPLICATE');
   }
+  const clientStatus = exposedClientStatus(error);
+  if (clientStatus) {
+    return new HttpError(clientStatus, (error as Error).message, CLIENT_ERROR_CODES[clientStatus] ?? 'BAD_REQUEST');
+  }
   return null;
 }
 
+const CLIENT_ERROR_CODES: Record<number, string> = {
+  400: 'BAD_REQUEST',
+  413: 'PAYLOAD_TOO_LARGE',
+  415: 'UNSUPPORTED_MEDIA_TYPE'
+};
+
 /**
+ * Statut 4xx d'une erreur au format http-errors (body-parser : JSON malformé,
+ * corps trop volumineux…), qui porte `status`/`statusCode` et `expose: true`.
+ */
+function exposedClientStatus(error: unknown): number | null {
+  if (!(error instanceof Error)) return null;
+  const { status, statusCode, expose } = error as Error & { status?: unknown; statusCode?: unknown; expose?: unknown };
+  const code = typeof statusCode === 'number' ? statusCode : status;
+  return expose === true && typeof code === 'number' && code >= 400 && code < 500 ? code : null;
+}
+
+/**
+ * @deprecated Les contrôleurs laissent remonter l'erreur jusqu'au gestionnaire
+ * central (errorMiddleware), qui applique le même format. Retiré au fil des modules.
+ *
  * Si `error` est une HttpError (ou une erreur de données client, cf. asHttpError),
  * renvoie la réponse correspondante et retourne la Response.
  * Sinon, retourne null — le caller doit enchaîner son fallback 500 habituel.
