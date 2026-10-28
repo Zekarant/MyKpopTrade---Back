@@ -50,6 +50,22 @@ export async function resetPasswordWithToken(token: string, newPassword: string)
 }
 
 /**
+ * Ré-authentifie l'utilisateur avant une action sensible (changement d'email,
+ * anonymisation). Un compte créé par OAuth n'a pas de mot de passe connu : il
+ * en définit un via « mot de passe oublié ».
+ */
+export async function verifyCurrentPassword(userId: string, currentPassword: unknown): Promise<void> {
+  if (typeof currentPassword !== 'string' || !currentPassword) {
+    throw new HttpError(400, 'Mot de passe actuel requis', 'CURRENT_PASSWORD_REQUIRED');
+  }
+  const userWithPassword = await User.findById(userId).select('+password');
+  // `comparePassword` lève sur un compte sans mot de passe : on répond 401, pas 500.
+  if (!userWithPassword?.password || !(await userWithPassword.comparePassword(currentPassword))) {
+    throw new HttpError(401, 'Mot de passe actuel incorrect', 'CURRENT_PASSWORD_INVALID');
+  }
+}
+
+/**
  * Change le mot de passe de l'utilisateur connecté.
  *
  * @param keptRefreshToken session à l'origine du changement, la seule qui reste ouverte

@@ -71,7 +71,7 @@ export const cancelDeletionRequest = async (req: Request, res: Response) => {
  * @access Private
  */
 export const anonymizeUserData = async (req: Request, res: Response) => {
-  await anonymizeAccount(req.user!.id, req.body?.confirmation);
+  await anonymizeAccount(req.user!.id, req.body?.confirmation, req.body?.currentPassword);
 
   return res.status(200).json({
     success: true,

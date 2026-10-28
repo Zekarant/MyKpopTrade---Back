@@ -3,6 +3,7 @@ import { migration as dropLegacyFields } from './0001-dropLegacyFields';
 import { migration as backfillManualSales } from './0002-backfillManualSales';
 import { migration as dropStaleIdentityVerificationIndex } from './0003-dropStaleIdentityVerificationIndex';
 import { migration as uniquePaymentIntentId } from './0004-uniquePaymentIntentId';
+import { migration as dropEmptyRatingResponses } from './0005-dropEmptyRatingResponses';
 
 /**
  * Toutes les migrations, dans l'ordre d'application. Une nouvelle migration
@@ -13,5 +14,6 @@ export const migrations: readonly Migration[] = [
   dropLegacyFields,
   backfillManualSales,
   dropStaleIdentityVerificationIndex,
-  uniquePaymentIntentId
+  uniquePaymentIntentId,
+  dropEmptyRatingResponses
 ];

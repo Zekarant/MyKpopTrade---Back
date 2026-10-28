@@ -3,6 +3,7 @@ import { validateEmail, normalizePhoneNumber, validateUsername } from '../../../
 import { sendVerificationEmail, sendEmailChangedNotice } from '../../../commons/services/emailService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import { verifyCurrentPassword } from './passwordService';
 
 async function loadUserOr404(userId: string) {
   const user = await User.findById(userId);
@@ -25,21 +26,6 @@ async function verifyPasswordIfProvided(userId: string, confirmPassword?: string
 
   if (!(await userWithPassword.comparePassword(confirmPassword))) {
     throw new HttpError(401, 'Mot de passe de confirmation incorrect');
-  }
-}
-
-/**
- * Ré-authentifie l'utilisateur avant une modification sensible.
- * Un compte créé par OAuth n'a pas de mot de passe connu : il en définit un via
- * « mot de passe oublié ».
- */
-async function verifyCurrentPassword(userId: string, currentPassword: unknown) {
-  if (typeof currentPassword !== 'string' || !currentPassword) {
-    throw new HttpError(400, 'Mot de passe actuel requis pour changer d\'email', 'CURRENT_PASSWORD_REQUIRED');
-  }
-  const userWithPassword = await User.findById(userId).select('+password');
-  if (!userWithPassword || !(await userWithPassword.comparePassword(currentPassword))) {
-    throw new HttpError(401, 'Mot de passe actuel incorrect', 'CURRENT_PASSWORD_INVALID');
   }
 }
 

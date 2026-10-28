@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import request from 'supertest';
+import { Types } from 'mongoose';
 import { createApp } from '../../app';
 import { startInMemoryMongo, stopInMemoryMongo, clearAllCollections } from '../helpers/mongoMemory';
 import { createTestUser } from '../helpers/fixtures';
@@ -37,6 +38,15 @@ const createRating = (reviewer: TestUser, recipient: TestUser, overrides: Record
     type: 'seller',
     ...overrides
   });
+
+/** Document tel qu'il est stocké, sans les valeurs par défaut que Mongoose ajoute au chargement. */
+const storedRating = (ratingId: unknown) => Rating.collection.findOne({ _id: ratingId as Types.ObjectId });
+
+const addRatingImage = (ratingId: unknown, user: TestUser) =>
+  request(app)
+    .post(`/api/profiles/ratings/${ratingId}/images`)
+    .set('Authorization', auth(user))
+    .attach('ratingImage', PNG, { filename: 'colis.png', contentType: 'image/png' });
 
 describe('HTTP — médias du profil et des avis', () => {
   let uploadsBefore: Set<string>;
@@ -117,17 +127,11 @@ describe('HTTP — médias du profil et des avis', () => {
   });
 
   describe('/api/profiles/ratings/:ratingId/images', () => {
-    const addImage = (ratingId: unknown, user: TestUser) =>
-      request(app)
-        .post(`/api/profiles/ratings/${ratingId}/images`)
-        .set('Authorization', auth(user))
-        .attach('ratingImage', PNG, { filename: 'colis.png', contentType: 'image/png' });
-
     it('ajoute une image à l\'avis de son auteur', async () => {
       const [reviewer, seller] = [await createTestUser(), await createTestUser()];
       const rating = await createRating(reviewer, seller);
 
-      const res = await addImage(rating._id, reviewer);
+      const res = await addRatingImage(rating._id, reviewer);
 
       expect(res.status).toBe(200);
       expect(res.body.images).toEqual([res.body.image]);
@@ -138,7 +142,7 @@ describe('HTTP — médias du profil et des avis', () => {
       const [reviewer, seller] = [await createTestUser(), await createTestUser()];
       const rating = await createRating(reviewer, seller);
 
-      const res = await addImage(rating._id, seller);
+      const res = await addRatingImage(rating._id, seller);
 
       expect(res.status).toBe(403);
       expect(newUploads()).toEqual([]);
@@ -149,7 +153,7 @@ describe('HTTP — médias du profil et des avis', () => {
       const images = Array.from({ length: 5 }, (_, i) => `/uploads/ratings/existante-${i}.png`);
       const rating = await createRating(reviewer, seller, { images });
 
-      const res = await addImage(rating._id, reviewer);
+      const res = await addRatingImage(rating._id, reviewer);
 
       expect(res.status).toBe(400);
       expect(res.body.code).toBe('MAX_IMAGES_REACHED');
@@ -159,7 +163,7 @@ describe('HTTP — médias du profil et des avis', () => {
     it('retire l\'image demandée et son fichier', async () => {
       const [reviewer, seller] = [await createTestUser(), await createTestUser()];
       const rating = await createRating(reviewer, seller);
-      const { image } = (await addImage(rating._id, reviewer)).body;
+      const { image } = (await addRatingImage(rating._id, reviewer)).body;
 
       const res = await request(app)
         .delete(`/api/profiles/ratings/${rating._id}/images`)
@@ -203,7 +207,16 @@ describe('HTTP — médias du profil et des avis', () => {
       expect(created.body.rating.response.content).toBe('Merci pour votre achat !');
       expect(updated.body.rating.response.content).toBe('Merci, à bientôt');
       expect(deleted.status).toBe(200);
-      expect((await Rating.findById(rating._id))!.response?.content).toBeUndefined();
+      expect((await storedRating(rating._id))!.response).toBeUndefined();
+    });
+
+    it('n\'enregistre aucune réponse vide sur un avis sans réponse', async () => {
+      const [reviewer, seller] = [await createTestUser(), await createTestUser()];
+      const rating = await createRating(reviewer, seller);
+
+      await addRatingImage(rating._id, reviewer);
+
+      expect((await storedRating(rating._id))!.response).toBeUndefined();
     });
 
     it('refuse (403) une réponse de l\'auteur de l\'avis', async () => {

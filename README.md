@@ -48,13 +48,14 @@ Variables obligatoires en production, sans valeur par défaut acceptée :
 
 ```sh
 docker-compose up -d   # MongoDB
-npm run dev            # développement (tsx watch, rechargement à chaud)
+npm run dev            # migrations, puis développement (tsx watch, rechargement à chaud)
 ```
 
-En production :
+En production (pas encore de serveur : `npm run migrate` dépend de `tsx`,
+installé en dev seulement ; à revoir au premier déploiement) :
 
 ```sh
-npm run build && npm start
+npm run build && npm run migrate && npm start
 ```
 
 L'API écoute sur <http://localhost:3000>.
@@ -63,7 +64,7 @@ L'API écoute sur <http://localhost:3000>.
 
 | Commande | Effet |
 | --- | --- |
-| `npm run dev` | Serveur de développement |
+| `npm run dev` | Migrations en attente, puis serveur de développement |
 | `npm run build` | Compilation TypeScript vers `dist/` |
 | `npm start` | Lance `dist/index.js` |
 | `npm run typecheck` | `tsc --noEmit` |
@@ -78,7 +79,7 @@ L'API écoute sur <http://localhost:3000>.
 `npm run migrate` applique dans l'ordre les migrations de `src/migrations/`
 pas encore passées sur la base de `MONGODB_URI`, et les inscrit dans la
 collection `migrations`. À lancer à chaque déploiement, **avant** de démarrer la
-nouvelle version.
+nouvelle version. `npm run dev` le lance d'abord et s'arrête s'il échoue.
 
 - Ajouter une migration : un fichier `NNNN-nom.ts` exportant `migration`
   (`id`, `description`, `up`), puis l'inscrire en fin de liste dans

@@ -15,6 +15,7 @@ import { badRequest, notFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { erasePersonalFields } from './accountErasureService';
+import { verifyCurrentPassword } from '../../auth/services/passwordService';
 
 const USER_NOT_FOUND_MESSAGE = 'Utilisateur non trouvé';
 const DELETION_GRACE_PERIOD_DAYS = 30;
@@ -260,10 +261,16 @@ export async function cancelAccountDeletion(userId: string) {
   });
 }
 
-export async function anonymizeAccount(userId: string, confirmation: unknown) {
+/**
+ * Anonymisation immédiate et irréversible : le mot de passe est exigé, un jeton
+ * volé ne doit pas suffire. La demande de suppression, elle, reste annulable
+ * pendant le délai de grâce et n'exige qu'une confirmation.
+ */
+export async function anonymizeAccount(userId: string, confirmation: unknown, currentPassword: unknown) {
   if (confirmation !== true) {
     throw badRequest('Veuillez confirmer votre demande d\'anonymisation', 'CONFIRMATION_REQUIRED');
   }
+  await verifyCurrentPassword(userId, currentPassword);
 
   const user = await loadUserOr404(userId);
 

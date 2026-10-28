@@ -122,19 +122,46 @@ describe('HTTP — données personnelles du membre', () => {
   });
 
   describe('anonymisation', () => {
+    const anonymize = (user: TestUser, body: Record<string, unknown>) =>
+      request(app).post('/api/users/me/anonymize').set('Authorization', auth(user)).send(body);
+
     it('exige une confirmation explicite', async () => {
       const me = await createTestUser();
 
-      const res = await request(app).post('/api/users/me/anonymize').set('Authorization', auth(me)).send({ confirmation: 'oui' });
+      const res = await anonymize(me, { confirmation: 'oui', currentPassword: 'Password1!' });
 
       expect(res.status).toBe(400);
       expect(res.body.code).toBe('CONFIRMATION_REQUIRED');
     });
 
+    // Immédiate et irréversible : une session volée ne doit pas suffire.
+    it.each([
+      { currentPassword: undefined, status: 400, code: 'CURRENT_PASSWORD_REQUIRED' },
+      { currentPassword: 'Mauvais1!', status: 401, code: 'CURRENT_PASSWORD_INVALID' }
+    ])('exige le mot de passe actuel ($code)', async ({ currentPassword, status, code }) => {
+      const me = await createTestUser();
+
+      const res = await anonymize(me, { confirmation: true, currentPassword });
+
+      expect(res.status).toBe(status);
+      expect(res.body.code).toBe(code);
+      expect((await User.findById(me._id))?.username).toBe(me.username);
+    });
+
+    it('refuse (401) un compte OAuth qui n\'a pas encore de mot de passe', async () => {
+      const me = await createTestUser();
+      await User.collection.updateOne({ _id: me._id }, { $unset: { password: '' } });
+
+      const res = await anonymize(me, { confirmation: true, currentPassword: 'Password1!' });
+
+      expect(res.status).toBe(401);
+      expect(res.body.code).toBe('CURRENT_PASSWORD_INVALID');
+    });
+
     it('remplace pseudo et email par un identifiant anonyme', async () => {
       const me = await createTestUser({ bio: 'Fan de Seventeen à Lille' });
 
-      const res = await request(app).post('/api/users/me/anonymize').set('Authorization', auth(me)).send({ confirmation: true });
+      const res = await anonymize(me, { confirmation: true, currentPassword: 'Password1!' });
 
       expect(res.status).toBe(200);
       const stored = await User.findById(me._id);
