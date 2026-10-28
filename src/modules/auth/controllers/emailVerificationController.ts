@@ -1,83 +1,33 @@
 import { Request, Response } from 'express';
-import User, { hashOneTimeToken } from '../../../models/userModel';
-import { sendVerificationEmail } from '../../../commons/services/emailService';
-import logger from '../../../commons/utils/logger';
+import { HttpError } from '../../../commons/utils/httpError';
+import { verifyEmailToken, resendVerificationEmail } from '../services/emailVerificationService';
+import { isNonEmptyString } from './validation';
 
 /**
  * Vérification de l'email avec le token
+ * @route GET /api/auth/verify-email/:token
  */
 export const verifyEmail = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { token } = req.params;
-    
-    if (!token) {
-      res.status(400).json({ message: 'Token de vérification requis' });
-      return;
-    }
-
-    const user = await User.findOne({
-      emailVerificationToken: hashOneTimeToken(String(token)),
-      emailVerificationExpires: { $gt: Date.now() },
-      accountStatus: { $ne: 'deleted' }
-    });
-
-    if (!user) {
-      res.status(400).json({ message: 'Token de vérification invalide ou expiré' });
-      return;
-    }
-
-    // Marquer l'email comme vérifié
-    user.isEmailVerified = true;
-    user.emailVerificationToken = undefined;
-    user.emailVerificationExpires = undefined;
-    await user.save();
-
-    res.status(200).json({ message: 'Email vérifié avec succès. Vous pouvez maintenant vous connecter.' });
-  } catch (error) {
-    logger.error('Erreur lors de la vérification de l\'email', {
-      error: error instanceof Error ? error.message : String(error)
-    });
-    res.status(500).json({ message: 'Erreur lors de la vérification de l\'email' });
-  }
+  await verifyEmailToken(String(req.params.token));
+  res.status(200).json({ message: 'Email vérifié avec succès. Vous pouvez maintenant vous connecter.' });
 };
 
 /**
  * Renvoi d'un email de vérification
+ * @route POST /api/auth/resend-verification
  */
 export const resendVerification = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { email } = req.body;
-    
-    if (!email) {
-      res.status(400).json({ message: 'Email requis' });
-      return;
-    }
+  const { email } = req.body;
 
-    const user = await User.findOne({ email });
-    
-    if (!user) {
-      // Pour des raisons de sécurité, ne pas révéler si l'email existe
-      res.status(200).json({ message: 'Si cet email existe dans notre base de données, un nouveau lien de vérification a été envoyé.' });
-      return;
-    }
-
-    if (user.isEmailVerified) {
-      res.status(400).json({ message: 'Cette adresse email est déjà vérifiée' });
-      return;
-    }
-
-    // Générer un nouveau token
-    const verificationToken = user.generateVerificationToken();
-    await user.save();
-
-    // Envoyer l'email
-    await sendVerificationEmail(user, verificationToken);
-
-    res.status(200).json({ message: 'Un nouveau lien de vérification a été envoyé à votre adresse email' });
-  } catch (error) {
-    logger.error('Erreur lors de l\'envoi du lien de vérification', {
-      error: error instanceof Error ? error.message : String(error)
-    });
-    res.status(500).json({ message: 'Erreur lors de l\'envoi du lien de vérification' });
+  if (!isNonEmptyString(email)) {
+    throw new HttpError(400, 'Email requis');
   }
+
+  await resendVerificationEmail(email);
+
+  // Même réponse dans tous les cas : elle ne doit pas révéler si l'adresse a un
+  // compte, ni s'il est déjà vérifié.
+  res.status(200).json({
+    message: 'Si cette adresse correspond à un compte non vérifié, un nouveau lien de vérification vient d\'être envoyé.'
+  });
 };
