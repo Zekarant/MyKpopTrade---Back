@@ -148,6 +148,17 @@ describe('HTTP — données personnelles du membre', () => {
       expect((await User.findById(me._id))?.username).toBe(me.username);
     });
 
+    it('refuse (429) après 5 mots de passe erronés, même avec le bon', async () => {
+      const me = await createTestUser();
+      for (let i = 0; i < 5; i++) await anonymize(me, { confirmation: true, currentPassword: 'Mauvais1!' });
+
+      const res = await anonymize(me, { confirmation: true, currentPassword: 'Password1!' });
+
+      expect(res.status).toBe(429);
+      expect(res.body.code).toBe('TOO_MANY_PASSWORD_ATTEMPTS');
+      expect((await User.findById(me._id))?.username).toBe(me.username);
+    });
+
     it('refuse (401) un compte OAuth qui n\'a pas encore de mot de passe', async () => {
       const me = await createTestUser();
       await User.collection.updateOne({ _id: me._id }, { $unset: { password: '' } });

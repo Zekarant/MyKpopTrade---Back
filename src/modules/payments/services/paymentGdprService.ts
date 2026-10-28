@@ -4,6 +4,7 @@ import User from '../../../models/userModel';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
 import { HttpError, notFound } from '../../../commons/utils/httpError';
 import { anonymizeBuyerPayments, anonymizeExpiredPayments } from './paymentAnonymizationService';
+import { checkSessionPassword } from '../../auth/services/passwordService';
 
 export interface ExportedPayment {
   transaction_id: string;
@@ -77,7 +78,7 @@ export async function anonymizeOwnPayments(userId: string, password: string): Pr
     throw notFound('Utilisateur non trouvé');
   }
 
-  if (!(await user.comparePassword(password))) {
+  if (!(await checkSessionPassword(user, password))) {
     throw new HttpError(400, 'Mot de passe incorrect', 'INVALID_PASSWORD');
   }
 

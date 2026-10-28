@@ -3,6 +3,7 @@ import { RateLimiterMongo } from 'rate-limiter-flexible';
 import mongoose from 'mongoose';
 import logger from '../../../commons/utils/logger';
 import { isRateLimiterRes } from '../../../commons/utils/rateLimiterRes';
+import { HttpError } from '../../../commons/utils/httpError';
 
 /**
  * Rate limiting des endpoints d'authentification, par adresse IP.
@@ -46,7 +47,13 @@ const LIMITS = {
   /** Anti spam du formulaire de contact (route publique). */
   contact: { points: 5, duration: 60 * 60 },
   /** Anti inondation des signalements : chacun déclenche une alerte admin (webhook). */
-  report: { points: 20, duration: 60 * 60 }
+  report: { points: 20, duration: 60 * 60 },
+  /**
+   * Anti brute-force du mot de passe redemandé dans une session ouverte (jeton
+   * volé). Par utilisateur, et seuls les échecs comptent : la même route sert
+   * aussi des mises à jour sans mot de passe (PUT /api/auth/profile).
+   */
+  sessionPassword: { points: 5, duration: 15 * 60 }
 } as const;
 
 type LimitName = keyof typeof LIMITS;
@@ -135,6 +142,49 @@ function createUserRateLimiter(name: LimitName, message: string) {
     }
   };
 }
+
+/**
+ * Compteur des mots de passe saisis depuis une session (voir `sessionPassword`).
+ * Chaque tentative est comptée avant la comparaison, puis rendue si elle réussit :
+ * des essais envoyés en parallèle ne passent pas tous sous le plafond.
+ */
+export const sessionPasswordAttempts = {
+  /**
+   * @returns false si le limiteur est indisponible (tentative non comptée)
+   * @throws HttpError 429 quand les échecs récents ont atteint le plafond
+   */
+  async take(userId: string): Promise<boolean> {
+    try {
+      await getLimiter('sessionPassword').consume(userId);
+      return true;
+    } catch (error) {
+      if (isRateLimiterRes(error)) {
+        throw new HttpError(
+          429,
+          'Trop de mots de passe erronés. Veuillez patienter quelques minutes avant de réessayer.',
+          'TOO_MANY_PASSWORD_ATTEMPTS'
+        );
+      }
+      logger.error('Rate limiter indisponible, requête laissée passer', {
+        limit: 'sessionPassword',
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return false;
+    }
+  },
+
+  /** Rend une tentative prise par `take` : seuls les échecs restent comptés. */
+  async giveBack(userId: string): Promise<void> {
+    try {
+      await getLimiter('sessionPassword').reward(userId);
+    } catch (error) {
+      logger.error('Rate limiter indisponible, tentative réussie laissée comptée', {
+        limit: 'sessionPassword',
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+};
 
 export const rateLimitLogin = createIpRateLimiter(
   'login',

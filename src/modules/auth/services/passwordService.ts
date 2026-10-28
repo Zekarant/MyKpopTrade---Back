@@ -1,4 +1,5 @@
-import User, { hashOneTimeToken } from '../../../models/userModel';
+import User, { IUser, hashOneTimeToken } from '../../../models/userModel';
+import { sessionPasswordAttempts } from '../middleware/authRateLimiter';
 import { sendPasswordResetEmail } from '../../../commons/services/emailService';
 import { HttpError, notFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
@@ -59,10 +60,27 @@ export async function verifyCurrentPassword(userId: string, currentPassword: unk
     throw new HttpError(400, 'Mot de passe actuel requis', 'CURRENT_PASSWORD_REQUIRED');
   }
   const userWithPassword = await User.findById(userId).select('+password');
-  // `comparePassword` lève sur un compte sans mot de passe : on répond 401, pas 500.
-  if (!userWithPassword?.password || !(await userWithPassword.comparePassword(currentPassword))) {
+  if (!userWithPassword || !(await checkSessionPassword(userWithPassword, currentPassword))) {
     throw new HttpError(401, 'Mot de passe actuel incorrect', 'CURRENT_PASSWORD_INVALID');
   }
+}
+
+/**
+ * Vérifie un mot de passe redemandé dans une session ouverte. Les échecs sont
+ * plafonnés par utilisateur : un jeton volé ne doit pas permettre de deviner le
+ * mot de passe. Un compte sans mot de passe (OAuth) échoue, au lieu de faire
+ * lever `comparePassword`.
+ *
+ * @param user document chargé avec `+password`
+ * @throws HttpError 429 après trop d'échecs récents
+ */
+export async function checkSessionPassword(user: IUser, candidate: unknown): Promise<boolean> {
+  const userId = String(user._id);
+  const counted = await sessionPasswordAttempts.take(userId);
+  const valid = typeof candidate === 'string' && candidate !== '' && !!user.password
+    && await user.comparePassword(candidate);
+  if (valid && counted) await sessionPasswordAttempts.giveBack(userId);
+  return valid;
 }
 
 /**
@@ -87,7 +105,7 @@ export async function changePassword({
     throw notFound('Utilisateur non trouvé', 'USER_NOT_FOUND');
   }
 
-  if (!(await user.comparePassword(currentPassword))) {
+  if (!(await checkSessionPassword(user, currentPassword))) {
     throw new HttpError(401, 'Mot de passe actuel incorrect', 'CURRENT_PASSWORD_INVALID');
   }
 

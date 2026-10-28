@@ -3,7 +3,7 @@ import { validateEmail, normalizePhoneNumber, validateUsername } from '../../../
 import { sendVerificationEmail, sendEmailChangedNotice } from '../../../commons/services/emailService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
-import { verifyCurrentPassword } from './passwordService';
+import { checkSessionPassword, verifyCurrentPassword } from './passwordService';
 
 async function loadUserOr404(userId: string) {
   const user = await User.findById(userId);
@@ -24,7 +24,7 @@ async function verifyPasswordIfProvided(userId: string, confirmPassword?: string
 
   if (!userWithPassword.password) return;
 
-  if (!(await userWithPassword.comparePassword(confirmPassword))) {
+  if (!(await checkSessionPassword(userWithPassword, confirmPassword))) {
     throw new HttpError(401, 'Mot de passe de confirmation incorrect');
   }
 }
