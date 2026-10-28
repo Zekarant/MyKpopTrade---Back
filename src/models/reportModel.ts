@@ -1,8 +1,8 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type ReportTargetType = 'rating' | 'product' | 'user' | 'post';
+export type ReportTargetType = 'rating' | 'product' | 'user' | 'post' | 'message';
 
-export const REPORT_TARGET_TYPES: ReportTargetType[] = ['rating', 'product', 'user', 'post'];
+export const REPORT_TARGET_TYPES: ReportTargetType[] = ['rating', 'product', 'user', 'post', 'message'];
 
 export const REPORT_REASONS = [
   'inappropriate_content',
@@ -25,6 +25,8 @@ export interface IReport extends Document {
   details?: string;
   status: 'pending' | 'reviewed' | 'resolved' | 'rejected';
   adminNotes?: string;
+  /** Message signalé : son texte au moment du signalement. */
+  reportedContent?: string;
   createdAt: Date;
   updatedAt: Date;
   resolvedAt?: Date;
@@ -66,6 +68,11 @@ const ReportSchema: Schema = new Schema({
   },
   resolvedAt: {
     type: Date
+  },
+  // Copie conservée parce que l'auteur peut supprimer son message après le
+  // signalement : le modérateur doit pouvoir lire ce qui a été signalé.
+  reportedContent: {
+    type: String
   }
 }, {
   timestamps: true
@@ -73,5 +80,9 @@ const ReportSchema: Schema = new Schema({
 
 // Empêcher les doublons de signalements par le même utilisateur
 ReportSchema.index({ reporter: 1, targetType: 1, targetId: 1 }, { unique: true });
+// File de modération admin : filtre par statut, tri par date.
+ReportSchema.index({ status: 1, createdAt: 1 });
+// Historique des signalements d'une cible (détail admin) ; sert aussi au filtre par type.
+ReportSchema.index({ targetType: 1, targetId: 1 });
 
 export default (mongoose.models.Report as mongoose.Model<IReport>) || mongoose.model<IReport>('Report', ReportSchema);

@@ -57,6 +57,6 @@ export async function deliverContactMessage(contact: ContactMessage): Promise<vo
   }, webhookUrl);
 
   if (!delivered) {
-    throw new HttpError(503, 'Le service de support est momentanément indisponible. Veuillez réessayer plus tard.');
+    throw new HttpError(503, 'Le service de support est momentanément indisponible. Veuillez réessayer plus tard.', 'SUPPORT_UNAVAILABLE');
   }
 }

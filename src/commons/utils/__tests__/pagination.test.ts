@@ -1,4 +1,13 @@
-import { clampLimit } from '../pagination';
+import { MAX_PAGE_NUMBER, clampLimit, parsePagination } from '../pagination';
+
+describe('parsePagination', () => {
+  it('plafonne un numéro de page démesuré au lieu de laisser Mongo échouer', () => {
+    const request = parsePagination({ page: '99999999999999999999', limit: '20' });
+
+    expect(request.page).toBe(MAX_PAGE_NUMBER);
+    expect(request.skip).toBe((MAX_PAGE_NUMBER - 1) * 20);
+  });
+});
 
 describe('clampLimit', () => {
   it('garde une valeur dans les bornes', () => {

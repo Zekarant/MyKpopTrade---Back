@@ -37,6 +37,7 @@ const NotificationSchema: Schema = new Schema({
             'refund_pending',
             'wishlist_price_drop',
             'wishlist_unavailable',
+            'saved_search_match',
             'dispute_opened',
             'dispute_message',
             'dispute_resolved',

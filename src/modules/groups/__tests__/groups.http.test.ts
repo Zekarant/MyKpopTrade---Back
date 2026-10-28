@@ -59,4 +59,15 @@ describe('HTTP — groupes (admin)', () => {
     expect(stored?.followers).toEqual([]);
     expect(stored?.followersCount).toBe(0);
   });
+
+  it('borne la limite de la recherche publique (négative ou invalide → défaut)', async () => {
+    await KpopGroup.insertMany(Array.from({ length: 25 }, (_, i) => ({ name: `Groupe ${i}`, isActive: true })));
+
+    const negative = await request(app).get('/api/groups/search').query({ query: 'Groupe', limit: '-5' });
+    const invalid = await request(app).get('/api/groups/search').query({ query: 'Groupe', limit: 'abc' });
+
+    expect(negative.status).toBe(200);
+    expect(negative.body.found).toBe(20);
+    expect(invalid.body.found).toBe(20);
+  });
 });

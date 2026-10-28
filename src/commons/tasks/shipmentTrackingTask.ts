@@ -15,7 +15,9 @@ import {
  *    minimiser la concurrence avec le trafic utilisateur.
  *
  * Chaque tâche absorbe ses propres erreurs ; un échec ne décale pas la
- * suivante et ne tue pas le scheduler.
+ * suivante et ne tue pas le scheduler. `noOverlap` saute un tick tant que le
+ * précédent tourne encore, pour ne jamais traiter deux fois les mêmes colis
+ * (doubles relances, doubles notifications).
  */
 export const startShipmentTrackingTask = () => {
   // Polling carrier — toutes les 6h
@@ -27,7 +29,7 @@ export const startShipmentTrackingTask = () => {
         error: error instanceof Error ? error.message : String(error)
       });
     }
-  }, { timezone: 'Europe/Paris' });
+  }, { timezone: 'Europe/Paris', noOverlap: true });
 
   // Auto-confirmation + relances — chaque jour à 4h
   cron.schedule('0 4 * * *', async () => {
@@ -45,7 +47,7 @@ export const startShipmentTrackingTask = () => {
         error: error instanceof Error ? error.message : String(error)
       });
     }
-  }, { timezone: 'Europe/Paris' });
+  }, { timezone: 'Europe/Paris', noOverlap: true });
 
   logger.info('Tâches CRON shipment tracking programmées', {
     polling: '0 */6 * * *',

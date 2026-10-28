@@ -7,11 +7,7 @@ import {
   rateLimitMessages,
   verifyConversationAccess
 } from './middleware/messageSecurityMiddleware';
-import {
-  authenticateAttachmentRequest,
-  issueAttachmentReadToken,
-  ATTACHMENT_TOKEN_TTL_SECONDS
-} from './middleware/attachmentAuthMiddleware';
+import { authenticateAttachmentRequest } from './middleware/attachmentAuthMiddleware';
 
 const router = express.Router();
 
@@ -111,6 +107,7 @@ router.post(
   authenticateJWT,
   verifyConversationAccess,
   messageController.upload.array('attachments', 5),
+  messageController.discardAttachmentsOnRejection,
   rateLimitMessages,
   messageController.sendNewMessage
 );
@@ -134,13 +131,7 @@ router.delete(
   messageController.deleteMessage
 );
 
-// Jeton de lecture des pièces jointes, à placer dans leurs URL (<img src>).
-router.post('/attachment-token', authenticateJWT, (req, res) => {
-  res.status(200).json({
-    token: issueAttachmentReadToken(req.user!.id),
-    expiresIn: ATTACHMENT_TOKEN_TTL_SECONDS
-  });
-});
+router.post('/attachment-token', authenticateJWT, messageController.createAttachmentToken);
 
 router.get(
   '/messages/:messageId/attachments/:attachment',

@@ -66,10 +66,8 @@ const RatingSchema: Schema = new Schema({
       type: String,
       maxlength: 500
     },
-    createdAt: {
-      type: Date,
-      default: Date.now
-    }
+    // Pas de valeur par défaut : elle créerait une réponse vide sur chaque avis.
+    createdAt: Date
   }
 }, {
   timestamps: true

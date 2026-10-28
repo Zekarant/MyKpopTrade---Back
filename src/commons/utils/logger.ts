@@ -3,6 +3,8 @@ import 'winston-daily-rotate-file';
 import path from 'path';
 import fs from 'fs';
 import type { Request } from 'express';
+import env from '../../config/env';
+import { getRequestId } from './requestContext';
 
 // Créer le répertoire des logs s'il n'existe pas
 const logDir = path.join(process.cwd(), 'logs');
@@ -16,23 +18,22 @@ const customFormat = winston.format.printf(({ level, message, timestamp, ...meta
   return `${timestamp} [${level.toUpperCase()}]: ${message} ${metaStr}`;
 });
 
-// Configuration des transports en fonction de l'environnement
+// Configuration des transports en fonction de l'environnement.
+// Fichier avec rotation dans tous les environnements : des fichiers sans
+// rotation (anciens combined.log / error.log) grossissent jusqu'à remplir le
+// disque. L'import de 'winston-daily-rotate-file' enregistre le transport.
 const transports: winston.transport[] = [
-  // Log tout dans un fichier combiné
-  new winston.transports.File({
-    filename: path.join(logDir, 'combined.log'),
-    level: 'info'
-  }),
-  
-  // Log les erreurs dans un fichier séparé
-  new winston.transports.File({
-    filename: path.join(logDir, 'error.log'),
-    level: 'error'
+  new winston.transports.DailyRotateFile({
+    filename: path.join(logDir, '%DATE%-app.log'),
+    datePattern: 'YYYY-MM-DD',
+    zippedArchive: true,
+    maxSize: '20m',
+    maxFiles: '14d'
   })
 ];
 
-// En développement, log aussi dans la console
-if (process.env.NODE_ENV !== 'production') {
+if (env.NODE_ENV !== 'production') {
+  // En développement, console lisible et colorée.
   transports.push(
     new winston.transports.Console({
       level: 'debug',
@@ -44,17 +45,9 @@ if (process.env.NODE_ENV !== 'production') {
     })
   );
 } else {
-  // En production, rotation des logs. L'import de 'winston-daily-rotate-file'
-  // enregistre le transport sur winston.transports.
-  transports.push(
-    new winston.transports.DailyRotateFile({
-      filename: path.join(logDir, '%DATE%-app.log'),
-      datePattern: 'YYYY-MM-DD',
-      zippedArchive: true,
-      maxSize: '20m',
-      maxFiles: '14d'
-    })
-  );
+  // En production (conteneurs), stdout est le canal collecté par la plateforme :
+  // une ligne JSON par événement, telle que produite par le format du logger.
+  transports.push(new winston.transports.Console());
 }
 
 // Configuration pour ne pas enregistrer d'informations sensibles
@@ -170,13 +163,21 @@ const logsSanitizer = winston.format((info) => {
   return sanitizedInfo;
 });
 
+/** Ajoute l'identifiant de la requête HTTP en cours (cf. requestIdMiddleware). */
+const requestIdFormat = winston.format((info) => {
+  const requestId = getRequestId();
+  if (requestId) info.requestId = requestId;
+  return info;
+});
+
 // Création du logger
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
+  level: env.LOG_LEVEL,
   format: winston.format.combine(
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.errors({ stack: true }),
     winston.format.splat(),
+    requestIdFormat(),
     // ⚠️ ORDRE CRITIQUE : logsSanitizer() doit passer AVANT json(). json() fige
     // la ligne finale dans info[MESSAGE] ; tout format placé après n'a plus aucun
     // effet sur ce qui est écrit dans les fichiers de log (les mots de passe et
@@ -189,15 +190,6 @@ const logger = winston.createLogger({
 });
 
 export default logger;
-
-// Fonctions utilitaires pour les logs métier
-export const logAuthEvent = (userId: string, event: string, details?: Record<string, unknown>) => {
-  logger.info(`AUTH [${event}] - User ID: ${userId}`, { details });
-};
-
-export const logUserAction = (userId: string, action: string, details?: Record<string, unknown>) => {
-  logger.info(`USER [${action}] - User ID: ${userId}`, { details });
-};
 
 export const logAPIRequest = (req: Request, responseTime?: number) => {
   logger.debug(`API Request: ${req.method} ${req.originalUrl}`, {

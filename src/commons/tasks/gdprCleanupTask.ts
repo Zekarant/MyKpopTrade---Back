@@ -21,7 +21,8 @@ export const startGdprCleanupTask = () => {
       GdprLogger.logError('Erreur lors de l\'anonymisation automatique des données', error);
     }
   }, {
-    timezone: 'Europe/Paris'
+    timezone: 'Europe/Paris',
+    noOverlap: true
   });
 
   GdprLogger.logInfo('Tâche d\'anonymisation GDPR programmée', {

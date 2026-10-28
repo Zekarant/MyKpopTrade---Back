@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import Post from '../modules/posts/model';
+import Post from '../models/postModel';
 
 /**
  * Migration idempotente : réécrit les chemins d'images des publications de

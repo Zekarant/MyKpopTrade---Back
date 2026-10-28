@@ -1,18 +1,17 @@
-jest.mock('axios');
 jest.mock('../../../notifications/services/notificationService', () => ({
-  NotificationService: { createNotification: jest.fn().mockResolvedValue(undefined) }
+  createNotification: jest.fn().mockResolvedValue(undefined)
 }));
 jest.mock('../../../payments/services/paypalClient', () => ({
   PayPalClient: {
     getAccessToken: jest.fn().mockResolvedValue('platform-token'),
     checkPaymentStatus: jest.fn().mockResolvedValue('CREATED')
   },
-  paypalApiBaseUrl: 'https://paypal.test',
+  paypalHttp: { get: jest.fn(), post: jest.fn() },
   partnerHeaders: () => ({}),
   extractDebugId: () => undefined
 }));
 
-import axios from 'axios';
+import { paypalHttp } from '../../../payments/services/paypalClient';
 import { Types } from 'mongoose';
 import {
   startInMemoryMongo,
@@ -29,7 +28,7 @@ import { PayPalPartnerService } from '../../../payments/services/paypalPartnerSe
  * le montant envoyé à PayPal doit être le prix négocié, et égal au
  * `buyerPrice` que le panier affiche.
  */
-const mockedPost = axios.post as jest.Mock;
+const mockedPost = paypalHttp.post as jest.Mock;
 
 type PostedOrder = { purchase_units: Array<{ custom_id: string; amount: { value: string } }> };
 

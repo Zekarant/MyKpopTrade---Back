@@ -33,9 +33,4 @@ export class PayPalService {
   static completeOnboarding = PayPalPartnerService.completeOnboarding;
   static refreshSellerStatus = PayPalPartnerService.refreshSellerStatus;
   static forgetSellerAccount = PayPalPartnerService.forgetSellerAccount;
-
-  /**
-   * Alias legacy pour compatibilité. Utiliser checkPaymentStatus directement.
-   */
-  static getPaymentStatus = PayPalClient.checkPaymentStatus;
 }

@@ -48,13 +48,14 @@ Variables obligatoires en production, sans valeur par défaut acceptée :
 
 ```sh
 docker-compose up -d   # MongoDB
-npm run dev            # développement (ts-node)
+npm run dev            # migrations, puis développement (tsx watch, rechargement à chaud)
 ```
 
-En production :
+En production (pas encore de serveur : `npm run migrate` dépend de `tsx`,
+installé en dev seulement ; à revoir au premier déploiement) :
 
 ```sh
-npm run build && npm start
+npm run build && npm run migrate && npm start
 ```
 
 L'API écoute sur <http://localhost:3000>.
@@ -63,7 +64,7 @@ L'API écoute sur <http://localhost:3000>.
 
 | Commande | Effet |
 | --- | --- |
-| `npm run dev` | Serveur de développement |
+| `npm run dev` | Migrations en attente, puis serveur de développement |
 | `npm run build` | Compilation TypeScript vers `dist/` |
 | `npm start` | Lance `dist/index.js` |
 | `npm run typecheck` | `tsc --noEmit` |
@@ -71,8 +72,23 @@ L'API écoute sur <http://localhost:3000>.
 | `npm test` | Suite Jest |
 | `npm run test:coverage` | Suite Jest avec couverture |
 | `npm run paypal:status` | Diagnostic de la configuration PayPal |
-| `npm run migrate:legacy-fields` | Retire les champs de réservation et les conversations « prix libre » obsolètes |
-| `npm run migrate:manual-sales` | Rétablit « vendu » sur les anciennes ventes manuelles (simulation ; `-- --apply` pour écrire) |
+| `npm run migrate` | Applique les migrations de base en attente (voir ci-dessous) |
+
+## Migrations
+
+`npm run migrate` applique dans l'ordre les migrations de `src/migrations/`
+pas encore passées sur la base de `MONGODB_URI`, et les inscrit dans la
+collection `migrations`. À lancer à chaque déploiement, **avant** de démarrer la
+nouvelle version. `npm run dev` le lance d'abord et s'arrête s'il échoue.
+
+- Ajouter une migration : un fichier `NNNN-nom.ts` exportant `migration`
+  (`id`, `description`, `up`), puis l'inscrire en fin de liste dans
+  `src/migrations/index.ts`.
+- `up` doit être idempotente : une migration interrompue est rejouée en entier.
+- Une migration déjà appliquée en production ne se modifie plus : en écrire une
+  nouvelle.
+- `0004-uniquePaymentIntentId` échoue en listant les ordres PayPal en double
+  s'il en existe : les dédoublonner à la main, puis relancer.
 
 ## Supervision
 
@@ -83,6 +99,34 @@ L'API écoute sur <http://localhost:3000>.
 
 À brancher sur les sondes de l'orchestrateur : `/health` pour le redémarrage,
 `/ready` pour le routage du trafic.
+
+## Temps réel (Server-Sent Events)
+
+`GET /api/realtime/stream` ouvre un flux `text/event-stream` pour l'utilisateur
+connecté, authentifié par le token d'accès habituel (`Authorization: Bearer`).
+Le front le lit avec `fetch` (EventSource ne sait pas envoyer d'en-tête
+`Authorization`), cf. `src/services/realtime.ts` côté front.
+
+| Événement | Données |
+| --- | --- |
+| `message:new` | `{ conversationId, message }` — message peuplé (`sender.username`, `profilePicture`), envoyé à tous les participants, auteur compris |
+| `conversation:read` | `{ conversationId, readerId, readAt, messageIds? }` — `messageIds` absent : tout ce que le lecteur n'avait pas écrit |
+| `notification:new` | la notification créée, telle que renvoyée par `GET /api/notifications` |
+| `unread:update` | `{ messages, notifications }` — à l'ouverture du flux et après une lecture |
+
+- Un commentaire `: heartbeat` part toutes les 25 s pour que les proxys ne
+  coupent pas la connexion ; `X-Accel-Buffering: no` désactive le tampon nginx.
+- Le flux est fermé à l'expiration du token d'accès (15 min) : le client se
+  reconnecte avec un token frais. Les événements manqués ne sont pas rejoués,
+  `unread:update` à l'ouverture sert de resynchronisation.
+- Limites : 5 flux par compte (`429` au-delà), `REALTIME_MAX_CONNECTIONS` par
+  process (`503`). Un client qui ne lit plus son flux (> 1 Mio en attente) est coupé.
+- ⚠️ **Une seule instance.** Le hub (`modules/realtime/realtimeHub.ts`) vit en
+  mémoire : avec plusieurs instances de l'API, un événement publié sur l'une
+  n'atteint pas les clients connectés aux autres. Il faudra alors relayer les
+  publications par un pub/sub (Redis, change streams MongoDB).
+- À l'arrêt (SIGTERM), les flux sont fermés pour que `server.close()` ne reste
+  pas bloqué.
 
 ## Structure
 
@@ -101,7 +145,7 @@ src/
     ├── auth/               inscription, connexion, OAuth, mots de passe
     ├── users/              RGPD (export, suppression, anonymisation), admin
     ├── products/ posts/    annonces et fil d'actualité
-    ├── payments/           PayPal, Stripe Connect, remboursements, suivi colis
+    ├── payments/           PayPal, remboursements, suivi colis
     ├── messaging/          conversations chiffrées, offres, négociation
     ├── cart/ addresses/    panier et carnet d'adresses
     ├── disputes/ reports/  litiges et signalements
@@ -125,7 +169,8 @@ n'est requise. Les tests vivent dans `__tests__/` au plus près du code testé.
 | Mécanisme | Détail |
 | --- | --- |
 | Mot de passe | bcrypt |
-| Session | JWT 15 min + refresh token 7 jours, révocables |
+| Session | JWT 15 min + refresh token 7 jours, révocables ; le refresh token ne circule que dans un cookie `HttpOnly` (`mkt_refresh`, `SameSite=Lax`, chemin `/api/auth`) |
+| Changement d'email | mot de passe actuel exigé, l'ancienne adresse est prévenue |
 | Double authentification | TOTP (RFC 6238), optionnelle — voir ci-dessous |
 | Vérification du téléphone | code à 6 chiffres par SMS (Twilio), `crypto.randomInt` |
 | Rate limiting | par IP sur connexion / inscription / envoi d'emails, par utilisateur sur les SMS |

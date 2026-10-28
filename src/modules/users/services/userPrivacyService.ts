@@ -9,17 +9,21 @@ import Report from '../../../models/reportModel';
 import Dispute from '../../../models/disputeModel';
 import SearchHistory from '../../../models/historicSearchModel';
 import IdentityVerification from '../../../models/identityVerificationModel';
-import Post from '../../posts/model';
-import { NotificationService } from '../../notifications/services/notificationService';
-import { HttpError } from '../../../commons/utils/httpError';
+import Post from '../../../models/postModel';
+import { createNotification } from '../../notifications/services/notificationService';
+import { badRequest, notFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { erasePersonalFields } from './accountErasureService';
+import { verifyCurrentPassword } from '../../auth/services/passwordService';
+
+const USER_NOT_FOUND_MESSAGE = 'Utilisateur non trouvé';
+const DELETION_GRACE_PERIOD_DAYS = 30;
 
 async function loadUserOr404(userId: string) {
   const user = await User.findById(userId);
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw notFound(USER_NOT_FOUND_MESSAGE);
   }
   return user;
 }
@@ -80,7 +84,7 @@ export async function updateConsents(userId: string, {
 export async function buildUserDataExport(userId: string) {
   const user = await User.findById(userId).select('-password');
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw notFound(USER_NOT_FOUND_MESSAGE);
   }
 
   const [
@@ -175,7 +179,7 @@ export async function buildUserDataExport(userId: string) {
 
 export async function scheduleAccountDeletion(userId: string, confirmation: unknown) {
   if (confirmation !== true) {
-    throw new HttpError(400, 'Veuillez confirmer votre demande de suppression');
+    throw badRequest('Veuillez confirmer votre demande de suppression', 'CONFIRMATION_REQUIRED');
   }
 
   const user = await loadUserOr404(userId);
@@ -188,14 +192,14 @@ export async function scheduleAccountDeletion(userId: string, confirmation: unkn
   });
 
   if (pendingPayments > 0) {
-    throw new HttpError(
-      400,
-      'Impossible de supprimer votre compte car vous avez des paiements en cours. Veuillez les finaliser d\'abord.'
+    throw badRequest(
+      'Impossible de supprimer votre compte car vous avez des paiements en cours. Veuillez les finaliser d\'abord.',
+      'PENDING_PAYMENTS'
     );
   }
 
   const deletionDate = new Date();
-  deletionDate.setDate(deletionDate.getDate() + 30);
+  deletionDate.setDate(deletionDate.getDate() + DELETION_GRACE_PERIOD_DAYS);
 
   user.scheduledForDeletion = true;
   user.scheduledDeletionDate = deletionDate;
@@ -206,7 +210,7 @@ export async function scheduleAccountDeletion(userId: string, confirmation: unkn
     scheduledDeletionDate: deletionDate
   });
 
-  await NotificationService.createNotification({
+  await createNotification({
     recipientId: userId,
     type: 'system',
     title: 'Demande de suppression de compte',
@@ -237,7 +241,7 @@ export async function cancelAccountDeletion(userId: string) {
   const user = await loadUserOr404(userId);
 
   if (!user.scheduledForDeletion) {
-    throw new HttpError(400, 'Aucune demande de suppression n\'est en cours pour ce compte');
+    throw badRequest('Aucune demande de suppression n\'est en cours pour ce compte', 'NO_DELETION_PENDING');
   }
 
   user.scheduledForDeletion = false;
@@ -248,7 +252,7 @@ export async function cancelAccountDeletion(userId: string) {
     userId: userId.substring(0, 5) + '...'
   });
 
-  await NotificationService.createNotification({
+  await createNotification({
     recipientId: userId,
     type: 'system',
     title: 'Annulation de la demande de suppression',
@@ -257,10 +261,16 @@ export async function cancelAccountDeletion(userId: string) {
   });
 }
 
-export async function anonymizeAccount(userId: string, confirmation: unknown) {
+/**
+ * Anonymisation immédiate et irréversible : le mot de passe est exigé, un jeton
+ * volé ne doit pas suffire. La demande de suppression, elle, reste annulable
+ * pendant le délai de grâce et n'exige qu'une confirmation.
+ */
+export async function anonymizeAccount(userId: string, confirmation: unknown, currentPassword: unknown) {
   if (confirmation !== true) {
-    throw new HttpError(400, 'Veuillez confirmer votre demande d\'anonymisation');
+    throw badRequest('Veuillez confirmer votre demande d\'anonymisation', 'CONFIRMATION_REQUIRED');
   }
+  await verifyCurrentPassword(userId, currentPassword);
 
   const user = await loadUserOr404(userId);
 

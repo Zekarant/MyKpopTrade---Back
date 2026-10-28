@@ -1,130 +1,60 @@
 import { Request, Response } from 'express';
-import logger from '../../../commons/utils/logger';
-import { HttpError } from '../../../commons/utils/httpError';
 import {
   getPublicProfileData,
   updateProfileData,
   completeFirstProfile,
-  softDeleteAccount,
   setPayPalEmail,
   clearPayPalEmail
 } from '../services/authProfileService';
 
-function handleHttpError(res: Response, error: unknown): boolean {
-  if (error instanceof HttpError) {
-    res.status(error.statusCode).json({ message: error.message });
-    return true;
-  }
-  return false;
-}
-
 /**
  * Récupère le profil de l'utilisateur authentifié
+ * @route GET /api/auth/profile
  */
 export const getProfile = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = req.user!.id;
-    const user = await getPublicProfileData(userId);
-    res.status(200).json({ user });
-  } catch (error) {
-    if (handleHttpError(res, error)) return;
-
-    logger.error('Erreur lors de la récupération du profil:', error);
-    res.status(500).json({ message: 'Erreur lors de la récupération du profil' });
-  }
+  const user = await getPublicProfileData(req.user!.id);
+  res.status(200).json({ user });
 };
 
 /**
  * Marque le profil comme complété (OAuth first login).
  * Le front l'appelle après une inscription via Google/Discord.
+ * @route POST /api/auth/profile/complete
  */
 export const completeProfile = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = req.user!.id;
-    const result = await completeFirstProfile(userId, req.body);
-    res.status(200).json(result);
-  } catch (error) {
-    if (handleHttpError(res, error)) return;
-    logger.error('Erreur lors de la complétion du profil:', error);
-    res.status(500).json({ message: 'Erreur lors de la complétion du profil' });
-  }
+  const result = await completeFirstProfile(req.user!.id, req.body);
+  res.status(200).json(result);
 };
 
 /**
  * Met à jour le profil complet de l'utilisateur authentifié
+ * @route PUT /api/auth/profile
  */
 export const updateProfile = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = req.user!.id;
-    const result = await updateProfileData(userId, req.body);
-    res.status(200).json(result);
-  } catch (error) {
-    if (handleHttpError(res, error)) return;
-
-    logger.error('Erreur lors de la mise à jour du profil:', error);
-    res.status(500).json({ message: 'Erreur lors de la mise à jour du profil' });
-  }
-};
-
-/**
- * Supprime le compte de l'utilisateur authentifié
- * Le compte est marqué pour suppression et sera définitivement supprimé après 30 jours
- */
-export const deleteAccount = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = req.user!.id;
-    const { password } = req.body;
-
-    await softDeleteAccount(userId, password);
-
-    res.status(200).json({ message: 'Votre compte a été supprimé avec succès' });
-  } catch (error) {
-    if (handleHttpError(res, error)) return;
-
-    logger.error('Erreur lors de la suppression du compte:', error);
-    res.status(500).json({ message: 'Erreur lors de la suppression du compte' });
-  }
+  const result = await updateProfileData(req.user!.id, req.body);
+  res.status(200).json(result);
 };
 
 /**
  * Met à jour uniquement l'email PayPal de l'utilisateur authentifié
+ * @route PUT /api/auth/profile/paypal-email
  */
 export const updatePayPalEmail = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = req.user!.id;
-    const { paypalEmail, confirmPassword } = req.body;
+  const { paypalEmail, confirmPassword } = req.body;
 
-    const newPayPalEmail = await setPayPalEmail(userId, paypalEmail, confirmPassword);
+  const newPayPalEmail = await setPayPalEmail(req.user!.id, paypalEmail, confirmPassword);
 
-    res.status(200).json({
-      message: 'Email PayPal mis à jour avec succès',
-      paypalEmail: newPayPalEmail
-    });
-  } catch (error) {
-    if (handleHttpError(res, error)) return;
-
-    logger.error('Erreur lors de la mise à jour de l\'email PayPal:', error);
-    res.status(500).json({ message: 'Erreur lors de la mise à jour de l\'email PayPal' });
-  }
+  res.status(200).json({
+    message: 'Email PayPal mis à jour avec succès',
+    paypalEmail: newPayPalEmail
+  });
 };
 
 /**
  * Supprime l'email PayPal de l'utilisateur authentifié
+ * @route DELETE /api/auth/profile/paypal-email
  */
 export const removePayPalEmail = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = req.user!.id;
-    const { confirmPassword } = req.body;
-
-    await clearPayPalEmail(userId, confirmPassword);
-
-    res.status(200).json({
-      message: 'Email PayPal supprimé avec succès'
-    });
-  } catch (error) {
-    if (handleHttpError(res, error)) return;
-
-    logger.error('Erreur lors de la suppression de l\'email PayPal:', error);
-    res.status(500).json({ message: 'Erreur lors de la suppression de l\'email PayPal' });
-  }
+  await clearPayPalEmail(req.user!.id, req.body?.confirmPassword);
+  res.status(200).json({ message: 'Email PayPal supprimé avec succès' });
 };

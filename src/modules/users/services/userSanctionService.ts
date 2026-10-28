@@ -1,9 +1,9 @@
 import mongoose from 'mongoose';
 import User from '../../../models/userModel';
-import { HttpError } from '../../../commons/utils/httpError';
+import { badRequest, forbidden, notFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { recordAuditLog } from '../../../commons/utils/auditService';
-import { NotificationService } from '../../notifications/services/notificationService';
+import { createNotification } from '../../notifications/services/notificationService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 
 export const SUSPENSION_DURATIONS_DAYS = [1, 7, 30, 90] as const;
@@ -14,10 +14,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const normalizeReason = (reason: unknown): string => {
   if (typeof reason !== 'string' || reason.trim().length < MIN_REASON_LENGTH) {
-    throw new HttpError(
-      400,
-      `Le motif est obligatoire et doit contenir au moins ${MIN_REASON_LENGTH} caractères`
-    );
+    throw badRequest(`Le motif est obligatoire et doit contenir au moins ${MIN_REASON_LENGTH} caractères`);
   }
   return reason.trim().slice(0, MAX_REASON_LENGTH);
 };
@@ -27,8 +24,7 @@ const resolveSuspensionEnd = (durationDays: unknown): Date | undefined => {
 
   const days = Number(durationDays);
   if (!(SUSPENSION_DURATIONS_DAYS as readonly number[]).includes(days)) {
-    throw new HttpError(
-      400,
+    throw badRequest(
       `Durée invalide. Valeurs acceptées : ${SUSPENSION_DURATIONS_DAYS.join(', ')} jours, ou aucune pour une suspension définitive`
     );
   }
@@ -38,10 +34,10 @@ const resolveSuspensionEnd = (durationDays: unknown): Date | undefined => {
 const loadSanctionableUser = async (userId: string) => {
   const user = await User.findById(userId);
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw notFound('Utilisateur non trouvé');
   }
   if (user.role === 'admin') {
-    throw new HttpError(403, 'Impossible de modifier le statut d\'un administrateur');
+    throw forbidden('Impossible de modifier le statut d\'un administrateur', 'ADMIN_PROTECTED');
   }
   return user;
 };
@@ -83,7 +79,7 @@ export async function suspendUser({
     metadata: { reason: motive, until }
   });
 
-  await NotificationService.createNotification({
+  await createNotification({
     recipientId: userId,
     type: 'system',
     title: 'Votre compte a été suspendu',
@@ -141,7 +137,7 @@ export async function reactivateUser({
     details: `${user.username} réactivé${motive ? ` — ${motive}` : ''}`
   });
 
-  await NotificationService.createNotification({
+  await createNotification({
     recipientId: userId,
     type: 'system',
     title: 'Votre compte a été réactivé',
@@ -172,13 +168,17 @@ export async function liftExpiredSuspensions(): Promise<number> {
     ];
     await user.save({ validateBeforeSave: false });
 
-    await NotificationService.createNotification({
+    await createNotification({
       recipientId: user._id,
       type: 'system',
       title: 'Votre compte a été réactivé',
       content: 'Votre période de suspension est terminée, votre compte est de nouveau actif.',
       link: '/adherents/dashboard'
-    }).catch(() => {
+    }).catch((error) => {
+      logger.warn('Notification de fin de suspension non délivrée', {
+        userId: String(user._id).substring(0, 5) + '...',
+        error: error instanceof Error ? error.message : String(error)
+      });
     });
   }
 

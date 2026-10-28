@@ -2,6 +2,8 @@ import express from 'express';
 import { authenticateJWT, requireAdmin } from '../../commons/middlewares/authMiddleware';
 import { searchUsers } from './controllers/userSearchController';
 import * as userPrivacyController from './controllers/userPrivacyController';
+import * as userBlockController from './controllers/userBlockController';
+import * as notificationPreferencesController from './controllers/notificationPreferencesController';
 import * as userAdminController from './controllers/userAdminController';
 import * as adminModerationController from './controllers/adminModerationController';
 
@@ -18,6 +20,16 @@ router.get('/me/data-export', authenticateJWT, userPrivacyController.exportUserD
 router.post('/me/deletion-request', authenticateJWT, userPrivacyController.requestAccountDeletion);
 router.delete('/me/deletion-request', authenticateJWT, userPrivacyController.cancelDeletionRequest);
 router.post('/me/anonymize', authenticateJWT, userPrivacyController.anonymizeUserData);
+
+// Préférences de notification (email / push par catégorie)
+router.get('/me/notification-preferences', authenticateJWT, notificationPreferencesController.getMyNotificationPreferences);
+router.put('/me/notification-preferences', authenticateJWT, notificationPreferencesController.updateMyNotificationPreferences);
+
+// Blocage entre membres
+router.get('/me/blocked', authenticateJWT, userBlockController.listBlockedUsersHandler);
+router.get('/:id/block', authenticateJWT, userBlockController.getBlockStatusHandler);
+router.post('/:id/block', authenticateJWT, userBlockController.blockUserHandler);
+router.delete('/:id/block', authenticateJWT, userBlockController.unblockUserHandler);
 
 // Routes admin
 router.get('/admin/list', authenticateJWT, requireAdmin, userAdminController.getUsers);

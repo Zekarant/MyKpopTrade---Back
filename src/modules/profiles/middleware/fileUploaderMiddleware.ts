@@ -1,150 +1,68 @@
-import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
+import crypto from 'crypto';
 import { Request } from 'express';
-import { sanitizedMulter } from '../../../commons/middlewares/sanitizedMulter';
+import { storedUpload, reencodeImage } from '../../../commons/middlewares/storedUpload';
 
-// L'extension enregistrée dépend du type MIME validé par fileFilter, jamais du
-// nom envoyé par le client : sinon un `x.html` déclaré `image/png` serait servi
-// en HTML depuis /uploads (XSS / phishing sur le domaine de l'API).
-const EXTENSION_BY_MIME_TYPE: Record<string, string> = {
-  'image/jpeg': '.jpg',
-  'image/jpg': '.jpg',
-  'image/png': '.png',
-  'image/gif': '.gif'
-};
+const UPLOADS_ROOT = path.join(__dirname, '../../../../uploads');
 
-const extensionFor = (file: Express.Multer.File): string =>
-  EXTENSION_BY_MIME_TYPE[file.mimetype] ?? '';
+// Premier tri sur le type déclaré ; le contenu est ensuite décodé et ré-encodé,
+// et l'extension enregistrée est celle du format réellement décodé.
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
+const REJECTED_TYPE_MESSAGE = 'Format de fichier non supporté. Utilisez JPG, PNG ou GIF.';
 
-// Configuration du stockage des photos de profil
-const profilePictureStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = path.join(__dirname, '../../../../uploads/profiles');
-    
-    // Créer le dossier s'il n'existe pas
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    // Utiliser l'ID de l'utilisateur + timestamp pour éviter les collisions
-    const userId = req.user!.id;
-    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
-    const extension = extensionFor(file);
+const MB = 1024 * 1024;
 
-    cb(null, `${userId}-${uniqueSuffix}${extension}`);
-  }
+/** Upload d'images publiques, servies depuis /uploads/<dossier>. */
+function imageUpload({
+  folder,
+  filenamePrefix,
+  maxFileSize,
+  maxFiles
+}: {
+  folder: string;
+  /** Début du nom de fichier, avant l'identifiant de l'utilisateur. */
+  filenamePrefix: string;
+  maxFileSize: number;
+  maxFiles: number;
+}) {
+  return storedUpload({
+    directory: path.join(UPLOADS_ROOT, folder),
+    allowedMimeTypes: ALLOWED_IMAGE_TYPES,
+    rejectedTypeMessage: REJECTED_TYPE_MESSAGE,
+    maxFileSize,
+    maxFiles,
+    // L'ID de l'utilisateur + un suffixe aléatoire évitent les collisions.
+    filename: (req: Request, extension: string) =>
+      `${filenamePrefix}${req.user!.id}-${Date.now()}-${crypto.randomInt(1e9)}${extension}`,
+    prepare: (file) => reencodeImage(file.buffer)
+  });
+}
+
+export const profilePictureUpload = imageUpload({
+  folder: 'profiles',
+  filenamePrefix: '',
+  maxFileSize: 5 * MB,
+  maxFiles: 1
 });
 
-// Configuration du stockage de bannières de profil
-const profileBannerStorage = multer.diskStorage({
-  destination: function(req, file, cb) {
-    const uploadDir = path.join(__dirname, '../../../../uploads/banners');
-
-    if(!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-
-    cb(null, uploadDir);
-  },
-  filename: function(req, file, cb) {
-    const userId = req.user!.id;
-    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
-    const extension = extensionFor(file);
-
-    cb(null, `banner-${userId}-${uniqueSuffix}${extension}`);
-  }
+// Les bannières sont plus grandes que les photos de profil.
+export const profileBannerUpload = imageUpload({
+  folder: 'banners',
+  filenamePrefix: 'banner-',
+  maxFileSize: 10 * MB,
+  maxFiles: 1
 });
 
-// Configuration du stockage des images de produits
-const productImageStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = path.join(__dirname, '../../../../uploads/products');
-    
-    // Créer le dossier s'il n'existe pas
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const userId = req.user!.id;
-    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
-    const extension = extensionFor(file);
-
-    cb(null, `product-${userId}-${uniqueSuffix}${extension}`);
-  }
+export const productImagesUpload = imageUpload({
+  folder: 'products',
+  filenamePrefix: 'product-',
+  maxFileSize: 8 * MB,
+  maxFiles: 10
 });
 
-// Configuration du stockage des images d'avis
-const ratingImageStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = path.join(__dirname, '../../../../uploads/ratings');
-    
-    // Créer le dossier s'il n'existe pas
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const userId = req.user!.id;
-    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
-    const extension = extensionFor(file);
-
-    cb(null, `rating-${userId}-${uniqueSuffix}${extension}`);
-  }
-});
-
-// Filtre pour n'accepter que les images
-const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
-  
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Format de fichier non supporté. Utilisez JPG, PNG ou GIF.'));
-  }
-};
-
-// Configurer l'upload avec une taille maximum de 5MB
-export const profilePictureUpload = sanitizedMulter({
-  storage: profilePictureStorage,
-  limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB
-  },
-  fileFilter
-});
-
-// Upload pour les bannières de profil (plus grande taille max)
-export const profileBannerUpload = sanitizedMulter({
-  storage: profileBannerStorage,
-  limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB car les bannières sont plus grandes
-  },
-  fileFilter
-});
-
-// Upload pour les images de produits
-export const productImagesUpload = sanitizedMulter({
-  storage: productImageStorage,
-  limits: {
-    fileSize: 8 * 1024 * 1024, // 8MB
-    files: 10
-  },
-  fileFilter
-});
-
-// Upload pour les images d'avis
-export const ratingImageUpload = sanitizedMulter({
-  storage: ratingImageStorage,
-  limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB
-  },
-  fileFilter
+export const ratingImageUpload = imageUpload({
+  folder: 'ratings',
+  filenamePrefix: 'rating-',
+  maxFileSize: 5 * MB,
+  maxFiles: 5
 });

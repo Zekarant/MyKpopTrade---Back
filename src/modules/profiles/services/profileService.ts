@@ -1,10 +1,10 @@
 import mongoose from 'mongoose';
 import path from 'path';
-import fs from 'fs';
+import fs from 'fs/promises';
 import User, { IUser } from '../../../models/userModel';
 import Product from '../../../models/productModel';
 import Rating from '../../../models/ratingModel';
-import { HttpError } from '../../../commons/utils/httpError';
+import { HttpError, notFound } from '../../../commons/utils/httpError';
 
 /**
  * Calcule le pourcentage de complétion du profil
@@ -55,11 +55,12 @@ function resolveProjectPath(relativePath: string): string {
   return path.join(__dirname, '../../../../', relativePath.replace(/^\//, ''));
 }
 
-function removeFileIfExists(absolutePath: string) {
-  if (fs.existsSync(absolutePath)) {
-    fs.unlinkSync(absolutePath);
-  }
+/** Supprime un fichier ; un fichier déjà absent n'est pas une erreur. */
+async function removeFileIfExists(absolutePath: string): Promise<void> {
+  await fs.rm(absolutePath, { force: true });
 }
+
+const userNotFoundError = () => notFound('Utilisateur non trouvé', 'USER_NOT_FOUND');
 
 export async function fetchPublicProfile(identifier: string) {
   const isValidObjectId = mongoose.Types.ObjectId.isValid(identifier);
@@ -90,24 +91,21 @@ export async function fetchPublicProfile(identifier: string) {
   );
 
   if (!user) {
-    const err = new HttpError(404, 'Utilisateur non trouvé');
-    err.details = {
+    throw new HttpError(404, 'Utilisateur non trouvé', 'USER_NOT_FOUND', {
       searchedBy: isValidObjectId ? 'ID' : 'username',
       searchedValue: identifier
-    };
-    throw err;
+    });
   }
 
-  const activeListings = await Product.countDocuments({
-    seller: user._id,
-    isAvailable: true
-  });
-
-  const recentRatings = await Rating.find({ recipient: user._id })
-    .populate('reviewer', 'username profilePicture')
-    .sort({ createdAt: -1 })
-    .limit(3)
-    .select('rating review createdAt reviewer response');
+  const [activeListings, recentRatings] = await Promise.all([
+    Product.countDocuments({ seller: user._id, isAvailable: true }),
+    Rating.find({ recipient: user._id })
+      .populate('reviewer', 'username profilePicture')
+      .sort({ createdAt: -1 })
+      .limit(3)
+      .select('rating review createdAt reviewer response')
+      .lean()
+  ]);
 
   return {
     profile: {
@@ -132,10 +130,12 @@ export async function fetchPublicProfile(identifier: string) {
 }
 
 export async function fetchMyProfile(userId: string) {
+  // Pas de lean() : les valeurs par défaut du schéma (photo, statistiques,
+  // drapeaux de vérification) ne sont appliquées qu'aux documents hydratés.
   const user = await User.findById(userId);
 
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFoundError();
   }
 
   const completenessPercentage = calculateProfileCompleteness(user);
@@ -182,43 +182,13 @@ export async function fetchMyProfile(userId: string) {
   };
 }
 
-export async function updateMyProfile(userId: string, body: Record<string, unknown>) {
-  const allowedUpdates = ['bio', 'location', 'socialLinks', 'preferences'];
-
-  const updates: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(body)) {
-    if (allowedUpdates.includes(key)) {
-      updates[key] = value;
-    }
-  }
-
-  if (updates.bio && (updates.bio as string).length > 500) {
-    throw new HttpError(400, 'La bio ne peut pas dépasser 500 caractères');
-  }
-
-  const user = await User.findByIdAndUpdate(
-    userId,
-    { $set: updates },
-    { returnDocument: 'after', runValidators: true }
-  );
-
-  if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
-  }
-
-  user.set('statistics.lastActive', new Date());
-  await user.save();
-
-  return {
-    bio: user.bio,
-    location: user.location,
-    socialLinks: user.socialLinks,
-    preferences: user.preferences
-  };
-}
-
 type ProfileImageField = 'profilePicture' | 'profileBanner';
 
+/**
+ * Remplace la photo ou la bannière par le fichier déjà enregistré par l'upload,
+ * puis supprime l'ancien fichier. En cas d'échec, le fichier reçu est supprimé.
+ * @returns le chemin public de la nouvelle image
+ */
 export async function replaceProfileImage({
   userId,
   field,
@@ -230,25 +200,32 @@ export async function replaceProfileImage({
   uploadDir: 'profiles' | 'banners';
   uploadedPath: string;
 }): Promise<string> {
-  const user = await User.findById(userId);
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw userNotFoundError();
+    }
 
-  if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    const previous = user[field];
+    const relativePath = `/uploads/${uploadDir}/${path.basename(uploadedPath)}`;
+    user[field] = relativePath;
+    await user.save();
+
+    if (previous) {
+      await removeFileIfExists(resolveProjectPath(previous));
+    }
+    return relativePath;
+  } catch (error) {
+    // Rien ne référence le fichier reçu : il resterait orphelin sur le disque.
+    await removeFileIfExists(uploadedPath);
+    throw error;
   }
-
-  const relativePath = `/uploads/${uploadDir}/${path.basename(uploadedPath)}`;
-
-  const previous = user[field];
-  if (previous) {
-    removeFileIfExists(resolveProjectPath(previous));
-  }
-
-  user[field] = relativePath;
-  await user.save();
-
-  return relativePath;
 }
 
+/**
+ * Retire la photo ou la bannière et supprime son fichier.
+ * @throws HttpError 400 `missingMessage` si aucune image n'est définie
+ */
 export async function removeProfileImage({
   userId,
   field,
@@ -257,20 +234,18 @@ export async function removeProfileImage({
   userId: string;
   field: ProfileImageField;
   missingMessage: string;
-}) {
+}): Promise<void> {
   const user = await User.findById(userId);
-
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFoundError();
   }
 
   const current = user[field];
   if (!current) {
-    throw new HttpError(400, missingMessage);
+    throw new HttpError(400, missingMessage, 'NO_PROFILE_IMAGE');
   }
-
-  removeFileIfExists(resolveProjectPath(current));
 
   user.set(field, undefined);
   await user.save();
+  await removeFileIfExists(resolveProjectPath(current));
 }

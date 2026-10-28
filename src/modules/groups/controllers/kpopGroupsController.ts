@@ -1,7 +1,4 @@
 import { Request, Response } from 'express';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import logger from '../../../commons/utils/logger';
-import { mapHttpError } from '../../../commons/utils/httpErrorMapper';
 import {
   createGroup,
   listGroups,
@@ -11,176 +8,92 @@ import {
   updateGroup,
   deleteGroup
 } from '../services/kpopGroupsService';
-import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { clampLimit, parsePagination, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 import { queryString } from '../../../commons/utils/query';
+
+const DEFAULT_LIMIT = 20;
+/** Le panneau admin K-pop charge jusqu'à 2000 groupes d'un coup. */
+const CATALOG_MAX_LIMIT = 2000;
 
 /**
  * Créer un nouveau groupe K-pop (Admin uniquement)
  */
-export const createKpopGroup = asyncHandler(async (req: Request, res: Response) => {
-  const groupData = req.body;
+export const createKpopGroup = async (req: Request, res: Response) => {
+  const group = await createGroup(req.body ?? {});
 
-  try {
-    const group = await createGroup(groupData);
-
-    return res.status(201).json({
-      message: 'Groupe K-pop créé avec succès',
-      group
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la création du groupe K-pop', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      groupData: groupData.name
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la création du groupe'
-    });
-  }
-});
+  res.status(201).json({
+    message: 'Groupe K-pop créé avec succès',
+    group
+  });
+};
 
 /**
  * Récupérer tous les groupes K-pop avec pagination et filtres
  */
-export const getKpopGroups = asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const result = await listGroups(req.query);
-    return res.status(200).json(result);
-  } catch (error) {
-    logger.error('Erreur lors de la récupération des groupes', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la récupération des groupes'
-    });
-  }
-});
+export const getKpopGroups = async (req: Request, res: Response) => {
+  const { page, limit } = parsePagination(req.query, { defaultLimit: DEFAULT_LIMIT, maxLimit: CATALOG_MAX_LIMIT });
+
+  const result = await listGroups({
+    page,
+    limit,
+    sortBy: queryString(req.query.sortBy) || 'name',
+    sortOrder: req.query.sortOrder === 'desc' ? -1 : 1,
+    genre: queryString(req.query.genre),
+    tag: queryString(req.query.tag),
+    search: queryString(req.query.search)
+  });
+  res.status(200).json(result);
+};
 
 /**
- * Rerchercher des groupes K-pop avec des filtres avancés
+ * Rechercher des groupes K-pop avec des filtres avancés
  */
-export const searchGroups = asyncHandler(async (req: Request, res: Response) => {
-  const { query } = req.query;
-  const limit = parseInt(queryString(req.query.limit) || '20');
-  const includeInactive = req.query.includeInactive === 'true';
-
-  try {
-    const result = await searchGroupsByQuery({ query, limit, includeInactive });
-    return res.status(200).json(result);
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la recherche de groupes', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      query
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la recherche'
-    });
-  }
-});
+export const searchGroups = async (req: Request, res: Response) => {
+  const result = await searchGroupsByQuery({
+    query: queryString(req.query.query),
+    limit: clampLimit(req.query.limit, DEFAULT_LIMIT, MAX_PAGE_SIZE),
+    includeInactive: req.query.includeInactive === 'true'
+  });
+  res.status(200).json(result);
+};
 
 /**
  * Récupérer les groupes K-pop les plus populaires
  */
-export const getPopularGroups = asyncHandler(async (req: Request, res: Response) => {
-  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
-
-  try {
-    const groups = await fetchPopularGroups(limit);
-    return res.status(200).json({
-      groups,
-      total: groups.length
-    });
-  } catch (error) {
-    logger.error('Erreur lors de la récupération des groupes populaires', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue'
-    });
-  }
-});
+export const getPopularGroups = async (req: Request, res: Response) => {
+  const groups = await fetchPopularGroups(clampLimit(req.query.limit, DEFAULT_LIMIT, MAX_PAGE_SIZE));
+  res.status(200).json({
+    groups,
+    total: groups.length
+  });
+};
 
 /**
  * Récupérer un groupe K-pop par son ID avec ses albums et statistiques
  */
-export const getKpopGroupById = asyncHandler(async (req: Request, res: Response) => {
-  const groupId = req.params.groupId as string;
-
-  try {
-    const result = await fetchGroupWithStats(groupId);
-    return res.status(200).json(result);
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la récupération du groupe', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      groupId
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la récupération du groupe'
-    });
-  }
-});
+export const getKpopGroupById = async (req: Request, res: Response) => {
+  const result = await fetchGroupWithStats(req.params.groupId as string);
+  res.status(200).json(result);
+};
 
 /**
  * Mettre à jour un groupe K-pop (Admin uniquement)
  */
-export const updateKpopGroup = asyncHandler(async (req: Request, res: Response) => {
-  const groupId = req.params.groupId as string;
-
-  try {
-    const group = await updateGroup(groupId, req.body);
-    return res.status(200).json({
-      message: 'Groupe mis à jour avec succès',
-      group
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la mise à jour du groupe', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      groupId
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la mise à jour du groupe'
-    });
-  }
-});
+export const updateKpopGroup = async (req: Request, res: Response) => {
+  const group = await updateGroup(req.params.groupId as string, req.body ?? {});
+  res.status(200).json({
+    message: 'Groupe mis à jour avec succès',
+    group
+  });
+};
 
 /**
  * Supprimer un groupe (Admin uniquement)
  */
-export const deleteKpopGroup = asyncHandler(async (req: Request, res: Response) => {
-  const groupId = req.params.groupId as string;
-
-  try {
-    const albumsDeleted = await deleteGroup(groupId);
-    return res.status(200).json({
-      message: 'Groupe supprimé avec succès',
-      albumsDeleted
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la suppression du groupe', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      groupId
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la suppression du groupe'
-    });
-  }
-});
+export const deleteKpopGroup = async (req: Request, res: Response) => {
+  const albumsDeleted = await deleteGroup(req.params.groupId as string);
+  res.status(200).json({
+    message: 'Groupe supprimé avec succès',
+    albumsDeleted
+  });
+};

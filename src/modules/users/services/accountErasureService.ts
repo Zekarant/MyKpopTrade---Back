@@ -6,11 +6,13 @@ import Notification from '../../../models/notificationModel';
 import SearchHistory from '../../../models/historicSearchModel';
 import PushSubscription from '../../../models/pushSubscriptionModel';
 import IdentityVerification from '../../../models/identityVerificationModel';
-import Follow from '../../follows/model';
+import Follow from '../../../models/followModel';
+import SavedSearch from '../../savedSearches/model';
+import Block from '../../../models/blockModel';
 import { deleteSecureDocument } from '../../../commons/services/secureStorageService';
 import { invalidateAllUserRefreshTokens } from '../../../commons/services/tokenService';
 import { anonymizeBuyerPayments } from '../../payments/services/paymentAnonymizationService';
-import { HttpError } from '../../../commons/utils/httpError';
+import { notFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 
 const DEFAULT_PROFILE_PICTURE = 'https://mykpoptrade.com/images/avatar-default.png';
@@ -68,7 +70,7 @@ export function erasePersonalFields(user: IUser, pseudonym: string): void {
 export async function eraseUserAccount(userId: string): Promise<{ pseudonym: string }> {
   const user = await User.findById(userId);
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw notFound('Utilisateur non trouvé');
   }
 
   const pseudonym = deletedUsernameFor(userId);
@@ -86,7 +88,7 @@ export async function eraseUserAccount(userId: string): Promise<{ pseudonym: str
   const verifications = await IdentityVerification.find({ user: userId }).select('documentReferenceId');
   for (const verification of verifications) {
     try {
-      deleteSecureDocument(verification.documentReferenceId);
+      await deleteSecureDocument(verification.documentReferenceId);
     } catch (error) {
       logger.error('Pièce d\'identité non supprimée lors de l\'effacement d\'un compte', {
         error: error instanceof Error ? error.message : String(error)
@@ -102,6 +104,8 @@ export async function eraseUserAccount(userId: string): Promise<{ pseudonym: str
     Notification.deleteMany({ recipient: userId }),
     Cart.deleteOne({ user: userId }),
     Follow.deleteMany({ $or: [{ follower: userId }, { following: userId }] }),
+    SavedSearch.deleteMany({ user: userId }),
+    Block.deleteMany({ $or: [{ blocker: userId }, { blocked: userId }] }),
     Product.updateMany({ seller: userId, isSold: { $ne: true } }, { $set: { isAvailable: false } }),
     anonymizeBuyerPayments(userId)
   ]);

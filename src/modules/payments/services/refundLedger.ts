@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { add, gt } from '../../../commons/utils/moneyMath';
-import { NotificationService } from '../../notifications/services/notificationService';
+import { createNotification } from '../../notifications/services/notificationService';
 import type { IPayment } from '../../../models/paymentModel';
 
 export interface RefundEntryInput {
@@ -110,9 +110,10 @@ export async function notifyRefund(
 
   const label = ledger.isFullyRefunded ? 'complet' : 'partiel';
 
-  await NotificationService.createNotification({
+  // `refund_issued` (catégorie commandes) : l'email suit les préférences du membre.
+  await createNotification({
     recipientId: payment.buyer,
-    type: 'system',
+    type: 'refund_issued',
     title: `Remboursement ${label} reçu`,
     content: `Vous avez été remboursé de ${refundAmount} ${payment.currency} pour votre achat.`,
     link: `/account/purchases/${payment._id}`,
@@ -126,9 +127,9 @@ export async function notifyRefund(
     }
   });
 
-  await NotificationService.createNotification({
+  await createNotification({
     recipientId: payment.seller,
-    type: 'system',
+    type: 'refund_issued',
     title: `Remboursement ${label} effectué`,
     content: `Un remboursement de ${refundAmount} ${payment.currency} a été émis depuis votre compte.`,
     link: `/account/sales/${payment._id}`,

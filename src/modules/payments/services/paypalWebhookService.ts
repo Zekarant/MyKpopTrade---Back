@@ -1,14 +1,14 @@
-import Payment from '../../../models/paymentModel';
+import Payment, { IPayment } from '../../../models/paymentModel';
 import Product from '../../../models/productModel';
-import Conversation from '../../../models/conversationModel';
-import Message from '../../../models/messageModel';
 import User from '../../../models/userModel';
 import { PayPalPartnerService } from './paypalPartnerService';
 import { applyRefundToPayment, notifyRefund } from './refundLedger';
-import { NotificationService } from '../../notifications/services/notificationService';
+import { completePayment } from './paymentCompletion';
+import { createNotification } from '../../notifications/services/notificationService';
 import logger from '../../../commons/utils/logger';
-import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
-import { PayPalLink, PayPalMoney } from './paypalClient';
+import { toCents } from '../../../commons/utils/moneyMath';
+import { ALERT_BURST_COOLDOWN_MS, dispatchAdminAlert } from '../../../commons/services/adminAlertService';
+import { PayPalClient, PayPalLink, PayPalMoney } from './paypalClient';
 
 /**
  * Ressource d'un webhook PayPal. Sa forme dépend de `event_type` (capture,
@@ -28,6 +28,79 @@ interface PayPalWebhookResource {
 export interface PayPalWebhookEvent {
   event_type: string;
   resource: PayPalWebhookResource;
+}
+
+/**
+ * La capture porte-t-elle exactement le montant et la devise de la commande ?
+ * Un écart (ordre modifié côté PayPal, rapprochement sur le mauvais paiement)
+ * ne doit jamais vendre le produit pour une somme qu'on n'a pas facturée.
+ */
+function isCapturedAmountExpected(
+  captured: PayPalMoney | undefined,
+  payment: Pick<IPayment, 'amount' | 'currency'>
+): boolean {
+  const capturedValue = Number.parseFloat(captured?.value ?? '');
+  return Number.isFinite(capturedValue) &&
+    captured?.currency_code === payment.currency &&
+    toCents(capturedValue) === toCents(payment.amount);
+}
+
+function alertCapturedAmountMismatch(
+  payment: Pick<IPayment, '_id' | 'amount' | 'currency'>,
+  captured: PayPalMoney | undefined,
+  orderId: string
+): void {
+  const capturedLabel = captured ? `${captured.value} ${captured.currency_code}` : 'absent';
+  logger.error('Webhook de capture ignoré : montant capturé différent du paiement', {
+    paymentId: payment._id,
+    orderId,
+    expected: `${payment.amount} ${payment.currency}`,
+    captured: capturedLabel
+  });
+
+  dispatchAdminAlert({
+    event: 'payment.capture_amount_mismatch',
+    severity: 'critical',
+    title: 'Montant capturé par PayPal différent de la commande',
+    summary: `PayPal a encaissé ${capturedLabel} au lieu de ${payment.amount} ${payment.currency} : le paiement n'a pas été finalisé, vérifiez la transaction.`,
+    adminTab: 'audit',
+    fields: [
+      { name: 'Attendu', value: `${payment.amount} ${payment.currency}`, inline: true },
+      { name: 'Capturé', value: capturedLabel, inline: true },
+      { name: 'Order PayPal', value: orderId, inline: true }
+    ],
+    data: { paymentId: payment._id, orderId }
+  });
+}
+
+/**
+ * Vérifie auprès de PayPal la signature d'un webhook. Un rejet alerte les
+ * admins : tant qu'il dure, aucun paiement n'est confirmé par webhook.
+ */
+export async function isAuthenticWebhook(
+  headers: Record<string, string | string[] | undefined>,
+  event: { event_type: string; id?: string }
+): Promise<boolean> {
+  if (await PayPalClient.verifyWebhookSignature(headers, event)) {
+    return true;
+  }
+
+  logger.warn('Webhook PayPal rejeté : signature invalide', {
+    eventType: event.event_type,
+    eventId: event.id
+  });
+
+  dispatchAdminAlert({
+    event: 'payment.webhook_rejected',
+    severity: 'critical',
+    title: 'Webhook PayPal rejeté (signature invalide)',
+    summary: 'Vérifiez PAYPAL_WEBHOOK_ID. Tant que la signature échoue, aucun paiement n\'est confirmé par webhook.',
+    adminTab: 'audit',
+    fields: [{ name: 'Type d\'évènement', value: String(event.event_type), inline: true }],
+    throttleMs: ALERT_BURST_COOLDOWN_MS
+  });
+
+  return false;
 }
 
 /**
@@ -120,68 +193,12 @@ export class PayPalWebhookService {
         return;
       }
 
-      // Le captureId est enregistré même si le paiement est déjà « completed »
-      // (capture faite en synchrone par l'API puis webhook redélivré) : sans
-      // lui, le vendeur ne peut plus rembourser.
-      if (captureId && payment.captureId !== captureId) {
-        payment.captureId = captureId;
-        await payment.save();
+      if (!isCapturedAmountExpected(resource.amount, payment)) {
+        alertCapturedAmountMismatch(payment, resource.amount, orderId);
+        return;
       }
 
-      if (payment.status !== 'completed') {
-        payment.status = 'completed';
-        payment.completedAt = new Date();
-
-        await payment.save();
-
-        await Product.findByIdAndUpdate(payment.product, {
-          isAvailable: false,
-          isSold: true,
-          soldAt: new Date(),
-          soldTo: payment.buyer
-        });
-
-        await NotificationService.createNotification({
-          recipientId: payment.seller,
-          type: 'system',
-          title: 'Nouveau paiement reçu',
-          content: `Un acheteur a payé ${payment.amount} ${payment.currency} pour votre produit.`,
-          link: `/account/sales/${payment._id}`,
-          data: {
-            paymentId: payment._id,
-            productId: payment.product,
-            amount: payment.amount,
-            currency: payment.currency
-          }
-        });
-
-        const conversation = await Conversation.findOne({
-          productId: payment.product,
-          participants: { $all: [payment.buyer, payment.seller] },
-          isActive: true
-        });
-
-        if (conversation) {
-          await Message.create({
-            conversation: conversation._id,
-            sender: payment.seller,
-            content: 'Paiement validé ☑️ — nous vous laissons organiser l\'envoi du colis avec le vendeur.',
-            contentType: 'system_notification',
-            isSystemMessage: true,
-            readBy: []
-          });
-
-          await Conversation.updateOne(
-            { _id: conversation._id },
-            { lastMessageAt: new Date() }
-          );
-        } else {
-          logger.warn('Aucune conversation trouvée pour poster le message de paiement validé', {
-            paymentId: payment._id,
-            productId: payment.product
-          });
-        }
-      }
+      await completePayment(payment._id, captureId);
     } catch (error) {
       logger.error('Erreur lors du traitement de l\'événement de paiement complété', { error });
       throw error;
@@ -196,12 +213,15 @@ export class PayPalWebhookService {
   private static async handleRefund(event: PayPalWebhookEvent): Promise<void> {
     try {
       const resource = event.resource;
-      // PAYMENT.CAPTURE.REFUNDED porte toujours l'id, les liens et le montant du remboursement.
-      const captureId = resource.links!.find((link) => link.rel === 'up')?.href.split('/').pop();
+      const captureId = resource.links?.find((link) => link.rel === 'up')?.href.split('/').pop();
 
-      if (!captureId) {
-        logger.warn('Impossible de déterminer le captureId dans l\'événement de remboursement', {
-          resourceId: resource.id
+      // Un événement signé mais incomplet ne deviendra jamais traitable : y
+      // répondre 5xx ferait redélivrer PayPal indéfiniment.
+      if (!captureId || !resource.amount || !resource.id) {
+        logger.warn('Événement de remboursement incomplet, ignoré', {
+          resourceId: resource.id,
+          hasCaptureId: Boolean(captureId),
+          hasAmount: Boolean(resource.amount)
         });
         return;
       }
@@ -213,9 +233,9 @@ export class PayPalWebhookService {
         return;
       }
 
-      const refundAmount = parseFloat(resource.amount!.value);
-      const refundCurrency = resource.amount!.currency_code;
-      const refundId = resource.id!;
+      const refundAmount = parseFloat(resource.amount.value);
+      const refundCurrency = resource.amount.currency_code;
+      const refundId = resource.id;
 
       // Même registre que le remboursement synchrone : idempotent par refundId,
       // donc un webhook redélivré ne double ni le montant ni les notifications.
@@ -273,11 +293,12 @@ export class PayPalWebhookService {
 
     const status = await PayPalPartnerService.completeOnboarding(
       seller._id.toString(),
-      merchantId
+      merchantId,
+      trackingId
     );
 
-    if (status && PayPalPartnerService.isReady(status)) {
-      await NotificationService.createNotification({
+    if (PayPalPartnerService.isReady(status)) {
+      await createNotification({
         recipientId: seller._id,
         type: 'system',
         title: 'Compte PayPal connecté',
@@ -357,7 +378,7 @@ export class PayPalWebhookService {
       sellerId: seller._id.toString().substring(0, 5) + '...'
     });
 
-    await NotificationService.createNotification({
+    await createNotification({
       recipientId: seller._id,
       type: 'system',
       title: 'Connexion PayPal révoquée',

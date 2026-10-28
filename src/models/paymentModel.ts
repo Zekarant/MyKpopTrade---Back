@@ -346,7 +346,12 @@ paymentSchema.methods.toJSON = function() {
 // ordre PayPal (capture, annulation, webhooks) et paiements d'un produit.
 paymentSchema.index({ buyer: 1, createdAt: -1 });
 paymentSchema.index({ seller: 1, createdAt: -1 });
-paymentSchema.index({ paymentIntentId: 1 });
+// Un ordre PayPal ↔ un paiement (cf. src/migrations/0004-uniquePaymentIntentId.ts).
+paymentSchema.index({ paymentIntentId: 1 }, { unique: true, partialFilterExpression: { paymentIntentId: { $type: 'string' } } });
 paymentSchema.index({ product: 1, status: 1 });
+// Webhook PAYMENT.CAPTURE.REFUNDED : le paiement n'est connu que par sa capture.
+paymentSchema.index({ captureId: 1 }, { sparse: true });
+// Tâches planifiées de suivi des colis (polling, relances, auto-confirmation).
+paymentSchema.index({ 'shipment.status': 1, 'shipment.shippedAt': 1 });
 
 export default (mongoose.models.Payment as mongoose.Model<IPayment>) || mongoose.model<IPayment>('Payment', paymentSchema);

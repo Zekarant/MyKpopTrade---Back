@@ -1,11 +1,14 @@
 import axios from 'axios';
-import { HttpError } from '../../../commons/utils/httpError';
+import { badRequest, HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 
 const BAN_URL = 'https://api-adresse.data.gouv.fr/search/';
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 15;
 const REQUEST_TIMEOUT_MS = 5000;
+
+const lookupUnavailable = () =>
+  new HttpError(502, 'Service d\'autocomplétion d\'adresse indisponible', 'ADDRESS_LOOKUP_UNAVAILABLE');
 
 export interface AddressResult {
   label: string;
@@ -86,7 +89,7 @@ export async function lookupAddress(query: LookupQuery): Promise<AddressResult[]
   const limit = clampLimit(query.limit);
 
   if (!q && !postalCode) {
-    throw new HttpError(400, 'Paramètre q ou postalCode requis');
+    throw badRequest('Paramètre q ou postalCode requis');
   }
 
   const banQuery = q ?? postalCode!;
@@ -116,11 +119,11 @@ export async function lookupAddress(query: LookupQuery): Promise<AddressResult[]
         status: error.response.status,
         params
       });
-      throw new HttpError(502, 'Service d\'autocomplétion d\'adresse indisponible');
+      throw lookupUnavailable();
     }
     logger.error('Erreur lors de l\'appel à BAN', {
       error: error instanceof Error ? error.message : String(error)
     });
-    throw new HttpError(502, 'Service d\'autocomplétion d\'adresse indisponible');
+    throw lookupUnavailable();
   }
 }

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import * as postController from './controller';
+import * as postController from './controllers/postController';
 import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
 import { productImagesUpload } from '../profiles/middleware/fileUploaderMiddleware';
 

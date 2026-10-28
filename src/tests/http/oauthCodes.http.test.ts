@@ -5,13 +5,16 @@ import { createTestUser } from '../helpers/fixtures';
 import User from '../../models/userModel';
 import { generateAccessToken } from '../../commons/services/tokenService';
 import { issueOneTimeCode } from '../../modules/auth/services/oneTimeCodeService';
+import env from '../../config/env';
 
 // Stratégie Google enregistrée avec des identifiants factices (createApp les
 // lit à l'appel) : aucun appel réseau, on vérifie seulement la redirection.
-process.env.GOOGLE_CLIENT_ID = 'client-de-test';
-process.env.GOOGLE_CLIENT_SECRET = 'secret-de-test';
-process.env.API_URL = 'http://api.test';
-process.env.FRONTEND_URL = 'http://front.test';
+// La config est validée à l'import de config/env : on surcharge l'objet validé,
+// process.env n'est plus relu ensuite.
+env.GOOGLE_CLIENT_ID = 'client-de-test';
+env.GOOGLE_CLIENT_SECRET = 'secret-de-test';
+env.API_URL = 'http://api.test';
+env.FRONTEND_URL = 'http://front.test';
 
 /** Aucun jeton de session dans une URL : codes et tickets OAuth à usage unique. */
 const app = createApp();
@@ -40,9 +43,12 @@ describe('HTTP — codes à usage unique OAuth', () => {
       expect(first.status).toBe(200);
       expect(first.body).toMatchObject({
         accessToken: expect.any(String),
-        refreshToken: expect.any(String),
         user: { id: user._id.toString(), username: user.username }
       });
+      expect(first.body.refreshToken).toBeUndefined();
+      expect(first.headers['set-cookie']).toEqual(
+        expect.arrayContaining([expect.stringMatching(/^mkt_refresh=.+HttpOnly/)])
+      );
       expect(replay.status).toBe(401);
     });
 

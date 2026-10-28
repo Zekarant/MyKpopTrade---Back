@@ -1,76 +1,40 @@
-import { mapHttpError } from '../httpErrorMapper';
+import { asHttpError } from '../httpErrorMapper';
 import { HttpError } from '../httpError';
-import type { Response } from 'express';
 import mongoose from 'mongoose';
 
-type ResMock = Response & { _status?: number; _body?: unknown };
+describe('asHttpError', () => {
+  it('rend telle quelle une HttpError, code métier compris', () => {
+    const error = new HttpError(403, 'Bloqué', 'BLOCKED');
 
-function createResMock(): ResMock {
-  const res = {} as ResMock;
-  res.status = jest.fn((code: number) => {
-    res._status = code;
-    return res;
-  });
-  res.json = jest.fn((body: unknown) => {
-    res._body = body;
-    return res;
-  });
-  return res;
-}
-
-describe('mapHttpError', () => {
-  it('retourne une réponse avec statusCode + message quand l\'erreur est HttpError', () => {
-    const res = createResMock();
-    const error = new HttpError(404, 'Not found');
-
-    const result = mapHttpError(res, error);
-
-    expect(result).toBe(res);
-    expect(res.status).toHaveBeenCalledWith(404);
-    expect(res.json).toHaveBeenCalledWith({ message: 'Not found' });
+    expect(asHttpError(error)).toBe(error);
   });
 
-  it('retourne null pour une Error standard', () => {
-    const res = createResMock();
-    const error = new Error('Generic error');
-
-    const result = mapHttpError(res, error);
-
-    expect(result).toBeNull();
-    expect(res.status).not.toHaveBeenCalled();
-    expect(res.json).not.toHaveBeenCalled();
-  });
-
-  it('retourne null pour une valeur non-Error', () => {
-    const res = createResMock();
-
-    expect(mapHttpError(res, 'string error')).toBeNull();
-    expect(mapHttpError(res, null)).toBeNull();
-    expect(mapHttpError(res, undefined)).toBeNull();
-    expect(mapHttpError(res, { statusCode: 404, message: 'fake' })).toBeNull();
+  it('ne traduit pas une vraie erreur serveur (500 par le gestionnaire central)', () => {
+    expect(asHttpError(new Error('Generic error'))).toBeNull();
+    expect(asHttpError('string error')).toBeNull();
+    expect(asHttpError(null)).toBeNull();
+    expect(asHttpError(undefined)).toBeNull();
+    expect(asHttpError({ statusCode: 404, message: 'fake' })).toBeNull();
   });
 
   it('traduit les erreurs de données Mongoose en erreurs client', () => {
     const validation = new mongoose.Error.ValidationError();
     validation.addError('albumType', new mongoose.Error.ValidatorError({ path: 'albumType', message: 'invalide' }));
-    const cases: Array<[unknown, number]> = [
-      [validation, 400],
-      [new mongoose.Error.CastError('ObjectId', 'abc', 'artistId'), 400],
-      [Object.assign(new Error('E11000 duplicate key'), { code: 11000 }), 409]
+    const cases: Array<[unknown, number, string]> = [
+      [validation, 400, 'VALIDATION_ERROR'],
+      [new mongoose.Error.CastError('ObjectId', 'abc', 'artistId'), 400, 'INVALID_VALUE'],
+      [Object.assign(new Error('E11000 duplicate key'), { code: 11000 }), 409, 'DUPLICATE']
     ];
-    for (const [error, status] of cases) {
-      const res = createResMock();
-      expect(mapHttpError(res, error)).toBe(res);
-      expect(res.status).toHaveBeenCalledWith(status);
+    for (const [error, status, code] of cases) {
+      expect(asHttpError(error)).toMatchObject({ statusCode: status, code });
     }
   });
 
-  it('propage le bon statusCode (403, 400, 409, ...)', () => {
-    const cases = [400, 401, 403, 404, 409, 500];
-    for (const code of cases) {
-      const res = createResMock();
-      mapHttpError(res, new HttpError(code, `code ${code}`));
-      expect(res.status).toHaveBeenCalledWith(code);
-    }
+  it('expose les refus 4xx de body-parser (JSON malformé, corps trop gros)', () => {
+    const tooLarge = Object.assign(new Error('request entity too large'), { status: 413, expose: true });
+    const hidden = Object.assign(new Error('internal'), { status: 400, expose: false });
+
+    expect(asHttpError(tooLarge)).toMatchObject({ statusCode: 413, code: 'PAYLOAD_TOO_LARGE' });
+    expect(asHttpError(hidden)).toBeNull();
   });
 });

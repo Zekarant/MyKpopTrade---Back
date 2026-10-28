@@ -1,9 +1,9 @@
 import User, { IUser } from '../../../models/userModel';
 import { validateEmail, normalizePhoneNumber, validateUsername } from '../../../commons/utils/validators';
-import { sendVerificationEmail } from '../../../commons/services/emailService';
+import { sendVerificationEmail, sendEmailChangedNotice } from '../../../commons/services/emailService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
-import { eraseUserAccount } from '../../users/services/accountErasureService';
+import { verifyCurrentPassword } from './passwordService';
 
 async function loadUserOr404(userId: string) {
   const user = await User.findById(userId);
@@ -24,15 +24,8 @@ async function verifyPasswordIfProvided(userId: string, confirmPassword?: string
 
   if (!userWithPassword.password) return;
 
-  try {
-    const isPasswordValid = await userWithPassword.comparePassword(confirmPassword);
-    if (!isPasswordValid) {
-      throw new HttpError(401, 'Mot de passe de confirmation incorrect');
-    }
-  } catch (error) {
-    if (error instanceof HttpError) throw error;
-    logger.error('Erreur lors de la vérification du mot de passe:', error);
-    throw new HttpError(500, 'Erreur lors de la vérification du mot de passe');
+  if (!(await userWithPassword.comparePassword(confirmPassword))) {
+    throw new HttpError(401, 'Mot de passe de confirmation incorrect');
   }
 }
 
@@ -75,6 +68,8 @@ export interface ProfileUpdateInput {
   preferences?: IUser['preferences'];
   legalName?: string;
   address?: AddressInput | null | '';
+  /** Exigé pour changer d'email. */
+  currentPassword?: string;
 }
 
 export interface FirstProfileInput extends ProfileUpdateInput {
@@ -98,7 +93,8 @@ export async function updateProfileData(userId: string, body: ProfileUpdateInput
     socialLinks,
     preferences,
     legalName,
-    address
+    address,
+    currentPassword
   } = body;
 
   let emailUpdated = false;
@@ -119,20 +115,25 @@ export async function updateProfileData(userId: string, body: ProfileUpdateInput
     if (!validateEmail(email)) {
       throw new HttpError(400, 'Format d\'email invalide');
     }
+    // L'email sert à réinitialiser le mot de passe : le changer avec un simple
+    // jeton d'accès volé donnerait le compte pour de bon, 2FA comprise.
+    await verifyCurrentPassword(userId, currentPassword);
     const existing = await User.findOne({ email, _id: { $ne: userId } });
     if (existing) {
       throw new HttpError(400, 'Cet email est déjà utilisé');
     }
+    const previousEmail = user.email;
     user.email = email;
     user.isEmailVerified = false;
     const verificationToken = user.generateVerificationToken();
     await user.save();
     try {
       await sendVerificationEmail(user, verificationToken);
+      await sendEmailChangedNotice(user, previousEmail);
     } catch (error) {
       // L'utilisateur peut redemander un email de vérification via un autre endpoint
       // si l'envoi échoue ici (SMTP down, rate limit, etc.).
-      logger.error('Échec de l\'envoi de l\'email de vérification', {
+      logger.error('Échec de l\'envoi des emails de changement d\'adresse', {
         error: error instanceof Error ? error.message : String(error),
         userId
       });
@@ -197,7 +198,14 @@ export async function updateProfileData(userId: string, body: ProfileUpdateInput
   if (bio !== undefined) user.bio = bio.substring(0, 500);
   if (location !== undefined) user.location = location.substring(0, 100);
   if (socialLinks) user.socialLinks = { ...user.socialLinks, ...socialLinks };
-  if (preferences) user.preferences = { ...user.preferences, ...preferences };
+  if (preferences) {
+    // Clé par clé : réaffecter l'objet entier pourrait effacer les
+    // préférences de notification, qui passent par leur propre endpoint validé.
+    const { notifications: _notifications, ...otherPreferences } = preferences;
+    for (const [key, value] of Object.entries(otherPreferences)) {
+      user.set(`preferences.${key}`, value);
+    }
+  }
 
   // Uniquement utilisés pour pré-remplir l'onboarding PayPal (cf.
   // paypalPartnerService.ts) — facultatifs, jamais requis pour vendre.
@@ -285,34 +293,6 @@ export async function completeFirstProfile(userId: string, body: FirstProfileInp
   await user.save();
 
   return { ...result, profileCompleted: true };
-}
-
-export async function softDeleteAccount(userId: string, password?: string) {
-  // Mongoose crée des sous-documents vides par défaut — on vérifie l'id explicitement
-  // pour savoir si un provider social est vraiment rattaché.
-  const userWithPassword = await User.findById(userId).select('+password');
-  if (!userWithPassword) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
-  }
-
-  const hasSocialAuth = Boolean(
-    userWithPassword.socialAuth?.google?.id ||
-    userWithPassword.socialAuth?.facebook?.id ||
-    userWithPassword.socialAuth?.discord?.id
-  );
-
-  if (!hasSocialAuth) {
-    if (!password) {
-      throw new HttpError(400, 'Mot de passe requis pour confirmer la suppression');
-    }
-
-    const isPasswordValid = await userWithPassword.comparePassword(password);
-    if (!isPasswordValid) {
-      throw new HttpError(401, 'Mot de passe incorrect');
-    }
-  }
-
-  await eraseUserAccount(userId);
 }
 
 export async function setPayPalEmail(userId: string, paypalEmail: string, confirmPassword?: string) {

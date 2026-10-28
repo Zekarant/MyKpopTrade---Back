@@ -3,20 +3,20 @@ import * as paymentController from './controllers/paymentController';
 import * as paymentGdprController from './controllers/paymentGdprController';
 import { authenticateJWT, requireAdmin } from '../../commons/middlewares/authMiddleware';
 import { sanitizeInputs } from '../../commons/middlewares/sanitizeMiddleware';
-import { validatePaymentConfig } from '../../config/paymentConfig';
 import { validateRefundRequest, validatePassword } from '../../commons/middlewares/validationMiddleware';
 import { dataBreachDetection } from '../../commons/middlewares/dataBreachDetectionMiddleware';
 
-// Valider la configuration au démarrage
-validatePaymentConfig();
-
+// La configuration PayPal est validée au démarrage par config/env.ts.
 const router = express.Router();
 
-// Appliquer la sanitisation pour toutes les routes
-router.use(sanitizeInputs);
-
-// Webhook PayPal (sans authentification)
+// Webhook PayPal (sans authentification), monté AVANT la sanitisation : le
+// corps est renvoyé tel quel à PayPal pour vérifier sa signature, et
+// DOMPurify en réécrirait les champs texte (`summary`, etc.) — signature
+// invalide, ou pire, événement altéré.
 router.post('/webhook/paypal', paymentController.handleWebhook);
+
+// Appliquer la sanitisation pour toutes les autres routes
+router.use(sanitizeInputs);
 
 // Retour d'onboarding PayPal (sans authentification — le vendeur est redirigé
 // par PayPal ; le rapprochement se fait sur le tracking_id)

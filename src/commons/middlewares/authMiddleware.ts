@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { isAccessTokenRevoked } from '../services/tokenService';
+import { isAccessTokenRevoked, JWT_VERIFY_OPTIONS } from '../services/tokenService';
 import env from '../../config/env';
 import User, { IUser } from '../../models/userModel';
 import logger from '../utils/logger';
@@ -49,7 +49,7 @@ export const authenticateJWT = async (req: Request, res: Response, next: NextFun
     
     try {
       // Décodage avec typage du payload
-      const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+      const decoded = jwt.verify(token, env.JWT_SECRET, JWT_VERIFY_OPTIONS) as JwtPayload;
 
       // Vérifier que l'ID est présent
       if (!decoded.id) {
@@ -108,6 +108,45 @@ export const authenticateJWT = async (req: Request, res: Response, next: NextFun
     );
     res.status(500).json({ message: 'Erreur interne du serveur.' });
   }
+};
+
+/**
+ * Variante d'authenticateJWT pour les routes publiques qui s'enrichissent quand
+ * l'appelant est connecté. Un token absent, invalide, expiré, révoqué ou celui
+ * d'un compte suspendu/supprimé laisse passer la requête en anonyme (sans
+ * `req.user`) au lieu de répondre 401 : la page reste consultable.
+ */
+export const optionalAuthenticateJWT = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) {
+    next();
+    return;
+  }
+
+  let decoded: JwtPayload;
+  try {
+    decoded = jwt.verify(token, env.JWT_SECRET, JWT_VERIFY_OPTIONS) as JwtPayload;
+  } catch (tokenError) {
+    // Expiré ou falsifié : anonyme. Toute autre erreur remonte au gestionnaire.
+    if (tokenError instanceof jwt.JsonWebTokenError) {
+      next();
+      return;
+    }
+    throw tokenError;
+  }
+
+  if (!decoded.id || await isAccessTokenRevoked(token)) {
+    next();
+    return;
+  }
+
+  const status = await User.findById(decoded.id).select('accountStatus').lean<{ accountStatus?: string } | null>();
+  if (status && status.accountStatus !== 'suspended' && status.accountStatus !== 'deleted') {
+    const { id, ...otherProps } = decoded;
+    req.user = { id, ...otherProps };
+  }
+
+  next();
 };
 
 /**

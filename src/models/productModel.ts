@@ -35,6 +35,17 @@ export interface IProduct extends Document {
   kpopGroup: string;
   kpopMember?: string;
   albumName?: string;
+  // Métadonnées structurées (photocards). Les champs libres ci-dessus restent
+  // remplis : les anciennes annonces n'ont qu'eux, et la recherche texte s'en sert.
+  group?: mongoose.Types.ObjectId;
+  /** Nom tel qu'il figure dans `members` du groupe, quand le groupe en a. */
+  member?: string;
+  album?: mongoose.Types.ObjectId;
+  version?: string;
+  era?: string;
+  /** Boutique du pre-order benefit (POB). */
+  pob?: string;
+  isOfficial?: boolean;
   images: string[];
   isAvailable: boolean;
   moderationFlag?: IProductModerationFlag;
@@ -123,6 +134,37 @@ const ProductSchema: Schema = new Schema({
   },
   albumName: {
     type: String
+  },
+  group: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'KpopGroup'
+  },
+  member: {
+    type: String,
+    trim: true,
+    maxlength: 100
+  },
+  album: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'KpopAlbum'
+  },
+  version: {
+    type: String,
+    trim: true,
+    maxlength: 50
+  },
+  era: {
+    type: String,
+    trim: true,
+    maxlength: 100
+  },
+  pob: {
+    type: String,
+    trim: true,
+    maxlength: 100
+  },
+  isOfficial: {
+    type: Boolean
   },
   images: {
     type: [String],
@@ -285,6 +327,12 @@ ProductSchema.index({
 
 ProductSchema.index({ seller: 1, isAvailable: 1 });
 ProductSchema.index({ kpopGroup: 1, isAvailable: 1 });
+// Pages groupe / album et filtres du catalogue. `albumName` sert au repli sur
+// les anciennes annonces : sans index, la branche `$or` correspondante
+// parcourrait toute la collection.
+ProductSchema.index({ group: 1, member: 1 });
+ProductSchema.index({ album: 1 });
+ProductSchema.index({ albumName: 1 });
 ProductSchema.index({ type: 1, isAvailable: 1 });
 ProductSchema.index({ createdAt: -1 });
 ProductSchema.index({ 'negotiations.buyer': 1, 'negotiations.status': 1 });

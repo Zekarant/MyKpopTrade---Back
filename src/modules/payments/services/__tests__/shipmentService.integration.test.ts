@@ -1,7 +1,5 @@
 jest.mock('../../../notifications/services/notificationService', () => ({
-  NotificationService: {
-    createNotification: jest.fn().mockResolvedValue(undefined)
-  }
+  createNotification: jest.fn().mockResolvedValue(undefined)
 }));
 
 import {
@@ -16,7 +14,7 @@ import {
   getShipment,
   buildTrackingUrl
 } from '../shipmentService';
-import { NotificationService } from '../../../notifications/services/notificationService';
+import { createNotification } from '../../../notifications/services/notificationService';
 import Payment from '../../../../models/paymentModel';
 
 describe('shipmentService (integration)', () => {
@@ -98,8 +96,8 @@ describe('shipmentService (integration)', () => {
       const reloaded = await Payment.findById(payment._id);
       expect(reloaded?.shipment?.status).toBe('shipped');
 
-      expect(NotificationService.createNotification).toHaveBeenCalledTimes(1);
-      const call = (NotificationService.createNotification as jest.Mock).mock.calls[0][0];
+      expect(createNotification).toHaveBeenCalledTimes(1);
+      const call = (createNotification as jest.Mock).mock.calls[0][0];
       expect(call.recipientId.toString()).toBe(buyer._id.toString());
       expect(call.type).toBe('order_status');
     });
@@ -216,7 +214,7 @@ describe('shipmentService (integration)', () => {
         carrier: 'Colissimo',
         trackingNumber: '6Z00000123FR'
       });
-      (NotificationService.createNotification as jest.Mock).mockClear();
+      (createNotification as jest.Mock).mockClear();
 
       const shipment = await confirmDelivery(
         buyer._id.toString(),
@@ -226,8 +224,8 @@ describe('shipmentService (integration)', () => {
       expect(shipment.status).toBe('delivered');
       expect(shipment.deliveredAt).toBeDefined();
 
-      expect(NotificationService.createNotification).toHaveBeenCalledTimes(1);
-      const call = (NotificationService.createNotification as jest.Mock).mock.calls[0][0];
+      expect(createNotification).toHaveBeenCalledTimes(1);
+      const call = (createNotification as jest.Mock).mock.calls[0][0];
       expect(call.recipientId.toString()).toBe(seller._id.toString());
     });
 

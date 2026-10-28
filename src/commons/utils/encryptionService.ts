@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import env from '../../config/env';
+import logger from './logger';
 
 const ENCRYPTION_KEY = env.ENCRYPTION_KEY;
 
@@ -20,7 +21,7 @@ const CURRENT_FORMAT_PREFIX = 'v2';
 
 /** IV historique, uniquement pour déchiffrer les données antérieures. */
 const legacyIv = (): Buffer | null => {
-  const raw = process.env.ENCRYPTION_IV;
+  const raw = env.ENCRYPTION_IV;
   if (!raw || raw.length < IV_BYTES) return null;
   return Buffer.from(raw.slice(0, IV_BYTES), 'utf8');
 };
@@ -66,7 +67,9 @@ export class EncryptionService {
 
       return `${CURRENT_FORMAT_PREFIX}:${iv.toString('hex')}:${encrypted}`;
     } catch (error) {
-      console.error('Erreur lors du chiffrement:', error);
+      logger.error('Erreur lors du chiffrement', {
+        error: error instanceof Error ? error.message : String(error)
+      });
       throw new Error('Erreur lors du chiffrement des données', { cause: error });
     }
   }
@@ -108,7 +111,9 @@ export class EncryptionService {
         return decrypted;
       }
     } catch (error) {
-      console.error('Erreur lors du déchiffrement:', error);
+      logger.error('Erreur lors du déchiffrement', {
+        error: error instanceof Error ? error.message : String(error)
+      });
       throw new Error('Erreur lors du déchiffrement des données', { cause: error });
     }
   }

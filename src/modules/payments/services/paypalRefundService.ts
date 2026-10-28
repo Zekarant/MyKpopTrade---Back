@@ -1,8 +1,8 @@
-import axios, { AxiosError } from 'axios';
+import { AxiosError } from 'axios';
 import {
   PayPalClient,
   PayPalErrorBody,
-  paypalApiBaseUrl,
+  paypalHttp,
   partnerHeaders
 } from './paypalClient';
 import User from '../../../models/userModel';
@@ -11,7 +11,7 @@ import logger from '../../../commons/utils/logger';
 import { formatForPayPal, gt } from '../../../commons/utils/moneyMath';
 
 const REFUND_ENDPOINT = (captureId: string) =>
-  `${paypalApiBaseUrl}/v2/payments/captures/${captureId}/refund`;
+  `/v2/payments/captures/${captureId}/refund`;
 
 interface PayPalErrorDescription {
   message: string;
@@ -110,7 +110,7 @@ async function callPayPalRefund(
   accessToken: string,
   sellerMerchantId: string
 ): Promise<{ id: string; status: string; amount: number | null; currency: string | null }> {
-  const response = await axios.post<PayPalRefundResponse>(REFUND_ENDPOINT(captureId), requestBody, {
+  const response = await paypalHttp.post<PayPalRefundResponse>(REFUND_ENDPOINT(captureId), requestBody, {
     headers: {
       ...partnerHeaders({
         accessToken,

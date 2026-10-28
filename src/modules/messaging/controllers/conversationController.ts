@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
 import logger from '../../../commons/utils/logger';
-import { HttpError } from '../../../commons/utils/httpError';
 import {
   fetchConversation,
   listUserConversations,
@@ -14,434 +12,256 @@ import {
 } from '../services/conversationService';
 import {
   initiateNegotiationFlow,
-  respondToNegotiationFlow,
-  initiatePayWhatYouWantFlow,
-  makePayWhatYouWantProposalFlow,
   fetchConversationOffers,
   cancelOfferFlow
 } from '../services/conversationOfferService';
-import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
-import { queryInt, queryString } from '../../../commons/utils/query';
+import { respondToNegotiationFlow } from '../services/negotiationResponseService';
+import {
+  initiatePayWhatYouWantFlow,
+  makePayWhatYouWantProposalFlow
+} from '../services/payWhatYouWantService';
+import { parsePagination } from '../../../commons/utils/pagination';
+import { queryString } from '../../../commons/utils/query';
 
-const DEFAULT_CONVERSATION_PAGE = 1;
 const DEFAULT_CONVERSATION_LIMIT = 20;
 const DEFAULT_USER_LIST_LIMIT = 10;
-const GENERIC_SERVER_ERROR = 'Une erreur est survenue';
-
-/**
- * Map les exceptions vers une réponse HTTP. Utilisé par tous les handlers
- * partageant le même contrat catch HttpError → status code, sinon 500 générique.
- */
-function handleControllerError(
-  res: Response,
-  error: unknown,
-  logMessage: string,
-  logContext: Record<string, unknown> = {}
-) {
-  if (error instanceof HttpError) {
-    return res.status(error.statusCode).json({ message: error.message });
-  }
-  logger.error(logMessage, { error, ...logContext });
-  return res.status(500).json({
-    message: error instanceof Error ? error.message : GENERIC_SERVER_ERROR
-  });
-}
-
-/** `path` du champ fautif, porté par les CastError / ValidatorError Mongoose. */
-function errorPath(error: unknown): unknown {
-  return typeof error === 'object' && error !== null && 'path' in error ? error.path : undefined;
-}
 
 /**
  * Récupère une conversation spécifique avec ses messages
  */
-export const getConversation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const conversationId = req.params.id as string;
-  const page = queryInt(req.query.page) || DEFAULT_CONVERSATION_PAGE;
-  const limit = clampLimit(req.query.limit, DEFAULT_CONVERSATION_LIMIT, MAX_PAGE_SIZE);
-
-  try {
-    const result = await fetchConversation(conversationId, userId, page, limit);
-    return res.status(200).json(result);
-  } catch (error) {
-    return handleControllerError(
-      res, error,
-      'Erreur lors de la récupération de la conversation',
-      { conversationId, userId }
-    );
-  }
-});
+export const getConversation = async (req: Request, res: Response) => {
+  const { page, limit } = parsePagination(req.query, { defaultLimit: DEFAULT_CONVERSATION_LIMIT });
+  const result = await fetchConversation(req.params.id as string, req.user!.id, page, limit);
+  res.status(200).json(result);
+};
 
 /**
  * Récupère la liste des conversations d'un utilisateur
  */
-export const getUserConversations = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const page = queryInt(req.query.page) || DEFAULT_CONVERSATION_PAGE;
-  const limit = clampLimit(req.query.limit, DEFAULT_USER_LIST_LIMIT, MAX_PAGE_SIZE);
+export const getUserConversations = async (req: Request, res: Response) => {
+  const { page, limit } = parsePagination(req.query, { defaultLimit: DEFAULT_USER_LIST_LIMIT });
   const filter = queryString(req.query.filter) || 'all';
 
-  const result = await listUserConversations(userId, page, limit, filter);
-  return res.status(200).json(result);
-});
+  const result = await listUserConversations(req.user!.id, page, limit, filter);
+  res.status(200).json(result);
+};
 
 /**
  * Crée une nouvelle conversation
  */
-export const startConversation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const { recipientId, productId, initialMessage, type = 'general' } = req.body;
+export const startConversation = async (req: Request, res: Response) => {
+  const { recipientId, productId, initialMessage, type = 'general' } = req.body ?? {};
 
-  try {
-    const conversation = await createConversationForUser({
-      userId,
-      recipientId,
-      productId,
-      initialMessage,
-      type
-    });
+  const conversation = await createConversationForUser({
+    userId: req.user!.id,
+    recipientId,
+    productId,
+    initialMessage,
+    type
+  });
 
-    return res.status(201).json({
-      message: 'Conversation créée avec succès',
-      conversation
-    });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-
-    if (error instanceof Error) {
-      logger.error('Erreur lors de la création de la conversation', {
-        error: error.message,
-        stack: error.stack,
-        path: errorPath(error)
-      });
-    } else {
-      logger.error('Erreur inconnue lors de la création de la conversation', { error });
-    }
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la création de la conversation',
-      error: process.env.NODE_ENV === 'development' ? {
-        message: error instanceof Error ? error.message : 'Erreur inconnue',
-        path: errorPath(error)
-      } : undefined
-    });
-  }
-});
+  res.status(201).json({
+    message: 'Conversation créée avec succès',
+    conversation
+  });
+};
 
 /**
  * Initie une négociation pour un produit
  */
-export const initiateNegotiation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const { productId, initialOffer, message } = req.body;
+export const initiateNegotiation = async (req: Request, res: Response) => {
+  const { productId, initialOffer, message } = req.body ?? {};
 
-  try {
-    const result = await initiateNegotiationFlow({
-      userId,
-      productId,
-      initialOffer,
-      message
-    });
+  const result = await initiateNegotiationFlow({
+    userId: req.user!.id,
+    productId,
+    initialOffer,
+    message
+  });
 
-    return res.status(result.isUpdate ? 200 : 201).json({
-      message: result.isUpdate ? 'Offre mise à jour avec succès' : 'Négociation initiée avec succès',
-      conversation: result.conversation,
-      initialOffer: result.initialOffer,
-      isUpdate: result.isUpdate,
-      previousOffer: result.previousOffer
-    });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    logger.error('Erreur lors de l\'initiation d\'une négociation', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      stack: error instanceof Error ? error.stack : undefined,
-      productId, userId, initialOffer
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la création de la négociation'
-    });
-  }
-});
+  res.status(result.isUpdate ? 200 : 201).json({
+    message: result.isUpdate ? 'Offre mise à jour avec succès' : 'Négociation initiée avec succès',
+    conversation: result.conversation,
+    initialOffer: result.initialOffer,
+    isUpdate: result.isUpdate,
+    previousOffer: result.previousOffer
+  });
+};
 
 /**
  * Répond à une négociation (accept, reject, counter)
  */
-export const respondToNegotiation = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const conversationId = req.params.id as string;
-  const { action, counterOffer, message } = req.body;
+export const respondToNegotiation = async (req: Request, res: Response) => {
+  const { action, counterOffer, message } = req.body ?? {};
 
-  try {
-    const result = await respondToNegotiationFlow({
-      userId,
-      conversationId,
-      action,
-      counterOffer,
-      message
-    });
+  const result = await respondToNegotiationFlow({
+    userId: req.user!.id,
+    conversationId: req.params.id as string,
+    action,
+    counterOffer,
+    message
+  });
 
-    return res.status(200).json({
-      message: 'Réponse à la négociation envoyée avec succès',
-      action: result.action,
-      conversation: result.conversation,
-      negotiation: result.negotiation
-    });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    logger.error('Erreur lors de la réponse à une négociation', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      stack: error instanceof Error ? error.stack : undefined,
-      conversationId,
-      userId,
-      action
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la réponse à la négociation'
-    });
-  }
-});
+  res.status(200).json({
+    message: 'Réponse à la négociation envoyée avec succès',
+    action: result.action,
+    conversation: result.conversation,
+    negotiation: result.negotiation
+  });
+};
 
 /**
  * Initie une offre Pay What You Want sur un produit
  */
-export const initiatePayWhatYouWant = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const { productId, minimumPrice, maximumPrice, enabled } = req.body;
+export const initiatePayWhatYouWant = async (req: Request, res: Response) => {
+  const { productId, minimumPrice, maximumPrice, enabled } = req.body ?? {};
 
-  try {
-    const payWhatYouWant = await initiatePayWhatYouWantFlow({
-      userId,
-      productId,
-      minimumPrice,
-      maximumPrice,
-      enabled
-    });
+  const payWhatYouWant = await initiatePayWhatYouWantFlow({
+    userId: req.user!.id,
+    productId,
+    minimumPrice,
+    maximumPrice,
+    enabled
+  });
 
-    if (!payWhatYouWant.enabled) {
-      return res.status(200).json({
-        message: 'Option Pay What You Want désactivée avec succès',
-        payWhatYouWant
-      });
-    }
-
-    return res.status(201).json({
-      message: 'Option Pay What You Want activée avec succès',
+  if (!payWhatYouWant.enabled) {
+    res.status(200).json({
+      message: 'Option Pay What You Want désactivée avec succès',
       payWhatYouWant
     });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    logger.error('Erreur lors de la configuration de Pay What You Want', {
-      error: error instanceof Error ? error.message : String(error),
-      productId,
-      userId
-    });
-    return res.status(500).json({ message: 'Une erreur est survenue lors de l\'activation du prix libre' });
+    return;
   }
-});
+
+  res.status(201).json({
+    message: 'Option Pay What You Want activée avec succès',
+    payWhatYouWant
+  });
+};
 
 /**
  * Fait une proposition dans une conversation Pay What You Want
  */
-export const makePayWhatYouWantProposal = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const conversationId = req.params.id as string;
-  const { proposedPrice, message } = req.body;
+export const makePayWhatYouWantProposal = async (req: Request, res: Response) => {
+  const { proposedPrice, message } = req.body ?? {};
 
-  try {
-    const result = await makePayWhatYouWantProposalFlow({
-      userId,
-      conversationId,
-      proposedPrice,
-      message
-    });
+  const result = await makePayWhatYouWantProposalFlow({
+    userId: req.user!.id,
+    conversationId: req.params.id as string,
+    proposedPrice,
+    message
+  });
 
-    return res.status(200).json({
-      message: 'Proposition de prix envoyée avec succès',
-      result
-    });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    logger.error('Erreur lors de la proposition d\'un prix PWYW', {
-      error: error instanceof Error ? error.message : String(error),
-      conversationId,
-      userId
-    });
-    return res.status(500).json({ message: 'Une erreur est survenue lors de la proposition de prix' });
-  }
-});
+  res.status(200).json({
+    message: 'Proposition de prix envoyée avec succès',
+    result
+  });
+};
 
 /**
  * Récupère tous les médias d'une conversation
  */
-export const getConversationMedia = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const conversationId = req.params.id as string;
-  const page = queryInt(req.query.page) || DEFAULT_CONVERSATION_PAGE;
-  const limit = clampLimit(req.query.limit, DEFAULT_CONVERSATION_LIMIT, MAX_PAGE_SIZE);
-  const type = queryString(req.query.type);
+export const getConversationMedia = async (req: Request, res: Response) => {
+  const { page, limit } = parsePagination(req.query, { defaultLimit: DEFAULT_CONVERSATION_LIMIT });
 
-  try {
-    const result = await fetchConversationMedia({ userId, conversationId, page, limit, type });
-    return res.status(200).json(result);
-  } catch (error) {
-    return handleControllerError(
-      res, error,
-      'Erreur lors de la récupération des médias',
-      { conversationId }
-    );
-  }
-});
+  const result = await fetchConversationMedia({
+    userId: req.user!.id,
+    conversationId: req.params.id as string,
+    page,
+    limit,
+    type: queryString(req.query.type)
+  });
+  res.status(200).json(result);
+};
 
 /**
  * Supprime une conversation pour l'utilisateur actuel
  */
-export const deleteConversation = asyncHandler(async (req: Request, res: Response) => {
+export const deleteConversation = async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const conversationId = req.params.id as string;
 
-  try {
-    await softDeleteConversation(userId, conversationId);
-    logger.info(`Conversation ${conversationId} supprimée par l'utilisateur ${userId}`);
-    return res.status(200).json({
-      message: 'Conversation supprimée avec succès',
-      conversationId
-    });
-  } catch (error) {
-    return handleControllerError(
-      res, error,
-      'Erreur lors de la suppression de la conversation',
-      { conversationId, userId }
-    );
-  }
-});
+  await softDeleteConversation(userId, conversationId);
+  logger.info(`Conversation ${conversationId} supprimée par l'utilisateur ${userId}`);
+
+  res.status(200).json({
+    message: 'Conversation supprimée avec succès',
+    conversationId
+  });
+};
 
 /**
  * Archive une conversation
  */
-export const archiveConversation = asyncHandler(async (req: Request, res: Response) => {
+export const archiveConversation = async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const conversationId = req.params.id as string;
 
-  try {
-    await archiveConversationForUser(userId, conversationId);
-    logger.info(`Conversation ${conversationId} archivée par l'utilisateur ${userId}`);
-    return res.status(200).json({
-      message: 'Conversation archivée avec succès',
-      conversationId,
-      isArchived: true
-    });
-  } catch (error) {
-    return handleControllerError(
-      res, error,
-      'Erreur lors de l\'archivage de la conversation',
-      { conversationId, userId }
-    );
-  }
-});
+  await archiveConversationForUser(userId, conversationId);
+  logger.info(`Conversation ${conversationId} archivée par l'utilisateur ${userId}`);
+
+  res.status(200).json({
+    message: 'Conversation archivée avec succès',
+    conversationId,
+    isArchived: true
+  });
+};
 
 /**
  * Désarchive une conversation
  */
-export const unarchiveConversation = asyncHandler(async (req: Request, res: Response) => {
+export const unarchiveConversation = async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const conversationId = req.params.id as string;
 
-  try {
-    await unarchiveConversationForUser(userId, conversationId);
-    logger.info(`Conversation ${conversationId} désarchivée par l'utilisateur ${userId}`);
-    return res.status(200).json({
-      message: 'Conversation désarchivée avec succès',
-      conversationId,
-      isArchived: false
-    });
-  } catch (error) {
-    return handleControllerError(
-      res, error,
-      'Erreur lors du désarchivage de la conversation',
-      { conversationId, userId }
-    );
-  }
-});
+  await unarchiveConversationForUser(userId, conversationId);
+  logger.info(`Conversation ${conversationId} désarchivée par l'utilisateur ${userId}`);
+
+  res.status(200).json({
+    message: 'Conversation désarchivée avec succès',
+    conversationId,
+    isArchived: false
+  });
+};
 
 /**
  * Toggle favoris d'une conversation
  */
-export const toggleFavoriteConversation = asyncHandler(async (req: Request, res: Response) => {
+export const toggleFavoriteConversation = async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const conversationId = req.params.id as string;
 
-  try {
-    const { wasFavorited } = await toggleFavoriteConversationForUser(userId, conversationId);
-    const isFavorited = !wasFavorited;
+  const { wasFavorited } = await toggleFavoriteConversationForUser(userId, conversationId);
+  const change = wasFavorited ? 'retirée des' : 'ajoutée aux';
+  logger.info(`Conversation ${conversationId} ${change} favoris par l'utilisateur ${userId}`);
 
-    logger.info(
-      `Conversation ${conversationId} ${wasFavorited ? 'retirée des' : 'ajoutée aux'} favoris par l'utilisateur ${userId}`
-    );
-
-    return res.status(200).json({
-      message: `Conversation ${wasFavorited ? 'retirée des' : 'ajoutée aux'} favoris avec succès`,
-      conversationId,
-      isFavorited
-    });
-  } catch (error) {
-    return handleControllerError(
-      res, error,
-      'Erreur lors du toggle favoris de la conversation',
-      { conversationId, userId }
-    );
-  }
-});
+  res.status(200).json({
+    message: `Conversation ${change} favoris avec succès`,
+    conversationId,
+    isFavorited: !wasFavorited
+  });
+};
 
 /**
  * Récupère l'historique des offres d'une conversation
  */
-export const getConversationOffers = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const conversationId = req.params.id as string;
-
-  try {
-    const response = await fetchConversationOffers(userId, conversationId);
-    return res.status(200).json(response);
-  } catch (error) {
-    return handleControllerError(
-      res, error,
-      'Erreur lors de la récupération des offres',
-      { conversationId, userId }
-    );
-  }
-});
+export const getConversationOffers = async (req: Request, res: Response) => {
+  const response = await fetchConversationOffers(req.user!.id, req.params.id as string);
+  res.status(200).json(response);
+};
 
 /**
  * Annule une offre en cours
  */
-export const cancelOffer = asyncHandler(async (req: Request, res: Response) => {
+export const cancelOffer = async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const conversationId = req.params.id as string;
 
-  try {
-    const cancelledOffer = await cancelOfferFlow(userId, conversationId);
-    logger.info(`Offre annulée pour la conversation ${conversationId} par l'utilisateur ${userId}`);
-    return res.status(200).json({
-      message: 'Offre annulée avec succès',
-      conversationId,
-      cancelledOffer
-    });
-  } catch (error) {
-    return handleControllerError(
-      res, error,
-      'Erreur lors de l\'annulation de l\'offre',
-      { conversationId, userId }
-    );
-  }
-});
+  const cancelledOffer = await cancelOfferFlow(userId, conversationId);
+  logger.info(`Offre annulée pour la conversation ${conversationId} par l'utilisateur ${userId}`);
+
+  res.status(200).json({
+    message: 'Offre annulée avec succès',
+    conversationId,
+    cancelledOffer
+  });
+};

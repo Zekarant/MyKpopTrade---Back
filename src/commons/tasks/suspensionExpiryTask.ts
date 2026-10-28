@@ -11,5 +11,5 @@ export const startSuspensionExpiryTask = () => {
         error: error instanceof Error ? error.message : String(error)
       });
     }
-  });
+  }, { noOverlap: true });
 };

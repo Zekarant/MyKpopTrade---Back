@@ -4,12 +4,24 @@ import { paymentConfig } from '../../../config/paymentConfig';
 
 /**
  * URL de base de l'API PayPal. Pilotée par `PAYPAL_MODE` (et non par NODE_ENV) :
- * c'est le seul commutateur explicite, et `validatePaymentConfig()` refuse le
- * mode `live` hors production.
+ * c'est le seul commutateur explicite, et config/env.ts refuse le mode `live`
+ * hors production.
  */
-export const paypalApiBaseUrl = paymentConfig.paypal.mode === 'live'
+const paypalApiBaseUrl = paymentConfig.paypal.mode === 'live'
   ? 'https://api-m.paypal.com'
   : 'https://api-m.sandbox.paypal.com';
+
+/**
+ * Délai maximal d'un appel PayPal. Sans lui, une API PayPal qui ne répond plus
+ * garde la requête de l'acheteur (ou le webhook) ouverte indéfiniment.
+ */
+const PAYPAL_HTTP_TIMEOUT_MS = 10_000;
+
+/** Client HTTP de tous les appels PayPal : URL de l'environnement et délai maximal. */
+export const paypalHttp = axios.create({
+  baseURL: paypalApiBaseUrl,
+  timeout: PAYPAL_HTTP_TIMEOUT_MS
+});
 
 /** Marge avant expiration en dessous de laquelle on renouvelle le token. */
 const TOKEN_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
@@ -169,15 +181,16 @@ export class PayPalClient {
     const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
     try {
-      const response = await axios<{ access_token: string; expires_in?: number }>({
-        method: 'post',
-        url: `${paypalApiBaseUrl}/v1/oauth2/token`,
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Authorization: `Basic ${auth}`
-        },
-        data: 'grant_type=client_credentials'
-      });
+      const response = await paypalHttp.post<{ access_token: string; expires_in?: number }>(
+        '/v1/oauth2/token',
+        'grant_type=client_credentials',
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Authorization: `Basic ${auth}`
+          }
+        }
+      );
 
       const { access_token, expires_in } = response.data;
 
@@ -209,8 +222,8 @@ export class PayPalClient {
     try {
       const accessToken = await PayPalClient.getAccessToken();
 
-      const response = await axios.get<{ status: string }>(
-        `${paypalApiBaseUrl}/v2/checkout/orders/${orderId}`,
+      const response = await paypalHttp.get<{ status: string }>(
+        `/v2/checkout/orders/${orderId}`,
         { headers: partnerHeaders({ accessToken }) }
       );
 
@@ -238,8 +251,8 @@ export class PayPalClient {
     try {
       const accessToken = await PayPalClient.getAccessToken();
 
-      const response = await axios.get<{ amount: PayPalMoney; status: string }>(
-        `${paypalApiBaseUrl}/v2/payments/captures/${captureId}`,
+      const response = await paypalHttp.get<{ amount: PayPalMoney; status: string }>(
+        `/v2/payments/captures/${captureId}`,
         { headers: partnerHeaders({ accessToken, sellerMerchantId }) }
       );
 
@@ -302,8 +315,8 @@ export class PayPalClient {
     try {
       const accessToken = await PayPalClient.getAccessToken();
 
-      const response = await axios.post<{ verification_status: string }>(
-        `${paypalApiBaseUrl}/v1/notifications/verify-webhook-signature`,
+      const response = await paypalHttp.post<{ verification_status: string }>(
+        '/v1/notifications/verify-webhook-signature',
         { ...requiredHeaders, webhook_id: webhookId, webhook_event: event },
         { headers: partnerHeaders({ accessToken }) }
       );

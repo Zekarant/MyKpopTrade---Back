@@ -44,9 +44,10 @@ async function makeUserAdmin(email: string) {
 
 // Vérifier les arguments
 if (process.argv.length < 3) {
-  console.log('Usage: npx ts-node src/scripts/makeUserAdmin.ts <email>');
+  console.log('Usage: npx tsx src/scripts/makeUserAdmin.ts <email>');
   process.exit(1);
 }
 
 const email = process.argv[2];
-makeUserAdmin(email);
+// Les erreurs sont gérées dans la fonction (try/catch/finally).
+void makeUserAdmin(email);

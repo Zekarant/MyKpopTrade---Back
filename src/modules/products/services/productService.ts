@@ -1,28 +1,43 @@
 import mongoose from 'mongoose';
 import path from 'path';
-import fs from 'fs';
+import { rm } from 'fs/promises';
 import Product, { IProduct } from '../../../models/productModel';
 import User from '../../../models/userModel';
 import Payment, { IPayment } from '../../../models/paymentModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import KpopAlbum from '../../../models/albumModel';
 import { HttpError } from '../../../commons/utils/httpError';
-import { clampLimit } from '../../../commons/utils/pagination';
-import { queryInt, queryString } from '../../../commons/utils/query';
-import { validateProductData } from './productValidationService';
+import { MAX_PAGE_SIZE, paginationMeta, parsePagination } from '../../../commons/utils/pagination';
+import { queryString } from '../../../commons/utils/query';
+import { validateProductData, validateProductUpdate } from './productValidationService';
 import { notifyWishlistPriceDrop, notifyWishlistUnavailable } from './wishlistAlertService';
-import { dispatchProductModeration } from './productModerationService';
+import { dispatchProductModeration, awaitsModerationVerdict } from './productModerationService';
+import { dispatchSavedSearchAlerts } from '../../savedSearches/alertService';
+import { assertCatalogConsistency, buildCatalogClauses, parseCatalogCriteria } from './productCatalogService';
 
 const DEFAULT_LIST_LIMIT = 20;
-const MAX_LIST_LIMIT = 500;
-const DEFAULT_LIST_PAGE = 1;
+const MAX_LIST_LIMIT = MAX_PAGE_SIZE;
 const DEFAULT_LIST_SORT = '-createdAt';
+
+/**
+ * Tris proposés sur le catalogue public. Un tri libre laissait trier sur
+ * n'importe quel champ, y compris internes (modération, acheteur), et sur des
+ * champs non indexés.
+ */
+const ALLOWED_LIST_SORTS = new Set([
+  'createdAt', '-createdAt',
+  'price', '-price',
+  'views', '-views',
+  'favorites', '-favorites'
+]);
 
 const ALLOWED_PRODUCT_UPDATES = [
   'title', 'description', 'price', 'currency', 'condition',
   'category', 'type', 'kpopGroup', 'kpopMember', 'albumName',
+  'group', 'member', 'album', 'version', 'era', 'pob', 'isOfficial',
   'isAvailable', 'shippingOptions', 'allowOffers'
 ];
+const CATALOG_REFERENCE_FIELDS = ['group', 'member', 'album'] as const;
 /** Paiements qui font d'un article une vente encaissée. */
 const PAID_SALE_STATUSES: IPayment['status'][] = ['completed', 'partially_refunded'];
 
@@ -80,29 +95,30 @@ async function loadKpopEntities(
   return byKey;
 }
 
-function cleanupUploadedFiles(files?: Express.Multer.File[]) {
-  if (!files || !Array.isArray(files)) return;
-  for (const file of files) {
-    if (fs.existsSync(file.path)) {
-      fs.unlinkSync(file.path);
-    }
-  }
+/** Efface du disque les images reçues pour une annonce qui ne sera pas créée. */
+async function cleanupUploadedFiles(files?: Express.Multer.File[]): Promise<void> {
+  if (!files?.length) return;
+  await Promise.all(files.map((file) => rm(file.path, { force: true })));
 }
 
 async function withKpopNames(products: IProduct[]): Promise<EnrichedProduct[]> {
+  // La référence structurée prime ; les anciennes annonces n'ont que le champ libre.
+  const groupKey = (product: IProduct) => product.group?.toString() ?? product.kpopGroup;
+  const albumKey = (product: IProduct) => product.album?.toString() ?? product.albumName;
   const [groups, albums] = await Promise.all([
-    loadKpopEntities(KpopGroup, products.map((product) => product.kpopGroup)),
-    loadKpopEntities(KpopAlbum, products.map((product) => product.albumName))
+    loadKpopEntities(KpopGroup, products.map(groupKey)),
+    loadKpopEntities(KpopAlbum, products.map(albumKey))
   ]);
 
   return products.map((product) => {
     const enriched: EnrichedProduct = product.toObject();
-    const group = groups.get(product.kpopGroup);
+    const group = groups.get(groupKey(product));
     if (group) {
       enriched.kpopGroupName = group.name;
       enriched.kpopGroupId = group._id.toString();
     }
-    const album = product.albumName ? albums.get(product.albumName) : undefined;
+    const albumIdentifier = albumKey(product);
+    const album = albumIdentifier ? albums.get(albumIdentifier) : undefined;
     if (album) {
       enriched.albumNameStr = album.name;
       enriched.albumId = album._id.toString();
@@ -141,33 +157,20 @@ async function revertManualSaleStatistics(sellerId: string, buyerId?: mongoose.T
 
 /**
  * Chemins publics des images reçues par multer. `req.body.images` est ignoré :
- * un chemin fourni par le client finirait dans fs.unlinkSync à la suppression.
+ * un chemin fourni par le client finirait effacé du disque à la suppression.
  */
-export function resolveProductImages(req: Pick<Express.Request, 'files'>): string[] {
-  if (!req.files || !Array.isArray(req.files)) return [];
-  return (req.files as Express.Multer.File[]).map(file =>
-    `/uploads/products/${path.basename(file.path)}`
-  );
+function toProductImageUrls(files: Express.Multer.File[]): string[] {
+  return files.map((file) => `/uploads/products/${path.basename(file.path)}`);
 }
 
-export async function createProductForSeller({
-  sellerId,
-  productData,
-  imageUrls,
-  uploadedFiles
-}: {
-  sellerId: string;
-  productData: Record<string, unknown>;
-  imageUrls: string[];
-  uploadedFiles?: Express.Multer.File[];
-}) {
+/** Vérifie le vendeur et les données, puis enregistre l'annonce (sans effets de bord). */
+async function saveNewProduct(sellerId: string, productData: Record<string, unknown>, imageUrls: string[]) {
   // Vérifier que le vendeur peut encaisser. PayPal est désormais le seul canal :
   // Stripe a été retiré de la plateforme.
   const seller = await User.findById(sellerId).select(
     'paypalConnected paypalMerchantId paypalOnboarding'
-  );
+  ).lean();
   if (!seller) {
-    cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
 
@@ -179,7 +182,6 @@ export async function createProductForSeller({
   );
 
   if (!canReceiveViaPayPal) {
-    cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(
       403,
       'Vous devez connecter votre compte PayPal avant de pouvoir vendre. Rendez-vous dans Paramètres > Paiements.',
@@ -188,25 +190,25 @@ export async function createProductForSeller({
   }
 
   if (imageUrls.length === 0) {
-    cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(400, 'Au moins une image est requise pour créer un produit');
   }
 
-  productData.images = imageUrls;
+  const data: Record<string, unknown> = { ...productData, images: imageUrls };
 
-  if (typeof productData.shippingOptions === 'string') {
+  if (typeof data.shippingOptions === 'string') {
     try {
-      productData.shippingOptions = JSON.parse(productData.shippingOptions);
+      data.shippingOptions = JSON.parse(data.shippingOptions);
     } catch {
       throw new HttpError(400, 'shippingOptions est mal formé');
     }
   }
 
-  const { error, value } = validateProductData(productData);
-  if (error) {
-    cleanupUploadedFiles(uploadedFiles);
-    throw new HttpError(400, error.details[0].message);
+  const { error, value } = validateProductData(data);
+  if (error !== undefined) {
+    throw new HttpError(400, error);
   }
+
+  await assertCatalogConsistency(value);
 
   const product = new Product({
     ...value,
@@ -217,6 +219,29 @@ export async function createProductForSeller({
   });
 
   await product.save();
+  return product;
+}
+
+/**
+ * Crée une annonce avec les images reçues par multer. Si l'annonce n'est pas
+ * créée (refus ou erreur), ces images sont effacées du disque.
+ */
+export async function createProductForSeller({
+  sellerId,
+  productData,
+  uploadedFiles = []
+}: {
+  sellerId: string;
+  productData: Record<string, unknown>;
+  uploadedFiles?: Express.Multer.File[];
+}) {
+  let product;
+  try {
+    product = await saveNewProduct(sellerId, productData, toProductImageUrls(uploadedFiles));
+  } catch (error) {
+    await cleanupUploadedFiles(uploadedFiles);
+    throw error;
+  }
 
   await User.findByIdAndUpdate(sellerId, {
     $inc: { 'statistics.totalListings': 1 }
@@ -225,6 +250,12 @@ export async function createProductForSeller({
   // Modération IA (mots-clés suspects -> analyse Mistral). Fire-and-forget :
   // ne retarde jamais la publication, l'annonce est déjà visible.
   dispatchProductModeration(product._id.toString());
+
+  // Alertes des recherches sauvegardées, après la réponse. Une annonce que la
+  // modération va analyser attend son verdict : c'est elle qui les déclenche.
+  if (!awaitsModerationVerdict(product)) {
+    dispatchSavedSearchAlerts(product._id.toString());
+  }
 
   return product;
 }
@@ -239,12 +270,26 @@ export async function fetchProductById(productId: string, userId?: string) {
     throw new HttpError(404, 'Produit non trouvé');
   }
 
+  const isOwner = userId === product.seller._id.toString();
+
+  // Comme dans l'inventaire public : une annonce retirée sans avoir été vendue
+  // (en pause, archivée, suspendue par la modération) ne regarde que son vendeur.
+  if (!isOwner && !product.isAvailable && !product.isSold) {
+    throw new HttpError(404, 'Produit non trouvé');
+  }
+
   const [enrichedProduct] = await withKpopNames([product]);
 
   const opts: Partial<IProduct['shippingOptions']> = enrichedProduct.shippingOptions || {};
   enrichedProduct.shippingPrice = opts.nationalCost ?? opts.shippingCost ?? null;
 
-  if (userId && userId !== product.seller._id.toString()) {
+  if (!isOwner) {
+    // Données internes : analyse de modération et identité de l'acheteur.
+    delete enrichedProduct.moderationFlag;
+    delete enrichedProduct.soldTo;
+  }
+
+  if (userId && !isOwner) {
     // $inc atomique : aucune vue concurrente perdue, et pas de validation
     // complète du document à chaque consultation.
     await Product.updateOne({ _id: product._id }, { $inc: { views: 1 } });
@@ -262,9 +307,11 @@ export async function fetchProductById(productId: string, userId?: string) {
 }
 
 export async function listProducts(query: Record<string, unknown>) {
-  const page = queryInt(query.page) || DEFAULT_LIST_PAGE;
-  const limit = clampLimit(query.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
+  const pageRequest = parsePagination(query, { defaultLimit: DEFAULT_LIST_LIMIT, maxLimit: MAX_LIST_LIMIT });
   const sort = queryString(query.sort) || DEFAULT_LIST_SORT;
+  if (!ALLOWED_LIST_SORTS.has(sort)) {
+    throw new HttpError(400, `Tri non supporté. Valeurs acceptées : ${[...ALLOWED_LIST_SORTS].join(', ')}`);
+  }
 
   const filter: mongoose.QueryFilter<IProduct> = { isAvailable: true };
 
@@ -296,23 +343,21 @@ export async function listProducts(query: Record<string, unknown>) {
     filter.$text = { $search: search };
   }
 
+  const catalogClauses = await buildCatalogClauses(parseCatalogCriteria(query));
+  if (catalogClauses.length) filter.$and = [...(filter.$and ?? []), ...catalogClauses];
+
   const [products, total] = await Promise.all([
     Product.find(filter)
       .populate('seller', 'username profilePicture isIdentityVerified')
       .sort(sort)
-      .skip((page - 1) * limit)
-      .limit(limit),
+      .skip(pageRequest.skip)
+      .limit(pageRequest.limit),
     Product.countDocuments(filter)
   ]);
 
   return {
     products: await withKpopNames(products),
-    pagination: {
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit)
-    }
+    pagination: paginationMeta(pageRequest, total)
   };
 }
 
@@ -330,11 +375,28 @@ export async function updateProductForOwner({
   const product = await findProductOr404(productId);
   assertOwnership(product, userId, 'Vous n\'êtes pas autorisé à modifier ce produit');
 
-  const updates: Record<string, unknown> = {};
+  const allowedUpdates: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
     if (ALLOWED_PRODUCT_UPDATES.includes(key)) {
-      updates[key] = value;
+      allowedUpdates[key] = value;
     }
+  }
+
+  // Mêmes règles qu'à la création : sinon un PUT contournait la validation
+  // (titre vide, prix négatif, état inconnu…).
+  const { error, value: updates } = validateProductUpdate(allowedUpdates);
+  if (error !== undefined) {
+    throw new HttpError(400, error);
+  }
+
+  // Un champ absent de la mise à jour garde sa valeur : la cohérence se juge
+  // sur l'annonce telle qu'elle sera après écriture.
+  if (CATALOG_REFERENCE_FIELDS.some((field) => field in updates)) {
+    await assertCatalogConsistency({
+      group: 'group' in updates ? updates.group : product.group?.toString(),
+      member: 'member' in updates ? updates.member : product.member,
+      album: 'album' in updates ? updates.album : product.album?.toString()
+    });
   }
 
   // Une annonce mise en pause par la modération IA et pas encore validée par
@@ -430,8 +492,17 @@ export async function markAsSold({
   const product = await findProductOr404(productId);
   assertOwnership(product, userId, 'Vous n\'êtes pas autorisé à modifier ce produit');
 
-  if (buyerId && !mongoose.Types.ObjectId.isValid(buyerId)) {
+  // Le front n'envoie plus d'acheteur pour une vente hors plateforme, mais
+  // d'anciens clients transmettent encore l'identifiant du vendeur lui-même :
+  // dans les deux cas, la vente est enregistrée sans acheteur.
+  const declaredBuyerId = buyerId && buyerId !== userId ? buyerId : undefined;
+  // Le corps JSON n'est pas typé : un tableau ou un objet ne passe pas.
+  if (declaredBuyerId && (typeof declaredBuyerId !== 'string' || !mongoose.Types.ObjectId.isValid(declaredBuyerId))) {
     throw new HttpError(400, 'ID d\'acheteur invalide');
+  }
+  // Un identifiant fantôme fausserait `soldTo` (avis, litiges) sans compter d'achat à personne.
+  if (declaredBuyerId && !(await User.exists({ _id: declaredBuyerId, accountStatus: { $ne: 'deleted' } }))) {
+    throw new HttpError(400, 'Acheteur introuvable');
   }
   // Sinon chaque clic compterait une vente de plus dans les statistiques.
   if (product.isSold) {
@@ -444,11 +515,10 @@ export async function markAsSold({
   product.isSold = true;
   product.soldAt = new Date();
 
-  // Le front transmet parfois l'identifiant du vendeur : un vendeur n'est
-  // jamais son propre acheteur, ses achats ne doivent pas en être gonflés.
-  if (buyerId && buyerId !== userId) {
-    product.soldTo = new mongoose.Types.ObjectId(buyerId);
-    await User.findByIdAndUpdate(buyerId, {
+  // Un vendeur n'est jamais son propre acheteur : ses achats ne doivent pas en être gonflés.
+  if (declaredBuyerId) {
+    product.soldTo = new mongoose.Types.ObjectId(declaredBuyerId);
+    await User.findByIdAndUpdate(declaredBuyerId, {
       $inc: { 'statistics.totalPurchases': 1 }
     });
   }

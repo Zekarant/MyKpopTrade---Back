@@ -1,14 +1,9 @@
 jest.mock('../../../notifications/services/notificationService', () => ({
-  NotificationService: {
-    createNotification: jest.fn().mockResolvedValue(undefined)
-  }
+  createNotification: jest.fn().mockResolvedValue(undefined)
 }));
 
 jest.mock('../../../../commons/services/emailService', () => ({
-  sendShipmentShippedEmail: jest.fn().mockResolvedValue(undefined),
-  sendShipmentDeliveredEmail: jest.fn().mockResolvedValue(undefined),
-  sendShipmentReminderEmail: jest.fn().mockResolvedValue(undefined),
-  sendShipmentAutoConfirmedEmail: jest.fn().mockResolvedValue(undefined)
+  sendShipmentReminderEmail: jest.fn().mockResolvedValue(undefined)
 }));
 
 import {
@@ -27,11 +22,8 @@ import {
 } from '../shipmentService';
 import * as trackingModule from '../tracking';
 import { resetTrackingProviderCache } from '../tracking';
-import { NotificationService } from '../../../notifications/services/notificationService';
-import {
-  sendShipmentReminderEmail,
-  sendShipmentAutoConfirmedEmail
-} from '../../../../commons/services/emailService';
+import { createNotification } from '../../../notifications/services/notificationService';
+import { sendShipmentReminderEmail } from '../../../../commons/services/emailService';
 import Payment from '../../../../models/paymentModel';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -233,7 +225,7 @@ describe('shipmentService — automatisation', () => {
       );
       // Le markShipped initial a déjà notifié l'acheteur — on remet à zéro
       // pour ne mesurer que l'effet d'autoConfirmStaleShipments.
-      (NotificationService.createNotification as jest.Mock).mockClear();
+      (createNotification as jest.Mock).mockClear();
 
       const result = await autoConfirmStaleShipments();
       expect(result.confirmed).toBe(1);
@@ -241,8 +233,8 @@ describe('shipmentService — automatisation', () => {
       const reloaded = await Payment.findById(payment!._id);
       expect(reloaded?.shipment?.status).toBe('delivered');
       expect(reloaded?.shipment?.autoConfirmedAt).toBeDefined();
-      expect(NotificationService.createNotification).toHaveBeenCalledTimes(2); // buyer + seller
-      expect(sendShipmentAutoConfirmedEmail).toHaveBeenCalledTimes(2);
+      // buyer + seller ; les emails partent de ces notifications.
+      expect(createNotification).toHaveBeenCalledTimes(2);
     });
 
     it('laisse intacts les shipments expédiés récemment', async () => {

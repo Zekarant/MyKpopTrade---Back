@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { Request } from 'express';
+import { readCookie } from '../commons/utils/cookies';
 
 /** Cookie qui lie un parcours OAuth au navigateur qui l'a lancé. */
 export const OAUTH_STATE_COOKIE = 'oauth_state';
@@ -34,19 +35,6 @@ export function readOAuthState(raw: unknown): EncodedState | null {
   } catch {
     return null;
   }
-}
-
-function readCookie(req: Request, name: string): string | undefined {
-  const header = req.headers.cookie;
-  if (!header) return undefined;
-  for (const part of header.split(';')) {
-    const separator = part.indexOf('=');
-    if (separator === -1) continue;
-    if (part.slice(0, separator).trim() === name) {
-      return decodeURIComponent(part.slice(separator + 1).trim());
-    }
-  }
-  return undefined;
 }
 
 function sameNonce(a: string, b: string): boolean {

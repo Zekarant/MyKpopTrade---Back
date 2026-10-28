@@ -1,232 +1,140 @@
 import { Request, Response } from 'express';
 import path from 'path';
-import fs from 'fs';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
+import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
-import { mapHttpError } from '../../../commons/utils/httpErrorMapper';
 import {
   getUserRatingsWithStats,
   createUserRating,
-  reportUserRating,
   deleteRatingImageAt,
   addRatingImageForUser,
   respondToUserRating,
   updateUserRatingResponse,
   deleteUserRatingResponse
 } from '../services/ratingService';
-import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
-import { queryInt, queryString } from '../../../commons/utils/query';
+import { parsePagination } from '../../../commons/utils/pagination';
+import { queryString } from '../../../commons/utils/query';
+
+const RATINGS_PAGE_SIZE = 10;
 
 /**
  * Récupérer les évaluations d'un utilisateur
+ * @route GET /api/profiles/ratings/:userId
  */
-export const getUserRatings = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.params.userId as string;
-  const page = queryInt(req.query.page) || 1;
-  const limit = clampLimit(req.query.limit, 10, MAX_PAGE_SIZE);
-  const type = queryString(req.query.type);
-
-  const result = await getUserRatingsWithStats(userId, type, page, limit);
-  return res.status(200).json(result);
-});
+export const getUserRatings = async (req: Request, res: Response): Promise<void> => {
+  const result = await getUserRatingsWithStats(
+    String(req.params.userId),
+    queryString(req.query.type),
+    parsePagination(req.query, { defaultLimit: RATINGS_PAGE_SIZE })
+  );
+  res.status(200).json(result);
+};
 
 /**
  * Créer une nouvelle évaluation
+ * @route POST /api/profiles/ratings
  */
-export const createRating = asyncHandler(async (req: Request, res: Response) => {
-  const reviewerId = req.user!.id;
+export const createRating = async (req: Request, res: Response): Promise<void> => {
   const { recipientId, review, type, transactionId } = req.body;
+  const files = Array.isArray(req.files) ? req.files : [];
 
-  const rating = parseInt(req.body.rating, 10);
+  const savedRating = await createUserRating({
+    reviewerId: req.user!.id,
+    recipientId,
+    rating: parseInt(req.body.rating, 10),
+    review,
+    type,
+    transactionId,
+    images: files.map((file) => `/uploads/ratings/${path.basename(file.path)}`)
+  });
 
-  let images: string[] = [];
-  if (req.files && Array.isArray(req.files)) {
-    images = (req.files as Express.Multer.File[]).map(file =>
-      `/uploads/ratings/${path.basename(file.path)}`
-    );
-  }
-
-  try {
-    const savedRating = await createUserRating({
-      reviewerId,
-      recipientId,
-      rating,
-      review,
-      type,
-      transactionId,
-      images
-    });
-
-    return res.status(201).json({
-      message: 'Évaluation créée avec succès',
-      rating: savedRating
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
-
-/**
- * Signaler une évaluation
- */
-export const reportRating = asyncHandler(async (req: Request, res: Response) => {
-  const ratingId = req.params.ratingId as string;
-  const userId = req.user!.id;
-  const { reason } = req.body;
-
-  try {
-    await reportUserRating(userId, ratingId, reason);
-    return res.status(200).json({
-      message: 'Évaluation signalée avec succès. Elle sera examinée par nos modérateurs.'
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
+  res.status(201).json({
+    message: 'Évaluation créée avec succès',
+    rating: savedRating
+  });
+};
 
 /**
  * Supprimer une image d'un avis
+ * @route DELETE /api/profiles/ratings/:ratingId/images
  */
-export const deleteRatingImage = asyncHandler(async (req: Request, res: Response) => {
-  const ratingId = req.params.ratingId as string;
-  const { imageIndex } = req.body;
-  const userId = req.user!.id;
-
-  try {
-    const images = await deleteRatingImageAt({ userId, ratingId, imageIndex });
-    return res.status(200).json({
-      message: 'Image supprimée avec succès',
-      images
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la suppression d\'une image de l\'évaluation', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      ratingId,
-      userId
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la suppression de l\'image'
-    });
-  }
-});
+export const deleteRatingImage = async (req: Request, res: Response): Promise<void> => {
+  const images = await deleteRatingImageAt({
+    userId: req.user!.id,
+    ratingId: String(req.params.ratingId),
+    imageIndex: req.body?.imageIndex
+  });
+  res.status(200).json({
+    message: 'Image supprimée avec succès',
+    images
+  });
+};
 
 /**
  * Ajouter une image à un avis existant
+ * @route POST /api/profiles/ratings/:ratingId/images
  */
-export const addRatingImage = asyncHandler(async (req: Request, res: Response) => {
-  const ratingId = req.params.ratingId as string;
-  const userId = req.user!.id;
-
+export const addRatingImage = async (req: Request, res: Response): Promise<void> => {
   if (!req.file) {
-    return res.status(400).json({ message: 'Aucune image n\'a été téléchargée' });
+    throw new HttpError(400, 'Aucune image n\'a été téléchargée', 'NO_FILE_UPLOADED');
   }
 
-  try {
-    const result = await addRatingImageForUser({
-      userId,
-      ratingId,
-      filePath: req.file.path
-    });
+  const result = await addRatingImageForUser({
+    userId: req.user!.id,
+    ratingId: String(req.params.ratingId),
+    filePath: req.file.path
+  });
 
-    return res.status(200).json({
-      message: 'Image ajoutée avec succès',
-      image: result.image,
-      images: result.images
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-
-    logger.error('Erreur lors de l\'ajout d\'une image à l\'évaluation', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      ratingId,
-      userId
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de l\'ajout de l\'image'
-    });
-  }
-});
+  res.status(200).json({
+    message: 'Image ajoutée avec succès',
+    image: result.image,
+    images: result.images
+  });
+};
 
 /**
  * Répond à une évaluation (uniquement pour le destinataire de l'évaluation)
+ * @route POST /api/profiles/ratings/:ratingId/response
  */
-export const respondToRating = asyncHandler(async (req: Request, res: Response) => {
-  const ratingId = req.params.ratingId as string;
+export const respondToRating = async (req: Request, res: Response): Promise<void> => {
   const userId = req.user!.id;
-  const { response } = req.body;
+  const ratingId = String(req.params.ratingId);
 
-  try {
-    const rating = await respondToUserRating(userId, ratingId, response);
+  const rating = await respondToUserRating(userId, ratingId, req.body?.response);
+  logger.info('Réponse ajoutée à une évaluation', { userId, ratingId });
 
-    logger.info('Réponse ajoutée à une évaluation', { userId, ratingId });
-
-    return res.status(200).json({
-      message: 'Réponse ajoutée avec succès',
-      rating
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
+  res.status(200).json({
+    message: 'Réponse ajoutée avec succès',
+    rating
+  });
+};
 
 /**
  * Modifier sa réponse à une évaluation
+ * @route PUT /api/profiles/ratings/:ratingId/response
  */
-export const updateRatingResponse = asyncHandler(async (req: Request, res: Response) => {
-  const ratingId = req.params.ratingId as string;
+export const updateRatingResponse = async (req: Request, res: Response): Promise<void> => {
   const userId = req.user!.id;
-  const { response } = req.body;
+  const ratingId = String(req.params.ratingId);
 
-  try {
-    const rating = await updateUserRatingResponse(userId, ratingId, response);
+  const rating = await updateUserRatingResponse(userId, ratingId, req.body?.response);
+  logger.info('Réponse à une évaluation modifiée', { userId, ratingId });
 
-    logger.info('Réponse à une évaluation modifiée', { userId, ratingId });
-
-    return res.status(200).json({
-      message: 'Réponse modifiée avec succès',
-      rating
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
+  res.status(200).json({
+    message: 'Réponse modifiée avec succès',
+    rating
+  });
+};
 
 /**
  * Supprimer sa réponse à une évaluation
+ * @route DELETE /api/profiles/ratings/:ratingId/response
  */
-export const deleteRatingResponse = asyncHandler(async (req: Request, res: Response) => {
-  const ratingId = req.params.ratingId as string;
+export const deleteRatingResponse = async (req: Request, res: Response): Promise<void> => {
   const userId = req.user!.id;
+  const ratingId = String(req.params.ratingId);
 
-  try {
-    await deleteUserRatingResponse(userId, ratingId);
+  await deleteUserRatingResponse(userId, ratingId);
+  logger.info('Réponse à une évaluation supprimée', { userId, ratingId });
 
-    logger.info('Réponse à une évaluation supprimée', { userId, ratingId });
-
-    return res.status(200).json({
-      message: 'Réponse supprimée avec succès'
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
+  res.status(200).json({ message: 'Réponse supprimée avec succès' });
+};

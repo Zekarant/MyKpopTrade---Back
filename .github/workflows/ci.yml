@@ -1,0 +1,43 @@
+# Mêmes vérifications que les hooks husky, mais impossibles à contourner
+# (`--no-verify`) : types, lint, tests d'intégration et audit des dépendances
+# de production.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Types
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # mongodb-memory-server : aucune base externe ; en série, comme le hook
+      # pre-push, pour éviter les faux négatifs (timeouts, collisions sur uploads/).
+      - name: Tests
+        run: npm test -- --runInBand
+        env:
+          NODE_ENV: test
+
+      - name: Audit (dépendances de production)
+        run: npm audit --omit=dev --audit-level=high

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import * as faqController from './controller';
+import * as faqController from './controllers/faqController';
 import { authenticateJWT, requireAdmin } from '../../commons/middlewares/authMiddleware';
 
 const router = Router();

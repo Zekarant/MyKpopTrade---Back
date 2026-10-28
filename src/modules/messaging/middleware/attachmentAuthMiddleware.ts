@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import env from '../../../config/env';
 import User from '../../../models/userModel';
 import { authenticateJWT } from '../../../commons/middlewares/authMiddleware';
+import { JWT_VERIFY_OPTIONS } from '../../../commons/services/tokenService';
 
 /** `purpose` du jeton de lecture des pièces jointes. */
 const ATTACHMENT_READ_PURPOSE = 'attachment_read';
@@ -49,7 +50,7 @@ export async function authenticateAttachmentRequest(
 
   let userId: string | undefined;
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as { userId?: string; purpose?: string };
+    const decoded = jwt.verify(token, env.JWT_SECRET, JWT_VERIFY_OPTIONS) as { userId?: string; purpose?: string };
     userId = decoded.purpose === ATTACHMENT_READ_PURPOSE ? decoded.userId : undefined;
   } catch {
     userId = undefined;

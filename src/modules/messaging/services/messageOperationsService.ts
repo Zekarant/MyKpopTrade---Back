@@ -1,13 +1,19 @@
-import path from 'path';
-import fs from 'fs';
 import Message from '../../../models/messageModel';
 import Conversation from '../../../models/conversationModel';
-import { NotificationService } from '../../notifications/services/notificationService';
-import { MessagingUtilsService } from './messagingUtilsService';
+import { createNotification } from '../../notifications/services/notificationService';
+import {
+  verifyConversationAccess,
+  validateFileType,
+  updateConversationLastMessage,
+  markConversationAsRead
+} from './messagingUtilsService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import { assertNotBlockedInConversation } from '../../users/services/userBlockService';
+import { realtimePublisher } from '../../realtime/services/realtimePublisher';
+import { attachmentPath, attachmentExists, removeFiles } from '../attachmentStorage';
 
-const ATTACHMENTS_DIR = () => path.join(process.cwd(), 'uploads', 'chat_attachments');
+type StoredAttachment = { filename: string; mimetype: string };
 
 export async function sendMessageToConversation({
   userId,
@@ -20,18 +26,21 @@ export async function sendMessageToConversation({
   username?: string;
   conversationId: string;
   content: unknown;
-  files?: Express.Multer.File[];
+  /** Pièces jointes déjà vérifiées et écrites sur disque par le middleware d'upload. */
+  files?: StoredAttachment[];
 }) {
   if (typeof content !== 'string' || content.trim() === '') {
-    throw new HttpError(400, 'Le contenu du message ne peut pas être vide');
+    throw new HttpError(400, 'Le contenu du message ne peut pas être vide', 'EMPTY_MESSAGE');
   }
 
-  const conversation = await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+  const conversation = await verifyConversationAccess(conversationId, userId);
+  // Conversation existante : elle reste lisible, mais plus aucun message n'y passe après un blocage.
+  await assertNotBlockedInConversation(userId, conversation.participants);
 
   let attachments: string[] = [];
   if (files && Array.isArray(files) && files.length > 0) {
     for (const file of files) {
-      if (!MessagingUtilsService.validateFileType(file.mimetype)) {
+      if (!validateFileType(file.mimetype)) {
         throw new HttpError(400, `Type de fichier non autorisé: ${file.mimetype}`);
       }
     }
@@ -51,7 +60,7 @@ export async function sendMessageToConversation({
     readBy: [userId]
   });
 
-  await MessagingUtilsService.updateConversationLastMessage(conversationId, newMessage._id.toString());
+  await updateConversationLastMessage(conversationId, newMessage._id.toString());
 
   const otherParticipants = conversation.participants.filter(
     (p) => p.toString() !== userId
@@ -60,7 +69,7 @@ export async function sendMessageToConversation({
   const senderName = username || 'Utilisateur';
 
   for (const recipientId of otherParticipants) {
-    await NotificationService.createNotification({
+    await createNotification({
       recipientId,
       type: 'message',
       title: 'Nouveau message',
@@ -74,13 +83,24 @@ export async function sendMessageToConversation({
     });
   }
 
+  realtimePublisher.publishNewMessages(conversationId, [newMessage._id]);
+
   return await Message.findById(newMessage._id)
     .populate('sender', 'username profilePicture');
 }
 
 export async function markConversationRead(userId: string, conversationId: string) {
-  await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
-  return await MessagingUtilsService.markConversationAsRead(conversationId, userId);
+  const conversation = await verifyConversationAccess(conversationId, userId);
+  const markedCount = await markConversationAsRead(conversationId, userId);
+  // Rien de nouveau lu : pas d'accusé de lecture à diffuser.
+  if (markedCount > 0) {
+    realtimePublisher.publishConversationRead({
+      conversationId,
+      readerId: userId,
+      participantIds: conversation.participants
+    });
+  }
+  return markedCount;
 }
 
 export async function markSingleMessageRead(userId: string, messageId: string) {
@@ -104,6 +124,12 @@ export async function markSingleMessageRead(userId: string, messageId: string) {
       messageId,
       { $addToSet: { readBy: userId } }
     );
+    realtimePublisher.publishConversationRead({
+      conversationId: message.conversation,
+      readerId: userId,
+      participantIds: conversation.participants,
+      messageIds: [messageId]
+    });
   }
 }
 
@@ -129,17 +155,11 @@ export async function deleteUserMessage(userId: string, messageId: string) {
       }
     );
   } else {
-    if (message.attachments && message.attachments.length > 0) {
-      for (const attachment of message.attachments) {
-        const filePath = path.join(ATTACHMENTS_DIR(), attachment);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-      }
-    }
-
     await Message.deleteOne({ _id: messageId });
   }
+
+  // Dans les deux cas, plus aucun message ne référence ces fichiers.
+  await removeFiles((message.attachments ?? []).map(attachmentPath));
 }
 
 export async function resolveMessageAttachmentPath({
@@ -151,18 +171,18 @@ export async function resolveMessageAttachmentPath({
   messageId: string;
   attachmentName: string;
 }): Promise<string> {
-  const message = await Message.findOne({ _id: messageId });
+  const message = await Message.findOne({ _id: messageId }).select('conversation attachments').lean();
 
   if (!message) {
     throw new HttpError(404, 'Message non trouvé');
   }
 
-  const conversation = await Conversation.findOne({
+  const isParticipant = await Conversation.exists({
     _id: message.conversation,
     participants: userId
   });
 
-  if (!conversation) {
+  if (!isParticipant) {
     throw new HttpError(403, 'Accès refusé');
   }
 
@@ -170,11 +190,9 @@ export async function resolveMessageAttachmentPath({
     throw new HttpError(404, 'Pièce jointe non trouvée');
   }
 
-  const filePath = path.join(ATTACHMENTS_DIR(), attachmentName);
-
-  if (!fs.existsSync(filePath)) {
+  if (!(await attachmentExists(attachmentName))) {
     throw new HttpError(404, 'Fichier non trouvé sur le serveur');
   }
 
-  return filePath;
+  return attachmentPath(attachmentName);
 }

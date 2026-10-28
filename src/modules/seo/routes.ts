@@ -1,5 +1,5 @@
 import express from 'express';
-import { sitemapXml, robotsTxt } from './seoController';
+import { sitemapXml, robotsTxt } from './controllers/seoController';
 
 /**
  * Routes SEO publiques (pas d'auth). Montées à la racine pour exposer

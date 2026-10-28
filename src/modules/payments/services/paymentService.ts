@@ -3,18 +3,19 @@ import { PayPalService } from './paypalService';
 import { PayPalRefundError } from './paypalRefundService';
 import { applyRefundToPayment, notifyRefund, remainingRefundable } from './refundLedger';
 import { SELLER_BLOCK_MESSAGES, SellerBlockReason } from './paypalPartnerService';
-import { SellerNotReadyError } from './paypalPaymentService';
+import { OrderNotApprovedError, SellerNotReadyError } from './paypalPaymentService';
+import { completePayment } from './paymentCompletion';
 import Payment, { IPayment } from '../../../models/paymentModel';
 import Product from '../../../models/productModel';
-import User, { IUser } from '../../../models/userModel';
+import User from '../../../models/userModel';
 import { EncryptionService } from '../../../commons/utils/encryptionService';
-import { NotificationService } from '../../notifications/services/notificationService';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { gt, subtract } from '../../../commons/utils/moneyMath';
 import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
+import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 
 const PAYMENT_STATUS = {
   PENDING: 'pending',
@@ -29,13 +30,11 @@ const PAYPAL_STATUS = {
 const ERROR_CODES = {
   SELLER_UNAVAILABLE: 'SELLER_UNAVAILABLE',
   PAYMENT_ACCESS_DENIED: 'PAYMENT_ACCESS_DENIED',
-  REFUND_PERMISSION_DENIED: 'REFUND_PERMISSION_DENIED'
+  REFUND_PERMISSION_DENIED: 'REFUND_PERMISSION_DENIED',
+  ORDER_NOT_APPROVED: 'ORDER_NOT_APPROVED'
 } as const;
 
 const USER_ID_LOG_PREFIX_LENGTH = 5;
-
-/** Acheteur ou vendeur peuplé sur un paiement (jamais son email). */
-type PaymentParty = Pick<IUser, '_id' | 'username' | 'profilePicture'>;
 
 async function isUserAdmin(userId: string): Promise<boolean> {
   const user = await User.findById(userId).select('role');
@@ -71,18 +70,6 @@ async function assertPaymentAccess<T>(
     'Vous n\'êtes pas autorisé à accéder à ce paiement',
     ERROR_CODES.PAYMENT_ACCESS_DENIED
   );
-}
-
-async function markProductAsSold(
-  productId: mongoose.Types.ObjectId,
-  buyerId: mongoose.Types.ObjectId
-): Promise<void> {
-  await Product.findByIdAndUpdate(productId, {
-    isAvailable: false,
-    isSold: true,
-    soldAt: new Date(),
-    soldTo: buyerId
-  });
 }
 
 export function decryptPaymentMetadata(
@@ -218,6 +205,29 @@ export async function disconnectPayPalForUser(userId: string): Promise<void> {
   }
 
   await PayPalService.forgetSellerAccount(userId);
+
+  logger.info('Compte PayPal déconnecté', {
+    userId: userId.substring(0, USER_ID_LOG_PREFIX_LENGTH) + '...'
+  });
+}
+
+/**
+ * Retour navigateur du vendeur en fin d'onboarding PayPal. Le vendeur est
+ * retrouvé par le `tracking_id` de sa referral ; rien n'est enregistré si PayPal
+ * ne confirme pas ce marchand (completeOnboarding lève alors une erreur).
+ */
+export async function completeOnboardingReturn(
+  merchantIdInPayPal: string,
+  trackingId: string
+): Promise<'complete' | 'unknown_tracking_id'> {
+  const seller = await User.findOne({ paypalTrackingId: trackingId }).select('_id').lean();
+  if (!seller) {
+    logger.warn('Retour d\'onboarding PayPal avec un tracking_id inconnu', { trackingId });
+    return 'unknown_tracking_id';
+  }
+
+  await PayPalService.completeOnboarding(seller._id.toString(), merchantIdInPayPal, trackingId);
+  return 'complete';
 }
 
 export interface InitiateDirectPaymentInput {
@@ -354,27 +364,17 @@ export async function captureDirectPayment(userId: string, orderId: string) {
         { $set: { isAvailable: true, isSold: false }, $unset: { soldAt: 1, soldTo: 1 } }
       );
     }
+    // L'acheteur n'a pas (encore) validé sur PayPal : le front le renvoie vers
+    // la page d'approbation de l'ordre.
+    if (error instanceof OrderNotApprovedError) {
+      const notApproved = new HttpError(400, error.message, ERROR_CODES.ORDER_NOT_APPROVED);
+      notApproved.details = { approvalUrl: payment.approvalUrl || null };
+      throw notApproved;
+    }
     throw error;
   }
 
-  payment.status = PAYMENT_STATUS.COMPLETED;
-  payment.completedAt = new Date();
-  payment.captureId = captureResult.captureId;
-  await payment.save();
-
-  await NotificationService.createNotification({
-    recipientId: payment.seller,
-    type: 'system',
-    title: 'Nouveau paiement reçu',
-    content: `Votre produit a été acheté pour ${payment.amount} ${payment.currency}.`,
-    link: `/account/sales/${payment._id}`,
-    data: {
-      paymentId: payment._id,
-      productId: payment.product,
-      amount: payment.amount,
-      currency: payment.currency
-    }
-  });
+  await completePayment(payment._id, captureResult.captureId);
 
   return {
     id: payment._id,
@@ -415,13 +415,7 @@ export async function resolveConfirmPayment(orderId: unknown): Promise<ConfirmPa
   }
 
   if (paymentStatus === PAYPAL_STATUS.COMPLETED) {
-    if (payment.status !== PAYMENT_STATUS.COMPLETED) {
-      payment.status = PAYMENT_STATUS.COMPLETED;
-      payment.completedAt = new Date();
-      await payment.save();
-
-      await markProductAsSold(payment.product, payment.buyer);
-    }
+    await completePayment(payment._id);
     return { kind: 'completed', paymentId: payment._id };
   }
 
@@ -454,10 +448,8 @@ export async function fetchPaymentStatus(userId: string, paymentId: string) {
 
 export async function listUserPayments(
   userId: string,
-  role: string,
-  status: string | undefined,
-  page: number,
-  limit: number
+  { role, status }: { role: string; status?: string },
+  { page, limit, skip }: PageRequest
 ) {
   const filter: mongoose.QueryFilter<IPayment> = {};
 
@@ -474,34 +466,28 @@ export async function listUserPayments(
     filter.status = status as IPayment['status'];
   }
 
-  const skip = (page - 1) * limit;
-
-  const payments = await Payment.find(filter)
-    .populate('product', 'title images price currency')
-    .populate('buyer', 'username profilePicture')
-    .populate('seller', 'username profilePicture')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit);
-
-  const total = await Payment.countDocuments(filter);
+  const [payments, total] = await Promise.all([
+    Payment.find(filter)
+      .populate('product', 'title images price currency')
+      .populate('buyer', 'username profilePicture')
+      .populate('seller', 'username profilePicture')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Payment.countDocuments(filter)
+  ]);
 
   const processedPayments = payments.map(payment => {
-    const paymentObj = payment.toObject();
-    delete paymentObj.ipAddress;
-    delete paymentObj.userAgent;
-    decryptPaymentMetadata(paymentObj, payment._id);
-    return paymentObj;
+    delete payment.ipAddress;
+    delete payment.userAgent;
+    decryptPaymentMetadata(payment, payment._id);
+    return payment;
   });
 
   return {
     data: processedPayments,
-    pagination: {
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit)
-    }
+    pagination: paginationMeta({ page, limit }, total)
   };
 }
 
@@ -686,30 +672,5 @@ export async function processRefund({
     }
     throw new HttpError(400, (error instanceof Error && error.message) || 'Erreur lors du remboursement');
   }
-}
-
-export async function fetchPaymentDetails(userId: string, paymentId: string) {
-  const payment = await Payment.findById(paymentId)
-    .populate('product', 'title description price images')
-    // Jamais l'email de l'autre partie : acheteur et vendeur échangent via la messagerie.
-    // null si le compte a été supprimé depuis.
-    .populate<{ buyer: PaymentParty | null }>('buyer', 'username profilePicture')
-    .populate<{ seller: PaymentParty | null }>('seller', 'username profilePicture');
-
-  if (!payment) {
-    throw new HttpError(404, 'Paiement non trouvé');
-  }
-
-  await assertPaymentAccess(
-    payment,
-    userId,
-    paymentId,
-    (p) => p.buyer?._id.toString() ?? '',
-    (p) => p.seller?._id.toString() ?? ''
-  );
-
-  GdprLogger.logPaymentAction('payment_details_accessed', { paymentId }, userId);
-
-  return payment;
 }
 

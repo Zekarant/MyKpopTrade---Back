@@ -1,124 +1,36 @@
 import { Types } from 'mongoose';
 import Conversation, { IConversation, IOfferHistory } from '../../../models/conversationModel';
-import Message from '../../../models/messageModel';
 import Product, { IProduct } from '../../../models/productModel';
-import { MessagingUtilsService } from './messagingUtilsService';
+import { verifyConversationAccess } from './messagingUtilsService';
 import { LeanConversation } from '../types/conversationTypes';
 import { HttpError } from '../../../commons/utils/httpError';
-import { NotificationService } from '../../notifications/services/notificationService';
+import { createNotification } from '../../notifications/services/notificationService';
+import { assertNotBlocked } from '../../users/services/userBlockService';
+import {
+  OFFER_STATUS,
+  OFFER_TYPE,
+  NEGOTIATION_CONVERSATION_TYPE,
+  NegotiatedProduct,
+  buildOfferEntry,
+  setOfferHistoryStatus,
+  findOfferConversation
+} from './offerHistory';
+import { MESSAGE_CONTENT_TYPE, createOfferMessages } from './offerMessageService';
 
-const OFFER_STATUS = {
-  PENDING: 'pending',
-  ACCEPTED: 'accepted',
-  REJECTED: 'rejected',
-  EXPIRED: 'expired'
-} as const;
-
-const OFFER_TYPE = {
-  INITIAL: 'initial',
-  COUNTER: 'counter'
-} as const;
-
-const CONVERSATION_TYPE = {
-  NEGOTIATION: 'negotiation'
-} as const;
-
-const MESSAGE_CONTENT_TYPE = {
-  OFFER: 'offer',
-  COUNTER_OFFER: 'counter_offer',
-  SYSTEM_NOTIFICATION: 'system_notification'
-} as const;
+/**
+ * Offres de négociation : ouverture (ou mise à jour), historique et annulation.
+ * Les réponses aux offres sont dans negotiationResponseService, le prix libre
+ * dans payWhatYouWantService.
+ */
 
 const DEFAULT_MIN_OFFER_PERCENTAGE = 50;
+const DEFAULT_CURRENCY = 'EUR';
 
-type MessageContentType =
-  | typeof MESSAGE_CONTENT_TYPE.OFFER
-  | typeof MESSAGE_CONTENT_TYPE.COUNTER_OFFER
-  | typeof MESSAGE_CONTENT_TYPE.SYSTEM_NOTIFICATION;
-
-type ObjectIdLike = Types.ObjectId | string;
 type OfferProduct = Pick<
   IProduct,
   | '_id' | 'seller' | 'title' | 'price' | 'currency' | 'isAvailable' | 'allowOffers' | 'minOfferPercentage'
   | 'isPayWhatYouWant' | 'pwywMinPrice' | 'pwywMaxPrice'
 >;
-type NegotiatedProduct = Pick<IProduct, '_id' | 'seller' | 'title' | 'price' | 'currency'>;
-type ProductNegotiation = NonNullable<IProduct['negotiations']>[number];
-
-/**
- * Crée un message système puis un message texte optionnel,
- * et met à jour lastMessage / lastMessageAt de la conversation.
- */
-async function createOfferMessages(
-  conversationId: ObjectIdLike,
-  senderId: string,
-  systemContent: string,
-  contentType: MessageContentType,
-  optionalUserMessage?: string
-): Promise<void> {
-  const systemMessage = await Message.create({
-    conversation: conversationId,
-    sender: senderId,
-    content: systemContent,
-    contentType,
-    isSystemMessage: true,
-    readBy: [senderId]
-  });
-
-  let lastMessageId = systemMessage._id;
-
-  if (optionalUserMessage && optionalUserMessage.trim()) {
-    const userMessage = await Message.create({
-      conversation: conversationId,
-      sender: senderId,
-      content: optionalUserMessage,
-      contentType: 'text',
-      readBy: [senderId]
-    });
-    lastMessageId = userMessage._id;
-  }
-
-  await Conversation.findByIdAndUpdate(
-    conversationId,
-    { lastMessage: lastMessageId, lastMessageAt: new Date() }
-  );
-}
-
-function findOfferConversation(conversationId: ObjectIdLike) {
-  return Conversation.findById(conversationId)
-    .populate('participants', 'username profilePicture')
-    .populate('productId', 'title price images')
-    .populate('lastMessage')
-    .populate('offerHistory.offeredBy', 'username profilePicture');
-}
-
-function buildOfferEntry(
-  userId: string,
-  amount: number,
-  offerType: typeof OFFER_TYPE[keyof typeof OFFER_TYPE],
-  message?: string
-) {
-  return {
-    offeredBy: userId,
-    amount,
-    offerType,
-    status: OFFER_STATUS.PENDING,
-    message: message || '',
-    createdAt: new Date()
-  };
-}
-
-async function setOfferHistoryStatus(
-  conversationId: ObjectIdLike,
-  offerId: Types.ObjectId,
-  status: typeof OFFER_STATUS[keyof typeof OFFER_STATUS],
-  extraSet: Record<string, unknown> = {}
-): Promise<void> {
-  await Conversation.updateOne(
-    { _id: conversationId, 'offerHistory._id': offerId },
-    { $set: { 'offerHistory.$.status': status, ...extraSet } }
-  );
-}
 
 function assertProductOfferable(product: OfferProduct | null, userId: string): asserts product is OfferProduct {
   if (!product) {
@@ -228,7 +140,7 @@ async function createNegotiationConversation(
 ) {
   const conversation = await Conversation.create({
     participants: [userId, product.seller],
-    type: CONVERSATION_TYPE.NEGOTIATION,
+    type: NEGOTIATION_CONVERSATION_TYPE,
     productId: product._id,
     createdBy: userId,
     status: 'open',
@@ -269,6 +181,10 @@ async function createNegotiationConversation(
   return conversation;
 }
 
+/**
+ * Ouvre une négociation sur un produit, ou met à jour l'offre de l'acheteur si
+ * une négociation active existe déjà avec ce vendeur.
+ */
 export async function initiateNegotiationFlow({
   userId,
   productId,
@@ -289,12 +205,14 @@ export async function initiateNegotiationFlow({
 
   const product = await Product.findById(productId);
   assertProductOfferable(product, userId);
+  // Couvre aussi les propositions de prix libre, qui passent par ce même circuit.
+  await assertNotBlocked(userId, product.seller);
   assertOfferInAcceptedRange(product, initialOffer);
 
   const existing = await Conversation.findOne({
     participants: { $all: [userId, product.seller] },
     productId: productId,
-    type: CONVERSATION_TYPE.NEGOTIATION,
+    type: NEGOTIATION_CONVERSATION_TYPE,
     isActive: true
   });
 
@@ -314,7 +232,8 @@ export async function initiateNegotiationFlow({
 
   const populatedConversation = await findOfferConversation(conversationId);
 
-  await NotificationService.createNotification({
+  // createNotification journalise déjà son échec ; l'offre est enregistrée, elle ne doit pas échouer pour ça.
+  await createNotification({
     recipientId: product.seller,
     type: 'offer',
     title: isUpdatingOffer ? 'Offre mise à jour' : 'Nouvelle offre reçue',
@@ -331,336 +250,8 @@ export async function initiateNegotiationFlow({
   };
 }
 
-type NegotiationActionResult = {
-  statusMessage: string;
-  contentType: MessageContentType;
-};
-
-async function applyAcceptAction(
-  conversationId: string,
-  pendingOffer: IOfferHistory,
-  product: NegotiatedProduct,
-  negotiation: ProductNegotiation
-): Promise<NegotiationActionResult> {
-  const offerAmount = pendingOffer.amount;
-  negotiation.status = OFFER_STATUS.ACCEPTED;
-  // currentOffer porte le montant accepté, celui que le paiement facture.
-  negotiation.currentOffer = offerAmount;
-  negotiation.counterOffer = undefined;
-  negotiation.updatedAt = new Date();
-
-  await setOfferHistoryStatus(
-    conversationId,
-    pendingOffer._id,
-    OFFER_STATUS.ACCEPTED,
-    {
-      'negotiation.status': OFFER_STATUS.ACCEPTED,
-      'negotiation.currentOffer': offerAmount,
-      'offerHistory.$.respondedAt': new Date()
-    }
-  );
-
-  return {
-    statusMessage: `Offre de ${offerAmount} ${product.currency} acceptée`,
-    contentType: MESSAGE_CONTENT_TYPE.SYSTEM_NOTIFICATION
-  };
-}
-
-async function applyRejectAction(
-  conversationId: string,
-  pendingOffer: IOfferHistory,
-  product: NegotiatedProduct,
-  negotiation: ProductNegotiation,
-  message?: string
-): Promise<NegotiationActionResult> {
-  const offerAmount = pendingOffer.amount;
-  negotiation.status = OFFER_STATUS.REJECTED;
-
-  await setOfferHistoryStatus(
-    conversationId,
-    pendingOffer._id,
-    OFFER_STATUS.REJECTED,
-    {
-      'negotiation.status': OFFER_STATUS.REJECTED,
-      'offerHistory.$.respondedAt': new Date()
-    }
-  );
-
-  let statusMessage = `Offre de ${offerAmount} ${product.currency} refusée`;
-  if (message && message.trim()) {
-    statusMessage += `\nRaison : ${message}`;
-  }
-
-  return {
-    statusMessage,
-    contentType: MESSAGE_CONTENT_TYPE.SYSTEM_NOTIFICATION
-  };
-}
-
-async function applyCounterAction(
-  conversationId: string,
-  pendingOffer: IOfferHistory,
-  product: NegotiatedProduct,
-  negotiation: ProductNegotiation,
-  userId: string,
-  counterOffer: number,
-  message?: string
-): Promise<NegotiationActionResult> {
-  negotiation.counterOffer = counterOffer;
-  negotiation.updatedAt = new Date();
-
-  // MongoDB refuse $set sur 'offerHistory.$.status' + $push sur 'offerHistory'
-  // dans la même updateOne (conflit sur le même path). On scinde en deux ops.
-  await setOfferHistoryStatus(
-    conversationId,
-    pendingOffer._id,
-    OFFER_STATUS.REJECTED,
-    { 'negotiation.counterOffer': counterOffer }
-  );
-
-  await Conversation.updateOne(
-    { _id: conversationId },
-    { $push: { offerHistory: buildOfferEntry(userId, counterOffer, OFFER_TYPE.COUNTER, message) } }
-  );
-
-  return {
-    statusMessage: `🔄 Contre-offre de ${counterOffer} ${product.currency}`,
-    contentType: MESSAGE_CONTENT_TYPE.COUNTER_OFFER
-  };
-}
-
-export async function respondToNegotiationFlow({
-  userId,
-  conversationId,
-  action,
-  counterOffer,
-  message
-}: {
-  userId: string;
-  conversationId: string;
-  action: string;
-  counterOffer?: number;
-  message?: string;
-}) {
-  if (!action || !['accept', 'reject', 'counter'].includes(action)) {
-    throw new HttpError(400, 'Action invalide. Doit être accept, reject ou counter');
-  }
-  if (action === 'counter' && (!counterOffer || typeof counterOffer !== 'number' || counterOffer <= 0)) {
-    throw new HttpError(400, 'Contre-offre requise et doit être un nombre positif');
-  }
-
-  const conversation = await Conversation.findById(conversationId).populate<{ productId: NegotiatedProduct | null }>({
-    path: 'productId',
-    select: 'title price images seller currency'
-  });
-
-  if (!conversation) {
-    throw new HttpError(404, 'Conversation non trouvée');
-  }
-  if (conversation.type !== CONVERSATION_TYPE.NEGOTIATION) {
-    throw new HttpError(400, 'Cette conversation n\'est pas une négociation');
-  }
-
-  const product = conversation.productId;
-  if (!product) {
-    throw new HttpError(400, 'Produit non trouvé dans cette négociation');
-  }
-  if (!conversation.participants.some(participant => participant.toString() === userId)) {
-    throw new HttpError(403, 'Vous ne participez pas à cette négociation');
-  }
-
-  const pendingOffer = conversation.offerHistory
-    .filter(offer => offer.status === OFFER_STATUS.PENDING)
-    .pop();
-  if (!pendingOffer) {
-    throw new HttpError(404, 'Aucune offre en attente');
-  }
-  // Le vendeur répond aux offres de l'acheteur, l'acheteur aux contre-offres du vendeur.
-  if (pendingOffer.offeredBy.toString() === userId) {
-    throw new HttpError(403, 'Vous ne pouvez pas répondre à votre propre offre');
-  }
-  const responder = product.seller.toString() === userId ? 'Le vendeur' : 'L\'acheteur';
-
-  const productDoc = await Product.findById(product._id).select('+negotiations');
-  const negotiations = productDoc?.negotiations ?? [];
-  const negotiationIndex = negotiations.findIndex(
-    n => n.conversationId.toString() === conversationId
-  );
-  if (!productDoc || negotiationIndex === -1) {
-    throw new HttpError(404, 'Négociation non trouvée pour ce produit');
-  }
-  const negotiation = negotiations[negotiationIndex];
-
-  let result: NegotiationActionResult;
-  switch (action) {
-    case 'accept':
-      result = await applyAcceptAction(conversationId, pendingOffer, product, negotiation);
-      break;
-    case 'reject':
-      result = await applyRejectAction(conversationId, pendingOffer, product, negotiation, message);
-      break;
-    case 'counter':
-      result = await applyCounterAction(
-        conversationId, pendingOffer, product, negotiation, userId, counterOffer!, message
-      );
-      break;
-    default:
-      throw new HttpError(400, 'Action invalide');
-  }
-
-  negotiations[negotiationIndex] = negotiation;
-  await productDoc.save();
-
-  const optionalMsg = action !== 'reject' ? message : undefined;
-  await createOfferMessages(conversationId, userId, result.statusMessage, result.contentType, optionalMsg);
-
-  const offerAmount = pendingOffer.amount;
-  const notification = {
-    accept: {
-      type: 'offer_accepted',
-      title: 'Offre acceptée',
-      content: `${responder} a accepté votre offre de ${offerAmount} ${product.currency} sur "${product.title}"`
-    },
-    reject: {
-      type: 'offer_rejected',
-      title: 'Offre refusée',
-      content: `${responder} a refusé votre offre sur "${product.title}"`
-    },
-    counter: {
-      type: 'counter_offer',
-      title: 'Contre-offre reçue',
-      content: `${responder} propose ${counterOffer} ${product.currency} pour "${product.title}"`
-    }
-  }[action as 'accept' | 'reject' | 'counter'];
-
-  await NotificationService.createNotification({
-    recipientId: pendingOffer.offeredBy,
-    ...notification,
-    link: `/adherents/messages/${conversationId}`,
-    data: { conversationId, productId: product._id, action, amount: counterOffer || offerAmount }
-  }).catch(() => undefined);
-
-  const updatedConversation = await findOfferConversation(conversationId);
-
-  return {
-    action,
-    conversation: updatedConversation,
-    negotiation: updatedConversation?.negotiation
-  };
-}
-
-/** `enabled: false` (ou "false") désactive le prix libre ; absent, il est activé. */
-function isDisableRequest(enabled: unknown): boolean {
-  return enabled === false || enabled === 'false';
-}
-
-/**
- * Active (ou met à jour) le prix libre d'un produit. Les acheteurs proposent
- * ensuite leur prix par la négociation habituelle, bornée par cette fourchette ;
- * le prix accepté par le vendeur est celui facturé au paiement.
- * Avec `enabled: false`, le prix libre est retiré et la fourchette effacée.
- */
-export async function initiatePayWhatYouWantFlow({
-  userId,
-  productId,
-  minimumPrice,
-  maximumPrice,
-  enabled
-}: {
-  userId: string;
-  productId: string;
-  minimumPrice?: unknown;
-  maximumPrice?: unknown;
-  enabled?: unknown;
-}) {
-  if (!productId || !Types.ObjectId.isValid(productId)) {
-    throw new HttpError(400, 'ID du produit requis');
-  }
-
-  if (isDisableRequest(enabled)) {
-    const product = await Product.findOneAndUpdate(
-      { _id: productId, seller: userId },
-      { $set: { isPayWhatYouWant: false }, $unset: { pwywMinPrice: '', pwywMaxPrice: '' } },
-      { returnDocument: 'after' }
-    );
-    if (!product) {
-      throw new HttpError(404, 'Produit non trouvé ou vous n\'êtes pas le vendeur');
-    }
-    return {
-      productId: product._id,
-      enabled: false,
-      minimumPrice: null,
-      maximumPrice: null
-    };
-  }
-
-  const min = parseFloat(minimumPrice as string);
-  if (isNaN(min) || min < 0) {
-    throw new HttpError(400, 'Prix minimum invalide');
-  }
-
-  const max = maximumPrice ? parseFloat(maximumPrice as string) : undefined;
-  if (max !== undefined && (isNaN(max) || max <= min)) {
-    throw new HttpError(400, 'Prix maximum invalide');
-  }
-
-  const product = await Product.findOneAndUpdate(
-    { _id: productId, seller: userId },
-    { $set: { isPayWhatYouWant: true, pwywMinPrice: min, pwywMaxPrice: max ?? null } },
-    { returnDocument: 'after' }
-  );
-  if (!product) {
-    throw new HttpError(404, 'Produit non trouvé ou vous n\'êtes pas le vendeur');
-  }
-
-  return {
-    productId: product._id,
-    enabled: true,
-    minimumPrice: min,
-    maximumPrice: max ?? null
-  };
-}
-
-/**
- * Nouvelle proposition de prix libre depuis une conversation existante sur le
- * produit : même circuit qu'une offre de négociation.
- */
-export async function makePayWhatYouWantProposalFlow({
-  userId,
-  conversationId,
-  proposedPrice,
-  message
-}: {
-  userId: string;
-  conversationId: string;
-  proposedPrice: unknown;
-  message?: string;
-}) {
-  const price = parseFloat(proposedPrice as string);
-  if (!proposedPrice || isNaN(price) || price <= 0) {
-    throw new HttpError(400, 'Prix proposé invalide');
-  }
-
-  const conversation = await Conversation.findById(conversationId).select('productId');
-  if (!conversation?.productId) {
-    throw new HttpError(404, 'Aucun produit associé à cette conversation');
-  }
-
-  const product = await Product.findById(conversation.productId).select('isPayWhatYouWant');
-  if (!product?.isPayWhatYouWant) {
-    throw new HttpError(400, 'Ce produit n\'est pas proposé à prix libre');
-  }
-
-  return initiateNegotiationFlow({
-    userId,
-    productId: String(conversation.productId),
-    initialOffer: price,
-    message
-  });
-}
-
 export async function fetchConversationOffers(userId: string, conversationId: string) {
-  await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+  await verifyConversationAccess(conversationId, userId);
 
   const conversationRaw = await Conversation.findById(conversationId)
     .populate('offerHistory.offeredBy', 'username profilePicture')
@@ -689,7 +280,7 @@ export async function fetchConversationOffers(userId: string, conversationId: st
     offerHistory: conversation.offerHistory
   };
 
-  if (conversation.type === CONVERSATION_TYPE.NEGOTIATION && conversation.negotiation) {
+  if (conversation.type === NEGOTIATION_CONVERSATION_TYPE && conversation.negotiation) {
     response.currentNegotiation = {
       initialPrice: conversation.negotiation.initialPrice,
       currentOffer: conversation.negotiation.currentOffer,
@@ -707,6 +298,7 @@ export async function fetchConversationOffers(userId: string, conversationId: st
   return response;
 }
 
+/** Retire l'offre en attente de l'utilisateur et l'annonce dans la conversation. */
 export async function cancelOfferFlow(userId: string, conversationId: string) {
   const conversation = await Conversation.findById(conversationId).populate<{ productId: NegotiatedProduct | null }>({
     path: 'productId',
@@ -716,7 +308,7 @@ export async function cancelOfferFlow(userId: string, conversationId: string) {
   if (!conversation) {
     throw new HttpError(404, 'Conversation non trouvée');
   }
-  if (conversation.type !== CONVERSATION_TYPE.NEGOTIATION) {
+  if (conversation.type !== NEGOTIATION_CONVERSATION_TYPE) {
     throw new HttpError(400, 'Cette conversation ne contient pas d\'offre');
   }
 
@@ -736,25 +328,18 @@ export async function cancelOfferFlow(userId: string, conversationId: string) {
     { 'offerHistory.$.respondedAt': new Date() }
   );
 
-  if (conversation.type === CONVERSATION_TYPE.NEGOTIATION && conversation.negotiation) {
+  if (conversation.negotiation) {
     await Conversation.updateOne(
       { _id: conversationId },
       { $set: { 'negotiation.status': OFFER_STATUS.EXPIRED } }
     );
   }
 
-  const systemMessage = await Message.create({
-    conversation: conversationId,
-    sender: userId,
-    content: `Offre de ${userOffer.amount} ${product?.currency || 'EUR'} annulée`,
-    contentType: MESSAGE_CONTENT_TYPE.SYSTEM_NOTIFICATION,
-    isSystemMessage: true,
-    readBy: [userId]
-  });
-
-  await Conversation.findByIdAndUpdate(
+  await createOfferMessages(
     conversationId,
-    { lastMessage: systemMessage._id, lastMessageAt: new Date() }
+    userId,
+    `Offre de ${userOffer.amount} ${product?.currency || DEFAULT_CURRENCY} annulée`,
+    MESSAGE_CONTENT_TYPE.SYSTEM_NOTIFICATION
   );
 
   return {

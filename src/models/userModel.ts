@@ -1,6 +1,9 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import { validateEmail } from '../commons/utils/validators';
+import logger from '../commons/utils/logger';
+import type { StoredNotificationPreferences } from '../modules/notifications/notificationPreferences';
 
 export interface IUser extends Document {
   username: string;
@@ -54,6 +57,8 @@ export interface IUser extends Document {
   preferences?: {
     kpopGroups?: string[];
     allowDirectMessages?: boolean;
+    /** Choix explicites par catégorie et canal ; les défauts vivent dans notificationPreferences.ts. */
+    notifications?: StoredNotificationPreferences;
   };
   socialLinks?: {
     instagram?: string;
@@ -154,9 +159,6 @@ export interface IUser extends Document {
     legalName?: string;
     checkedAt?: Date;
   };
-  stripeAccountId?: string;
-  stripePayoutsEnabled?: boolean;
-  stripeChargesEnabled?: boolean;
   isSellerVerified?: boolean;
   sellerRating?: number;
   
@@ -193,7 +195,9 @@ const UserSchema: Schema = new Schema({
     type: String,
     required: [true, 'Veuillez fournir un email'],
     unique: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Veuillez fournir un email valide']
+    // L'ancienne regex, `^\w+([.-]?\w+)*@…`, backtrackait exponentiellement :
+    // une seule inscription gelait l'API.
+    validate: [validateEmail, 'Veuillez fournir un email valide']
   },
   password: {
     type: String,
@@ -269,25 +273,6 @@ const UserSchema: Schema = new Schema({
     scopes: { type: [String], default: [] },
     legalName: { type: String },
     checkedAt: { type: Date }
-  },
-  stripeAccountId: {
-    type: String,
-    index: {
-      unique: true,
-      // Mongo's `sparse: true` n'exclut PAS les docs où le champ vaut null —
-      // seulement ceux où il est absent. Avec un schema partagé, plusieurs users
-      // peuvent finir avec `null` et faire collision sur l'index unique.
-      // partialFilterExpression vise explicitement les valeurs string non vides.
-      partialFilterExpression: { stripeAccountId: { $type: 'string' } }
-    }
-  },
-  stripePayoutsEnabled: {
-    type: Boolean,
-    default: false
-  },
-  stripeChargesEnabled: {
-    type: Boolean,
-    default: false
   },
   // Champs RGPD
   privacyPolicyAccepted: {
@@ -384,6 +369,16 @@ const UserSchema: Schema = new Schema({
     allowDirectMessages: {
       type: Boolean,
       default: true
+    },
+    // Pas de `default` : seuls les choix explicites sont stockés, les défauts
+    // sont appliqués à la lecture (cf. resolveNotificationPreferences).
+    notifications: {
+      orders: { email: Boolean, push: Boolean },
+      offers: { email: Boolean, push: Boolean },
+      messages: { email: Boolean, push: Boolean },
+      disputes: { email: Boolean, push: Boolean },
+      reviews: { email: Boolean, push: Boolean },
+      social: { email: Boolean, push: Boolean }
     }
   },
   socialLinks: {
@@ -532,25 +527,39 @@ UserSchema.methods.comparePassword = async function(candidatePassword: string): 
     
     return await bcrypt.compare(candidatePassword, this.password);
   } catch (error) {
-    console.error('Erreur lors de la comparaison du mot de passe:', error);
+    logger.error('Erreur lors de la comparaison du mot de passe', {
+      error: error instanceof Error ? error.message : String(error)
+    });
     throw new Error(error instanceof Error ? error.message : String(error), { cause: error });
   }
 };
 
+/**
+ * Empreinte d'un jeton envoyé par email (vérification, réinitialisation). Seule
+ * l'empreinte est stockée : une copie de la base ne donne aucun lien utilisable.
+ * SHA-256 suffit, le jeton étant aléatoire sur 256 bits.
+ */
+export const hashOneTimeToken = (token: string): string =>
+  crypto.createHash('sha256').update(token).digest('hex');
+
+/** Génère le jeton à envoyer par email ; le document n'en garde que l'empreinte. */
 UserSchema.methods.generateVerificationToken = function(): string {
   const token = crypto.randomBytes(32).toString('hex');
-  this.emailVerificationToken = token;
+  this.emailVerificationToken = hashOneTimeToken(token);
   this.emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 heures
   return token;
 };
 
+/** Génère le jeton à envoyer par email ; le document n'en garde que l'empreinte. */
 UserSchema.methods.generatePasswordResetToken = function(): string {
   const token = crypto.randomBytes(32).toString('hex');
-  this.passwordResetToken = token;
+  this.passwordResetToken = hashOneTimeToken(token);
   this.passwordResetExpires = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 heure
   return token;
 };
 
 UserSchema.index({ accountStatus: 1, 'suspension.until': 1 });
+// Suppressions programmées (tâche nocturne, file admin triée par échéance).
+UserSchema.index({ scheduledForDeletion: 1, scheduledDeletionDate: 1 });
 
 export default (mongoose.models.User as mongoose.Model<IUser>) || mongoose.model<IUser>('User', UserSchema);

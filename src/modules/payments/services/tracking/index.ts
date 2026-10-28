@@ -1,4 +1,5 @@
 import logger from '../../../../commons/utils/logger';
+import env from '../../../../config/env';
 import { NoopTrackingProvider } from './noopProvider';
 import { TrackingProvider } from './types';
 
@@ -13,7 +14,7 @@ let cached: TrackingProvider | null = null;
 export function getTrackingProvider(): TrackingProvider {
   if (cached) return cached;
 
-  const configured = (process.env.TRACKING_PROVIDER || 'noop').toLowerCase();
+  const configured = env.TRACKING_PROVIDER.toLowerCase();
 
   switch (configured) {
     case 'noop':

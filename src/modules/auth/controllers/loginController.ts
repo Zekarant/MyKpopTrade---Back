@@ -1,193 +1,69 @@
 import { Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
-import User from '../../../models/userModel';
-import env from '../../../config/env';
-import { 
-  generateAccessToken, 
-  generateRefreshToken,
-  invalidateRefreshToken,
-  invalidateAllUserRefreshTokens,
-  rotateRefreshToken,
-  revokeAccessToken
-} from '../../../commons/services/tokenService';
-import logger from '../../../commons/utils/logger';
-import {
-  isTwoFactorEnabled,
-  issueTwoFactorChallengeToken
-} from '../services/twoFactorService';
+import { HttpError } from '../../../commons/utils/httpError';
+import { loginWithPassword, closeSession, renewSession, sessionProfile } from '../services/sessionService';
+import { setRefreshTokenCookie, clearRefreshTokenCookie, readRefreshTokenCookie } from './refreshTokenCookie';
 
 /**
  * Connexion utilisateur
+ * @route POST /api/auth/login
  */
 export const login = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { identifier, password } = req.body;
-    
-    if (!identifier || !password) {
-      res.status(400).json({ message: 'Email/nom d\'utilisateur et mot de passe sont requis' });
-      return;
-    }
+  const { identifier, password } = req.body;
 
-    // Ajouter .select('+password') pour inclure explicitement le champ password
-    const user = await User.findOne({
-      $or: [
-        { email: identifier },
-        { username: identifier }
-      ],
-      accountStatus: { $ne: 'deleted' }
-    }).select('+password');
+  // Chaînes uniquement : un tableau deviendrait un `$in` dans la requête Mongo.
+  if (typeof identifier !== 'string' || typeof password !== 'string' || !identifier || !password) {
+    throw new HttpError(400, 'Email/nom d\'utilisateur et mot de passe sont requis');
+  }
 
-    if (!user) {
-      res.status(401).json({ message: 'Identifiants incorrects' });
-      return;
-    }
+  const result = await loginWithPassword(identifier, password);
 
-    const isPasswordValid = await user.comparePassword(password);
-    if (!isPasswordValid) {
-      res.status(401).json({ message: 'Identifiants incorrects' });
-      return;
-    }
-
-    if (!user.isEmailVerified) {
-      res.status(403).json({ message: 'Veuillez vérifier votre adresse email avant de vous connecter' });
-      return;
-    }
-
-    if (user.accountStatus === 'suspended') {
-      res.status(403).json({
-        message: 'Votre compte est suspendu. Contactez le support.',
-        code: 'ACCOUNT_SUSPENDED'
-      });
-      return;
-    }
-
-    // Double authentification active : le mot de passe seul ne suffit pas.
-    // Aucun jeton d'accès n'est délivré ici ; on rend un jeton de défi
-    // à courte durée de vie, utilisable uniquement sur /auth/2fa/verify.
-    if (isTwoFactorEnabled(user)) {
-      const twoFactorToken = issueTwoFactorChallengeToken(user._id.toString());
-
-      logger.info('Défi de double authentification émis', {
-        userId: user._id.toString().substring(0, 5) + '...'
-      });
-
-      res.status(200).json({
-        requiresTwoFactor: true,
-        twoFactorToken,
-        message: "Saisissez le code de votre application d'authentification."
-      });
-      return;
-    }
-
-    // Mise à jour de la dernière connexion
-    user.lastLogin = new Date();
-    await user.save();
-
-    // Génération des tokens
-    const accessToken = generateAccessToken(user);
-    const refreshToken = await generateRefreshToken(user._id.toString());
-
-    // Journalisation de la connexion réussie (sans données sensibles)
-    logger.info('Connexion réussie', {
-      userId: user._id.toString().substring(0, 5) + '...',
-      username: user.username
-    });
-
+  if (result.requiresTwoFactor) {
     res.status(200).json({
-      message: 'Connexion réussie',
-      accessToken,
-      refreshToken,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        isEmailVerified: user.isEmailVerified,
-        isPhoneVerified: user.isPhoneVerified,
-        role: user.role
-      },
-      consents: {
-        privacyPolicy: user.privacyPolicyAccepted,
-        dataProcessing: user.dataProcessingConsent,
-        marketing: user.marketingConsent
-      }
+      requiresTwoFactor: true,
+      twoFactorToken: result.twoFactorToken,
+      message: "Saisissez le code de votre application d'authentification."
     });
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error('Erreur lors de la connexion', { error: errorMessage });
-    console.error('Erreur lors de la connexion:', error);
-    res.status(500).json({ message: 'Erreur lors de la connexion. Veuillez réessayer.' });
+    return;
   }
-};
 
-function isValidAccessToken(token: string): boolean {
-  try {
-    jwt.verify(token, env.JWT_SECRET);
-    return true;
-  } catch {
-    return false;
-  }
-}
+  setRefreshTokenCookie(req, res, result.tokens.refreshToken);
+  res.status(200).json({
+    message: 'Connexion réussie',
+    accessToken: result.tokens.accessToken,
+    ...sessionProfile(result.user)
+  });
+};
 
 /**
  * Déconnexion utilisateur
+ * @route POST /api/auth/logout
  */
 export const logout = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { refreshToken } = req.body;
+  await closeSession({
+    accessToken: req.headers.authorization?.split(' ')[1],
+    refreshToken: readRefreshTokenCookie(req)
+  });
 
-    // La route n'exige pas de session (un jeton d'accès expiré ne doit pas
-    // bloquer la déconnexion) : seul un jeton authentique et valide est révoqué.
-    const accessToken = req.headers.authorization?.split(' ')[1];
-    if (accessToken && isValidAccessToken(accessToken)) {
-      await revokeAccessToken(accessToken);
-    }
-
-    // Invalider le refresh token (chaîne uniquement : un objet deviendrait un filtre Mongo)
-    if (typeof refreshToken === 'string' && refreshToken) {
-      await invalidateRefreshToken(refreshToken);
-    }
-
-    res.status(200).json({ message: 'Déconnexion réussie' });
-  } catch (error) {
-    console.error('Erreur lors de la déconnexion:', error);
-    res.status(500).json({ message: 'Erreur lors de la déconnexion' });
-  }
+  clearRefreshTokenCookie(res);
+  res.status(200).json({ message: 'Déconnexion réussie' });
 };
 
 /**
- * Rafraîchit l'access token en utilisant un refresh token
+ * Rafraîchit l'access token à partir du refresh token du cookie
+ * @route POST /api/auth/refresh-token
  */
 export const refreshToken = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { refreshToken } = req.body;
-    
-    if (typeof refreshToken !== 'string' || !refreshToken) {
-      res.status(400).json({ message: 'Refresh token requis' });
-      return;
-    }
-    
-    // Le jeton présenté est consommé : le client doit garder celui renvoyé.
-    const rotated = await rotateRefreshToken(refreshToken);
-
-    if (!rotated) {
-      res.status(401).json({ message: 'Refresh token invalide ou expiré' });
-      return;
-    }
-
-    const user = await User.findById(rotated.userId);
-
-    if (!user || user.accountStatus === 'deleted') {
-      await invalidateAllUserRefreshTokens(rotated.userId);
-      res.status(401).json({ message: 'Utilisateur non trouvé ou compte supprimé' });
-      return;
-    }
-
-    res.status(200).json({
-      accessToken: generateAccessToken(user),
-      refreshToken: rotated.refreshToken
-    });
-  } catch (error) {
-    console.error('Erreur lors du rafraîchissement du token:', error);
-    res.status(500).json({ message: 'Erreur lors du rafraîchissement du token' });
+  const currentRefreshToken = readRefreshTokenCookie(req);
+  if (!currentRefreshToken) {
+    throw new HttpError(401, 'Aucune session à renouveler');
   }
+
+  const renewal = await renewSession(currentRefreshToken);
+  if ('failure' in renewal) {
+    clearRefreshTokenCookie(res);
+    throw new HttpError(401, renewal.failure);
+  }
+
+  setRefreshTokenCookie(req, res, renewal.refreshToken);
+  res.status(200).json({ accessToken: renewal.accessToken });
 };

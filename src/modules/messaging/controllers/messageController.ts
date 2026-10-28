@@ -1,8 +1,5 @@
 import path from 'path';
 import { Request, Response } from 'express';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import { mapHttpError } from '../../../commons/utils/httpErrorMapper';
-import logger from '../../../commons/utils/logger';
 import {
   sendMessageToConversation,
   markConversationRead,
@@ -10,8 +7,9 @@ import {
   deleteUserMessage,
   resolveMessageAttachmentPath
 } from '../services/messageOperationsService';
+import { issueAttachmentReadToken, ATTACHMENT_TOKEN_TTL_SECONDS } from '../middleware/attachmentAuthMiddleware';
 
-export { upload } from '../middleware/messageUploadConfig';
+export { upload, discardAttachmentsOnRejection } from '../middleware/messageUploadConfig';
 
 /**
  * Types affichables dans le navigateur. Toute autre extension (`.html`,
@@ -30,6 +28,9 @@ function setAttachmentHeaders(res: Response, fileName: string): void {
   const inlineType = INLINE_ATTACHMENT_TYPES.get(path.extname(fileName).toLowerCase());
   if (inlineType) {
     res.type(inlineType);
+    // La visionneuse PDF du navigateur est un plugin : la CSP d'API
+    // (`default-src 'none'`, donc `object-src 'none'`) l'empêcherait de s'afficher.
+    if (inlineType === 'application/pdf') res.removeHeader('Content-Security-Policy');
   } else {
     // `sendFile` ne remplace pas un Content-Type déjà posé.
     res.type('application/octet-stream');
@@ -40,128 +41,75 @@ function setAttachmentHeaders(res: Response, fileName: string): void {
 /**
  * Envoie un nouveau message dans une conversation
  */
-export const sendNewMessage = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const username = req.user?.username;
-  const conversationId = req.params.id as string;
-  const { content } = req.body;
-  const files = Array.isArray(req.files) ? (req.files as Express.Multer.File[]) : undefined;
+export const sendNewMessage = async (req: Request, res: Response) => {
+  const populatedMessage = await sendMessageToConversation({
+    userId: req.user!.id,
+    username: req.user?.username,
+    conversationId: req.params.id as string,
+    content: req.body?.content,
+    files: Array.isArray(req.files) ? req.files : undefined
+  });
 
-  try {
-    const populatedMessage = await sendMessageToConversation({
-      userId,
-      username,
-      conversationId,
-      content,
-      files
-    });
-
-    return res.status(201).json({
-      message: 'Message envoyé avec succès',
-      data: populatedMessage
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de l\'envoi d\'un message', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
-  }
-});
+  res.status(201).json({
+    message: 'Message envoyé avec succès',
+    data: populatedMessage
+  });
+};
 
 /**
  * Marque tous les messages d'une conversation comme lus
  */
-export const markConversationAsRead = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const conversationId = req.params.id as string;
+export const markConversationAsRead = async (req: Request, res: Response) => {
+  const markedCount = await markConversationRead(req.user!.id, req.params.id as string);
 
-  try {
-    const markedCount = await markConversationRead(userId, conversationId);
-
-    return res.status(200).json({
-      message: 'Messages marqués comme lus',
-      markedCount
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors du marquage des messages comme lus', { error, conversationId, userId });
-    return res.status(500).json({
-      message: error instanceof Error ? error.message : 'Une erreur est survenue'
-    });
-  }
-});
+  res.status(200).json({
+    message: 'Messages marqués comme lus',
+    markedCount
+  });
+};
 
 /**
  * Marque un message spécifique comme lu
  */
-export const markMessageAsRead = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const messageId = req.params.messageId as string;
+export const markMessageAsRead = async (req: Request, res: Response) => {
+  await markSingleMessageRead(req.user!.id, req.params.messageId as string);
 
-  try {
-    await markSingleMessageRead(userId, messageId);
-
-    return res.status(200).json({
-      message: 'Message marqué comme lu'
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors du marquage d\'un message comme lu', { error, userId, messageId });
-    return res.status(500).json({ message: 'Une erreur est survenue' });
-  }
-});
+  res.status(200).json({
+    message: 'Message marqué comme lu'
+  });
+};
 
 /**
  * Supprime un message pour l'utilisateur actuel uniquement
  */
-export const deleteMessage = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const messageId = req.params.id as string;
+export const deleteMessage = async (req: Request, res: Response) => {
+  await deleteUserMessage(req.user!.id, req.params.id as string);
 
-  try {
-    await deleteUserMessage(userId, messageId);
+  res.status(200).json({
+    message: 'Message supprimé avec succès'
+  });
+};
 
-    return res.status(200).json({
-      message: 'Message supprimé avec succès'
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la suppression d\'un message', { error });
-    return res.status(500).json({ message: error instanceof Error ? error.message : undefined });
-  }
-});
+/**
+ * Jeton de lecture des pièces jointes, à placer dans leurs URL (<img src>).
+ */
+export const createAttachmentToken = (req: Request, res: Response) => {
+  res.status(200).json({
+    token: issueAttachmentReadToken(req.user!.id),
+    expiresIn: ATTACHMENT_TOKEN_TTL_SECONDS
+  });
+};
 
 /**
  * Récupère les fichiers joints à un message
  */
-export const getMessageAttachment = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const messageId = req.params.messageId as string;
-  const attachmentName = req.params.attachment as string;
+export const getMessageAttachment = async (req: Request, res: Response) => {
+  const filePath = await resolveMessageAttachmentPath({
+    userId: req.user!.id,
+    messageId: req.params.messageId as string,
+    attachmentName: req.params.attachment as string
+  });
 
-  try {
-    const filePath = await resolveMessageAttachmentPath({
-      userId,
-      messageId,
-      attachmentName
-    });
-
-    setAttachmentHeaders(res, filePath);
-    return res.sendFile(filePath);
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la récupération d\'une pièce jointe', { error });
-    return res.status(500).json({ message: error instanceof Error ? error.message : undefined });
-  }
-});
+  setAttachmentHeaders(res, filePath);
+  res.sendFile(filePath);
+};

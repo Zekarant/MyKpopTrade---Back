@@ -1,7 +1,4 @@
 import { Request, Response } from 'express';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import logger from '../../../commons/utils/logger';
-import { mapHttpError } from '../../../commons/utils/httpErrorMapper';
 import {
   SearchFilters,
   runAdvancedSearch,
@@ -15,11 +12,12 @@ import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
 const DEFAULT_SEARCH_LIMIT = 20;
 // La page de résultats du front demande jusqu'à 500 annonces d'un coup.
 const MAX_SEARCH_LIMIT = 500;
+const DEFAULT_HISTORY_LIMIT = 20;
 
 /**
  * Recherche avancée de produits
  */
-export const advancedSearch = asyncHandler(async (req: Request, res: Response) => {
+export const advancedSearch = async (req: Request, res: Response) => {
   const {
     query,
     groups,
@@ -32,6 +30,11 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
     era,
     company,
     currency,
+    group,
+    member,
+    album,
+    version,
+    isOfficial,
     page = 1,
     limit = DEFAULT_SEARCH_LIMIT,
     sortBy = 'relevance',
@@ -41,131 +44,58 @@ export const advancedSearch = asyncHandler(async (req: Request, res: Response) =
     limit?: number;
     sortBy?: string;
     includeOwnProducts?: boolean;
-  } = req.body;
+  } = req.body ?? {};
 
-  const userId = req.user?.id;
+  const result = await runAdvancedSearch({
+    filters: {
+      query, groups, members, albums, priceRange,
+      condition, type, albumType, era, company, currency,
+      group, member, album, version, isOfficial
+    },
+    userId: req.user?.id,
+    includeOwnProducts,
+    // Corps JSON : `page` et `limit` arrivent en nombres, pas en texte de query.
+    page: Math.max(1, parseInt(String(page), 10) || 1),
+    limit: clampLimit(limit, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT),
+    sortBy
+  });
 
-  try {
-    const result = await runAdvancedSearch({
-      filters: {
-        query, groups, members, albums, priceRange,
-        condition, type, albumType, era, company, currency
-      },
-      userId,
-      includeOwnProducts,
-      page: Math.max(1, parseInt(String(page), 10) || 1),
-      limit: clampLimit(limit, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT),
-      sortBy
-    });
-
-    return res.status(200).json(result);
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la recherche avancée', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      userId,
-      query
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la recherche'
-    });
-  }
-});
+  return res.status(200).json(result);
+};
 
 /**
  * Récupérer l'historique de recherche d'un utilisateur
  */
-export const getUserSearchHistory = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
-
-  try {
-    const searchHistory = await fetchUserSearchHistory(userId, limit);
-    return res.status(200).json({ searchHistory });
-  } catch (error) {
-    logger.error('Erreur lors de la récupération de l\'historique', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      userId
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la récupération de l\'historique'
-    });
-  }
-});
+export const getUserSearchHistory = async (req: Request, res: Response) => {
+  const limit = clampLimit(req.query.limit, DEFAULT_HISTORY_LIMIT, MAX_PAGE_SIZE);
+  const searchHistory = await fetchUserSearchHistory(req.user!.id, limit);
+  return res.status(200).json({ searchHistory });
+};
 
 /**
  * Supprimer un élément de l'historique de recherche
  */
-export const deleteSearchHistoryItem = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const { historyId } = req.params;
-
-  try {
-    await removeSearchHistoryItem(userId, String(historyId));
-    return res.status(200).json({
-      message: 'Élément supprimé de l\'historique'
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la suppression de l\'historique', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      userId,
-      historyId
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la suppression'
-    });
-  }
-});
+export const deleteSearchHistoryItem = async (req: Request, res: Response) => {
+  await removeSearchHistoryItem(req.user!.id, String(req.params.historyId));
+  return res.status(200).json({
+    message: 'Élément supprimé de l\'historique'
+  });
+};
 
 /**
  * Vider complètement l'historique de recherche
  */
-export const clearSearchHistory = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-
-  try {
-    await clearUserSearchHistory(userId);
-    return res.status(200).json({
-      message: 'Historique de recherche vidé avec succès'
-    });
-  } catch (error) {
-    logger.error('Erreur lors du vidage de l\'historique', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      userId
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors du vidage de l\'historique'
-    });
-  }
-});
+export const clearSearchHistory = async (req: Request, res: Response) => {
+  await clearUserSearchHistory(req.user!.id);
+  return res.status(200).json({
+    message: 'Historique de recherche vidé avec succès'
+  });
+};
 
 /**
  * Obtenir des suggestions de recherche
  */
-export const getSearchSuggestions = asyncHandler(async (req: Request, res: Response) => {
-  const { query } = req.query;
-
-  try {
-    const suggestions = await fetchSearchSuggestions(query);
-    return res.status(200).json({ suggestions });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la génération des suggestions', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      query
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la génération des suggestions'
-    });
-  }
-});
+export const getSearchSuggestions = async (req: Request, res: Response) => {
+  const suggestions = await fetchSearchSuggestions(req.query.query);
+  return res.status(200).json({ suggestions });
+};

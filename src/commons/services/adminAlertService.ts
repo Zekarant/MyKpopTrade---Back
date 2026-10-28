@@ -1,6 +1,6 @@
 import env from '../../config/env';
 import logger from '../utils/logger';
-import { NotificationService } from '../../modules/notifications/services/notificationService';
+import { notifyAllAdmins } from '../../modules/notifications/services/notificationService';
 import { postDiscordEmbed, type DiscordEmbedField } from './discordWebhookService';
 
 export type AdminAlertSeverity = 'info' | 'warning' | 'critical';
@@ -76,7 +76,7 @@ const deliverAdminAlert = async (alert: AdminAlert): Promise<void> => {
 
   if (IN_APP_SEVERITIES.includes(alert.severity)) {
     deliveries.push(
-      NotificationService.notifyAllAdmins({
+      notifyAllAdmins({
         type: 'admin_alert',
         title: alert.title,
         content: alert.summary,

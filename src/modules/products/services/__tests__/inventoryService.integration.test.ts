@@ -4,7 +4,7 @@ import {
   clearAllCollections
 } from '../../../../tests/helpers/mongoMemory';
 import { createTestUser, createTestProduct } from '../../../../tests/helpers/fixtures';
-import { fetchRecommendedProducts, fetchUserInventory } from '../inventoryService';
+import { fetchRecommendedProducts, fetchUserFavorites, fetchUserInventory } from '../inventoryService';
 import User from '../../../../models/userModel';
 
 describe('inventoryService (integration)', () => {
@@ -66,6 +66,44 @@ describe('inventoryService (integration)', () => {
 
       expect(titles(result)).toEqual(['En vente']);
       expect(result.stats).toBeNull();
+    });
+  });
+
+  describe('fetchUserFavorites', () => {
+    it('signale les favoris vendus ou retirés et ignore ceux supprimés', async () => {
+      const seller = await createTestUser();
+      const user = await createTestUser();
+      const onSale = await createTestProduct(seller._id, { title: 'En vente' });
+      const sold = await createTestProduct(seller._id, { title: 'Vendu', isAvailable: false, isSold: true });
+      const withdrawn = await createTestProduct(seller._id, { title: 'Retiré', isAvailable: false });
+      const deleted = await createTestProduct(seller._id, { title: 'Supprimé' });
+      await User.updateOne({ _id: user._id }, { favorites: [sold._id, withdrawn._id, onSale._id, deleted._id] });
+      await deleted.deleteOne();
+
+      const { products, pagination } = await fetchUserFavorites(String(user._id), 1, 20);
+      const reasons = Object.fromEntries(products.map((product) => [product.title, product.unavailableReason]));
+
+      expect(reasons).toEqual({ 'En vente': null, 'Vendu': 'sold', 'Retiré': 'withdrawn' });
+      expect(products[0].title).toBe('En vente');
+      expect(pagination.total).toBe(3);
+    });
+
+    it('ne renvoie pas l\'analyse de modération d\'un favori suspendu', async () => {
+      const seller = await createTestUser();
+      const user = await createTestUser();
+      const suspended = await createTestProduct(seller._id, {
+        isAvailable: false,
+        moderationFlag: {
+          suspect: true, confidence: 'high', reasoning: 'test', categories: ['counterfeit'], matchedKeywords: [],
+          keywordsVersion: '1', policyVersion: '1', model: 'm', provider: 'mistral', analyzedAt: new Date()
+        }
+      });
+      await User.updateOne({ _id: user._id }, { favorites: [suspended._id] });
+
+      const { products } = await fetchUserFavorites(String(user._id), 1, 20);
+
+      expect(products[0]).not.toHaveProperty('moderationFlag');
+      expect(products[0].unavailableReason).toBe('withdrawn');
     });
   });
 });
