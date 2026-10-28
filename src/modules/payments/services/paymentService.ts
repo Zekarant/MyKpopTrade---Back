@@ -16,6 +16,7 @@ import { gt, subtract } from '../../../commons/utils/moneyMath';
 import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
+import { checkSessionPassword } from '../../auth/services/passwordService';
 
 const PAYMENT_STATUS = {
   PENDING: 'pending',
@@ -553,7 +554,7 @@ export async function processRefund({
       throw new HttpError(400, 'Mot de passe de confirmation requis');
     }
     const userWithPwd = await User.findById(userId).select('+password');
-    if (!userWithPwd || !(await userWithPwd.comparePassword(password))) {
+    if (!userWithPwd || !(await checkSessionPassword(userWithPwd, password))) {
       GdprLogger.logPaymentAction('refund_password_invalid', { paymentId }, userId);
       throw new HttpError(401, 'Mot de passe incorrect');
     }

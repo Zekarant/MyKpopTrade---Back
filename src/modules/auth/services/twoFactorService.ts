@@ -12,6 +12,7 @@ import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import env from '../../../config/env';
 import { consumeTwoFactorAttempt } from './twoFactorAttemptLimiter';
+import { checkSessionPassword } from './passwordService';
 import { JWT_VERIFY_OPTIONS } from '../../../commons/services/tokenService';
 import { accountSuspendedError, maskUserId } from './authCommon';
 
@@ -261,8 +262,7 @@ export async function disableTwoFactor(
     throw new HttpError(409, 'La double authentification n\'est pas activée sur ce compte.');
   }
 
-  const isPasswordValid = await user.comparePassword(password);
-  if (!isPasswordValid) {
+  if (!(await checkSessionPassword(user, password))) {
     throw new HttpError(401, 'Mot de passe incorrect.');
   }
 
