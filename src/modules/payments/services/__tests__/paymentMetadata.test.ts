@@ -1,5 +1,3 @@
-process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'test-encryption-key-of-32-chars!';
-
 import mongoose from 'mongoose';
 import { EncryptionService } from '../../../../commons/utils/encryptionService';
 import { decryptPaymentMetadata } from '../paymentService';
