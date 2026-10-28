@@ -57,4 +57,5 @@ if (process.argv.length < 4) {
   process.exit(1);
 }
 
-mockPaypalConnect(process.argv[2], process.argv[3]);
+// Les erreurs sont gérées dans la fonction (try/catch/finally).
+void mockPaypalConnect(process.argv[2], process.argv[3]);

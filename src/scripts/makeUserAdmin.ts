@@ -49,4 +49,5 @@ if (process.argv.length < 3) {
 }
 
 const email = process.argv[2];
-makeUserAdmin(email);
+// Les erreurs sont gérées dans la fonction (try/catch/finally).
+void makeUserAdmin(email);

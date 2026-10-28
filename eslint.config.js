@@ -29,6 +29,20 @@ module.exports = defineConfig(
   },
 
   {
+    name: 'app/typed',
+    // Règles qui ont besoin des types : limitées au code applicatif, seul
+    // couvert par tsconfig.json (les tests en sont exclus).
+    files: ['src/**/*.ts'],
+    ignores: ['**/__tests__/**', 'src/tests/**'],
+    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: __dirname } },
+    rules: {
+      // Une promesse ni attendue ni gérée perd son erreur (rejet non traité) :
+      // marquer d'un `void` explicite celles lancées volontairement en tâche de fond.
+      '@typescript-eslint/no-floating-promises': 'error'
+    }
+  },
+
+  {
     name: 'app/tests',
     files: ['**/__tests__/**', 'src/tests/**'],
     languageOptions: { globals: globals.jest }

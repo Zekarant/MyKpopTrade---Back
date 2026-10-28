@@ -1,4 +1,3 @@
-import { Response } from 'express';
 import mongoose from 'mongoose';
 import { HttpError } from './httpError';
 
@@ -45,27 +44,4 @@ function exposedClientStatus(error: unknown): number | null {
   const { status, statusCode, expose } = error as Error & { status?: unknown; statusCode?: unknown; expose?: unknown };
   const code = typeof statusCode === 'number' ? statusCode : status;
   return expose === true && typeof code === 'number' && code >= 400 && code < 500 ? code : null;
-}
-
-/**
- * @deprecated Les contrôleurs laissent remonter l'erreur jusqu'au gestionnaire
- * central (errorMiddleware), qui applique le même format. Retiré au fil des modules.
- *
- * Si `error` est une HttpError (ou une erreur de données client, cf. asHttpError),
- * renvoie la réponse correspondante et retourne la Response.
- * Sinon, retourne null — le caller doit enchaîner son fallback 500 habituel.
- *
- * Shape par défaut : `{ message, code? }` — le code permet au front de distinguer
- * un refus métier (ex. BLOCKED) sans analyser le message. Pour les handlers qui
- * utilisent d'autres shapes (ex. `{ success: false, ... }`), gérer localement.
- */
-export function mapHttpError(res: Response, error: unknown): Response | null {
-  const httpError = asHttpError(error);
-  if (httpError) {
-    return res.status(httpError.statusCode).json({
-      message: httpError.message,
-      ...(httpError.code ? { code: httpError.code } : {})
-    });
-  }
-  return null;
 }

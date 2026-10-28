@@ -10,8 +10,8 @@ import Rating from '../models/ratingModel';
 import KpopGroup from '../models/kpopGroupModel';
 import Conversation from '../models/conversationModel';
 import Message from '../models/messageModel';
-import Post from '../modules/posts/model';
-import Follow from '../modules/follows/model';
+import Post from '../models/postModel';
+import Follow from '../models/followModel';
 
 dotenv.config({ quiet: true });
 
@@ -982,4 +982,5 @@ async function main() {
   }
 }
 
-main();
+// Les erreurs sont gérées dans main (try/catch/finally).
+void main();

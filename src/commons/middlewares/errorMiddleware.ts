@@ -73,15 +73,3 @@ export const notFoundHandler = (req: Request, res: Response): void => {
 
   res.status(404).json({ message: 'Route non trouvée', code: 'NOT_FOUND' } satisfies ApiErrorBody);
 };
-
-/**
- * @deprecated Express 5 transmet déjà au gestionnaire d'erreurs les promesses
- * rejetées des handlers : ce wrapper est inutile. Retiré au fil des modules.
- */
-// Signature de méthode : ses paramètres sont bivariants, ce qui laisse passer un
-// contrôleur typé avec une requête plus précise (ex. AuthenticatedRequest).
-type RouteHandler = { bivarianceHack(req: Request, res: Response, next: NextFunction): unknown }['bivarianceHack'];
-
-export const asyncHandler = (fn: RouteHandler) => (req: Request, res: Response, next: NextFunction) => {
-  Promise.resolve(fn(req, res, next)).catch(next);
-};
