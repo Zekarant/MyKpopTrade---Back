@@ -6,7 +6,7 @@ import {
 import { createTestProduct, createTestUser } from '../../tests/helpers/fixtures';
 import Product from '../../models/productModel';
 import Conversation from '../../models/conversationModel';
-import { dropLegacyFields } from '../dropLegacyFields';
+import { dropLegacyFields } from '../0001-dropLegacyFields';
 
 describe('dropLegacyFields (integration)', () => {
   beforeAll(async () => {

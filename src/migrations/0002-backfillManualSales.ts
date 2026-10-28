@@ -1,13 +1,14 @@
 import mongoose from 'mongoose';
-import dotenv from 'dotenv';
 import Product from '../models/productModel';
 import Payment from '../models/paymentModel';
 import Notification from '../models/notificationModel';
+import logger from '../commons/utils/logger';
+import type { Migration } from './runner';
 
 /**
- * Migration idempotente : rétablit `isSold` sur les ventes antérieures au
- * correctif de `markAsSold`, qui ne posait que `isAvailable: false`. Ces
- * articles s'affichent depuis en « Brouillon ».
+ * Rétablit `isSold` sur les ventes antérieures au correctif de `markAsSold`,
+ * qui ne posait que `isAvailable: false`. Ces articles s'affichent depuis en
+ * « Brouillon ».
  *
  * Rien en base ne distingue une telle vente d'une annonce simplement retirée ;
  * seuls deux indices sont fiables :
@@ -15,10 +16,7 @@ import Notification from '../models/notificationModel';
  *  - la notification « a été vendu » envoyée aux utilisateurs qui l'avaient
  *    en favori (seulement si quelqu'un l'avait en favori).
  * Les autres restent à trancher par leur vendeur, qui peut désormais les
- * marquer vendus ou les remettre en vente. Ils sont listés pour mémoire.
- *
- *   npm run migrate:manual-sales            (simulation)
- *   npm run migrate:manual-sales -- --apply (écriture)
+ * marquer vendus ou les remettre en vente. Ils sont journalisés pour mémoire.
  */
 const PAID_SALE_STATUSES = ['completed', 'partially_refunded'] as const;
 
@@ -83,28 +81,15 @@ export async function backfillManualSales({ apply }: { apply: boolean }): Promis
   };
 }
 
-async function main() {
-  dotenv.config({ path: '.env.local', quiet: true });
-  const apply = process.argv.includes('--apply');
-  try {
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/mykpoptrade');
-    const report = await backfillManualSales({ apply });
-    const verb = apply ? 'marqué(s)' : 'à marquer';
-    console.log(`${report.fromPayments} article(s) payé(s) ${verb} vendu(s).`);
-    console.log(`${report.fromNotifications} article(s) notifié(s) « vendu » ${verb} vendu(s).`);
-    console.log(`${report.undecided.length} annonce(s) retirée(s) sans indice, laissée(s) à leur vendeur :`);
-    for (const product of report.undecided) {
-      console.log(`  ${product.id}  vendeur ${product.seller}  ${product.title}`);
-    }
-    if (!apply) console.log('Simulation : relancer avec --apply pour écrire.');
-  } catch (error) {
-    console.error('Erreur:', error);
-    process.exitCode = 1;
-  } finally {
-    await mongoose.disconnect();
+export const migration: Migration = {
+  id: '0002-backfillManualSales',
+  description: 'Marque vendus les articles vendus à la main avant le correctif de markAsSold',
+  async up() {
+    const report = await backfillManualSales({ apply: true });
+    logger.info('migration.backfillManualSales', {
+      fromPayments: report.fromPayments,
+      fromNotifications: report.fromNotifications,
+      undecided: report.undecided
+    });
   }
-}
-
-if (require.main === module) {
-  void main();
-}
+};

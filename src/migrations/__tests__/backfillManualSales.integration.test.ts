@@ -7,7 +7,7 @@ import { createTestProduct, createTestUser } from '../../tests/helpers/fixtures'
 import Product from '../../models/productModel';
 import Payment from '../../models/paymentModel';
 import Notification from '../../models/notificationModel';
-import { backfillManualSales } from '../backfillManualSales';
+import { backfillManualSales } from '../0002-backfillManualSales';
 
 describe('backfillManualSales (integration)', () => {
   beforeAll(async () => {

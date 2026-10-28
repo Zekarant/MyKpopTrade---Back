@@ -71,8 +71,23 @@ L'API écoute sur <http://localhost:3000>.
 | `npm test` | Suite Jest |
 | `npm run test:coverage` | Suite Jest avec couverture |
 | `npm run paypal:status` | Diagnostic de la configuration PayPal |
-| `npm run migrate:legacy-fields` | Retire les champs de réservation et les conversations « prix libre » obsolètes |
-| `npm run migrate:manual-sales` | Rétablit « vendu » sur les anciennes ventes manuelles (simulation ; `-- --apply` pour écrire) |
+| `npm run migrate` | Applique les migrations de base en attente (voir ci-dessous) |
+
+## Migrations
+
+`npm run migrate` applique dans l'ordre les migrations de `src/migrations/`
+pas encore passées sur la base de `MONGODB_URI`, et les inscrit dans la
+collection `migrations`. À lancer à chaque déploiement, **avant** de démarrer la
+nouvelle version.
+
+- Ajouter une migration : un fichier `NNNN-nom.ts` exportant `migration`
+  (`id`, `description`, `up`), puis l'inscrire en fin de liste dans
+  `src/migrations/index.ts`.
+- `up` doit être idempotente : une migration interrompue est rejouée en entier.
+- Une migration déjà appliquée en production ne se modifie plus : en écrire une
+  nouvelle.
+- `0004-uniquePaymentIntentId` échoue en listant les ordres PayPal en double
+  s'il en existe : les dédoublonner à la main, puis relancer.
 
 ## Supervision
 
@@ -129,7 +144,7 @@ src/
     ├── auth/               inscription, connexion, OAuth, mots de passe
     ├── users/              RGPD (export, suppression, anonymisation), admin
     ├── products/ posts/    annonces et fil d'actualité
-    ├── payments/           PayPal, Stripe Connect, remboursements, suivi colis
+    ├── payments/           PayPal, remboursements, suivi colis
     ├── messaging/          conversations chiffrées, offres, négociation
     ├── cart/ addresses/    panier et carnet d'adresses
     ├── disputes/ reports/  litiges et signalements
