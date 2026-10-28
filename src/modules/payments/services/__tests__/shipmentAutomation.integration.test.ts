@@ -1,7 +1,5 @@
 jest.mock('../../../notifications/services/notificationService', () => ({
-  NotificationService: {
-    createNotification: jest.fn().mockResolvedValue(undefined)
-  }
+  createNotification: jest.fn().mockResolvedValue(undefined)
 }));
 
 jest.mock('../../../../commons/services/emailService', () => ({
@@ -24,7 +22,7 @@ import {
 } from '../shipmentService';
 import * as trackingModule from '../tracking';
 import { resetTrackingProviderCache } from '../tracking';
-import { NotificationService } from '../../../notifications/services/notificationService';
+import { createNotification } from '../../../notifications/services/notificationService';
 import { sendShipmentReminderEmail } from '../../../../commons/services/emailService';
 import Payment from '../../../../models/paymentModel';
 
@@ -227,7 +225,7 @@ describe('shipmentService — automatisation', () => {
       );
       // Le markShipped initial a déjà notifié l'acheteur — on remet à zéro
       // pour ne mesurer que l'effet d'autoConfirmStaleShipments.
-      (NotificationService.createNotification as jest.Mock).mockClear();
+      (createNotification as jest.Mock).mockClear();
 
       const result = await autoConfirmStaleShipments();
       expect(result.confirmed).toBe(1);
@@ -236,7 +234,7 @@ describe('shipmentService — automatisation', () => {
       expect(reloaded?.shipment?.status).toBe('delivered');
       expect(reloaded?.shipment?.autoConfirmedAt).toBeDefined();
       // buyer + seller ; les emails partent de ces notifications.
-      expect(NotificationService.createNotification).toHaveBeenCalledTimes(2);
+      expect(createNotification).toHaveBeenCalledTimes(2);
     });
 
     it('laisse intacts les shipments expédiés récemment', async () => {

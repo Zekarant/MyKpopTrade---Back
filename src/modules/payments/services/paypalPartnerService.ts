@@ -513,8 +513,7 @@ export class PayPalPartnerService {
   }
 
   private static returnUrl(): string {
-    const baseUrl =
-      process.env.PAYPAL_OAUTH_BASE_URL || process.env.API_URL || 'http://localhost:3000';
+    const baseUrl = env.PAYPAL_OAUTH_BASE_URL || env.API_URL;
     return `${baseUrl}/api/payments/paypal/onboarding-return`;
   }
 }

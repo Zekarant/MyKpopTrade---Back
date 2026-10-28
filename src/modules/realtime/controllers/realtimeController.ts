@@ -29,6 +29,9 @@ export function streamEvents(req: Request, res: Response): void {
   if (!registration.ok) {
     const isUserLimit = registration.reason === 'USER_LIMIT';
     res.set('Retry-After', String(RETRY_AFTER_SECONDS));
+    // Réponse directe et non HttpError : le gestionnaire central traite tout
+    // 5xx comme un bug (log error, message masqué en production), or la
+    // saturation (503) est un refus attendu dont le message doit rester lisible.
     res.status(isUserLimit ? 429 : 503).json({
       message: isUserLimit
         ? 'Trop de connexions temps réel ouvertes pour ce compte.'

@@ -3,7 +3,7 @@ import Payment, { IPayment } from '../../../models/paymentModel';
 import Product from '../../../models/productModel';
 import Conversation from '../../../models/conversationModel';
 import Message from '../../../models/messageModel';
-import { NotificationService } from '../../notifications/services/notificationService';
+import { createNotification } from '../../notifications/services/notificationService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import logger from '../../../commons/utils/logger';
 
@@ -104,7 +104,7 @@ function alertProductAlreadySold(payment: IPayment): void {
 async function announceCompletedPayment(payment: IPayment): Promise<void> {
   // `product_sold` (et non `system`) : la vente suit les préférences
   // « commandes » du vendeur au lieu de lui être imposée par email.
-  await NotificationService.createNotification({
+  await createNotification({
     recipientId: payment.seller,
     type: 'product_sold',
     title: 'Nouveau paiement reçu',
@@ -119,7 +119,7 @@ async function announceCompletedPayment(payment: IPayment): Promise<void> {
   });
 
   // Confirmation d'achat : l'acheteur n'avait jusqu'ici que la page de retour PayPal.
-  await NotificationService.createNotification({
+  await createNotification({
     recipientId: payment.buyer,
     type: 'order_status',
     title: 'Achat confirmé',

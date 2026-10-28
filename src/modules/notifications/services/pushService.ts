@@ -1,6 +1,9 @@
 import PushSubscription from '../../../models/pushSubscriptionModel';
 import logger from '../../../commons/utils/logger';
 import env from '../../../config/env';
+import { badRequest } from '../../../commons/utils/httpError';
+
+const INVALID_SUBSCRIPTION_CODE = 'INVALID_PUSH_SUBSCRIPTION';
 
 /**
  * Configuration VAPID. Chargée à la première utilisation pour ne pas
@@ -89,10 +92,11 @@ export async function registerSubscription(
   userAgent?: string
 ): Promise<void> {
   if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
-    throw new Error('Subscription invalide');
+    throw badRequest('Subscription invalide', INVALID_SUBSCRIPTION_CODE);
   }
   if (!isAllowedPushEndpoint(subscription.endpoint)) {
-    throw new Error('Subscription invalide : service de push inconnu');
+    logger.warn('Abonnement push refusé : service de push inconnu', { userId });
+    throw badRequest('Subscription invalide', INVALID_SUBSCRIPTION_CODE);
   }
   await PushSubscription.findOneAndUpdate(
     { endpoint: subscription.endpoint },

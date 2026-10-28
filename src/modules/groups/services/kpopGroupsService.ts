@@ -5,11 +5,8 @@ import Product from '../../../models/productModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
-import { clampLimit } from '../../../commons/utils/pagination';
-import { queryInt, queryString } from '../../../commons/utils/query';
+import { paginationMeta } from '../../../commons/utils/pagination';
 import { pickFields } from '../../../commons/utils/pickFields';
-
-const CATALOG_MAX_LIMIT = 2000;
 
 const EDITABLE_GROUP_FIELDS = [
   'name', 'profileImage', 'bannerImage', 'socialLinks', 'tags', 'genres', 'members', 'spotifyId', 'isActive'
@@ -32,7 +29,7 @@ export async function createGroup(body: Record<string, unknown>) {
   });
 
   if (existingGroup) {
-    throw new HttpError(400, 'Un groupe avec ce nom existe déjà');
+    throw new HttpError(400, 'Un groupe avec ce nom existe déjà', 'GROUP_ALREADY_EXISTS');
   }
 
   const group = new KpopGroup({
@@ -50,18 +47,19 @@ export async function createGroup(body: Record<string, unknown>) {
   return group;
 }
 
-export async function listGroups(query: Record<string, unknown>) {
-  const page = queryInt(query.page) || 1;
-  // Le panneau admin K-pop charge jusqu'à 2000 groupes d'un coup.
-  const limit = clampLimit(query.limit, 20, CATALOG_MAX_LIMIT);
-  const sortBy = queryString(query.sortBy) || 'name';
-  const sortOrder = query.sortOrder === 'desc' ? -1 : 1;
+export interface GroupListParams {
+  page: number;
+  limit: number;
+  sortBy: string;
+  sortOrder: 1 | -1;
+  genre?: string;
+  tag?: string;
+  search?: string;
+}
 
+export async function listGroups({ page, limit, sortBy, sortOrder, genre, tag, search }: GroupListParams) {
   const filters: mongoose.QueryFilter<IKpopGroup> = {};
 
-  const genre = queryString(query.genre);
-  const tag = queryString(query.tag);
-  const search = queryString(query.search);
   if (genre) {
     filters.genres = { $in: [genre] };
   }
@@ -90,12 +88,7 @@ export async function listGroups(query: Record<string, unknown>) {
 
   return {
     groups,
-    pagination: {
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit)
-    }
+    pagination: paginationMeta({ page, limit }, total)
   };
 }
 
@@ -104,12 +97,12 @@ export async function searchGroupsByQuery({
   limit,
   includeInactive
 }: {
-  query: unknown;
+  query?: string;
   limit: number;
   includeInactive: boolean;
 }) {
-  if (!query || typeof query !== 'string') {
-    throw new HttpError(400, 'Paramètre de recherche requis');
+  if (!query) {
+    throw new HttpError(400, 'Paramètre de recherche requis', 'SEARCH_QUERY_REQUIRED');
   }
 
   const searchRegex = new RegExp(escapeRegex(query.trim()), 'i');

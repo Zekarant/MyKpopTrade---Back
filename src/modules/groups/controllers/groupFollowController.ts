@@ -1,206 +1,42 @@
 import { Request, Response } from 'express';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import logger from '../../../commons/utils/logger';
-import { HttpError } from '../../../commons/utils/httpError';
 import {
   toggleFollow,
   getFollowStatusForUser,
   listFollowedGroups,
-  listGroupFollowers,
-  FollowStatusUserNotFoundError,
-  type FollowedGroupSummary
+  listGroupFollowers
 } from '../services/groupFollowService';
-import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
-import { queryInt } from '../../../commons/utils/query';
-
-interface AuthenticatedRequest extends Request {
-  user?: {
-    id: string;
-    email: string;
-    role: string;
-  };
-}
-
-interface FollowResponse {
-  message: string;
-  isFollowing: boolean;
-  followersCount: number;
-}
-
-interface FollowStatusResponse {
-  message?: string;
-  groupId: string;
-  groupName: string;
-  isFollowing: boolean;
-  followersCount: number;
-}
-
-interface UserFollowedGroupsResponse {
-  message?: string;
-  groups: FollowedGroupSummary[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    pages: number;
-  };
-}
+import { parsePagination } from '../../../commons/utils/pagination';
 
 /**
  * Suivre ou arrêter de suivre un groupe
  */
-export const toggleFollowGroup = asyncHandler(async (req: AuthenticatedRequest, res: Response<FollowResponse>) => {
-  const groupId = req.params.groupId as string;
-  const userId = req.user?.id;
-
-  if (!userId) {
-    return res.status(401).json({
-      message: 'Authentification requise',
-      isFollowing: false,
-      followersCount: 0
-    });
-  }
-
-  try {
-    const result = await toggleFollow(userId, groupId);
-    return res.status(200).json(result);
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({
-        message: error.message,
-        isFollowing: false,
-        followersCount: 0
-      });
-    }
-
-    logger.error('Erreur lors du suivi du groupe', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      stack: error instanceof Error ? error.stack : undefined,
-      groupId,
-      userId
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la modification du suivi',
-      isFollowing: false,
-      followersCount: 0
-    });
-  }
-});
+export const toggleFollowGroup = async (req: Request, res: Response) => {
+  const result = await toggleFollow(req.user!.id, req.params.groupId as string);
+  res.status(200).json(result);
+};
 
 /**
  * Vérifier si l'utilisateur suit un groupe
  */
-export const getFollowStatus = asyncHandler(async (req: AuthenticatedRequest, res: Response<FollowStatusResponse>) => {
-  const groupId = req.params.groupId as string;
-  const userId = req.user?.id;
-
-  if (!userId) {
-    return res.status(401).json({
-      message: 'Authentification requise',
-      groupId,
-      groupName: '',
-      isFollowing: false,
-      followersCount: 0
-    });
-  }
-
-  try {
-    const result = await getFollowStatusForUser(userId, groupId);
-    return res.status(200).json(result);
-  } catch (error) {
-    if (error instanceof HttpError) {
-      const groupName = error instanceof FollowStatusUserNotFoundError ? error.groupName : '';
-      const followersCount = error instanceof FollowStatusUserNotFoundError ? error.followersCount : 0;
-      return res.status(error.statusCode).json({
-        message: error.message,
-        groupId,
-        groupName,
-        isFollowing: false,
-        followersCount
-      });
-    }
-
-    logger.error('Erreur lors de la vérification du statut de suivi', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      groupId,
-      userId
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue',
-      groupId,
-      groupName: '',
-      isFollowing: false,
-      followersCount: 0
-    });
-  }
-});
+export const getFollowStatus = async (req: Request, res: Response) => {
+  const result = await getFollowStatusForUser(req.user!.id, req.params.groupId as string);
+  res.status(200).json(result);
+};
 
 /**
  * Récupérer les groupes suivis par l'utilisateur
  */
-export const getUserFollowedGroups = asyncHandler(async (req: AuthenticatedRequest, res: Response<UserFollowedGroupsResponse>) => {
-  const userId = req.user?.id;
-  const page = queryInt(req.query.page) || 1;
-  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
-
-  if (!userId) {
-    return res.status(401).json({
-      message: 'Authentification requise',
-      groups: [],
-      pagination: { page, limit, total: 0, pages: 0 }
-    });
-  }
-
-  try {
-    const result = await listFollowedGroups(userId, page, limit);
-    return res.status(200).json(result);
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({
-        message: error.message,
-        groups: [],
-        pagination: { page, limit, total: 0, pages: 0 }
-      });
-    }
-
-    logger.error('Erreur lors de la récupération des groupes suivis', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      userId
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue',
-      groups: [],
-      pagination: { page, limit, total: 0, pages: 0 }
-    });
-  }
-});
+export const getUserFollowedGroups = async (req: Request, res: Response) => {
+  const { page, limit } = parsePagination(req.query);
+  const result = await listFollowedGroups(req.user!.id, page, limit);
+  res.status(200).json(result);
+};
 
 /**
  * Récupérer les followers d'un groupe
  */
-export const getGroupFollowers = asyncHandler(async (req: Request, res: Response) => {
-  const groupId = req.params.groupId as string;
-  const page = queryInt(req.query.page) || 1;
-  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
-
-  try {
-    const result = await listGroupFollowers(groupId, page, limit);
-    return res.status(200).json(result);
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-
-    logger.error('Erreur lors de la récupération des followers', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      groupId
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue'
-    });
-  }
-});
+export const getGroupFollowers = async (req: Request, res: Response) => {
+  const { page, limit } = parsePagination(req.query);
+  const result = await listGroupFollowers(req.params.groupId as string, page, limit);
+  res.status(200).json(result);
+};

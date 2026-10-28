@@ -1,7 +1,5 @@
 jest.mock('../../../notifications/services/notificationService', () => ({
-  NotificationService: {
-    createNotification: jest.fn().mockResolvedValue(undefined)
-  }
+  createNotification: jest.fn().mockResolvedValue(undefined)
 }));
 
 import {
@@ -11,7 +9,7 @@ import {
 } from '../../../../tests/helpers/mongoMemory';
 import { createTestUser, createTestProduct } from '../../../../tests/helpers/fixtures';
 import { toggleFavoriteForUser, updateProductForOwner, markAsSold } from '../productService';
-import { NotificationService } from '../../../notifications/services/notificationService';
+import { createNotification } from '../../../notifications/services/notificationService';
 
 describe('wishlistAlertService (integration)', () => {
   beforeAll(async () => {
@@ -56,8 +54,8 @@ describe('wishlistAlertService (integration)', () => {
       // attend la fire-and-forget notification
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(NotificationService.createNotification).toHaveBeenCalledTimes(2);
-      const call = (NotificationService.createNotification as jest.Mock).mock.calls[0][0];
+      expect(createNotification).toHaveBeenCalledTimes(2);
+      const call = (createNotification as jest.Mock).mock.calls[0][0];
       expect(call.type).toBe('wishlist_price_drop');
       expect(call.data.oldPrice).toBe(50);
       expect(call.data.newPrice).toBe(30);
@@ -74,7 +72,7 @@ describe('wishlistAlertService (integration)', () => {
       });
 
       await new Promise((r) => setTimeout(r, 50));
-      expect(NotificationService.createNotification).not.toHaveBeenCalled();
+      expect(createNotification).not.toHaveBeenCalled();
     });
   });
 
@@ -89,8 +87,8 @@ describe('wishlistAlertService (integration)', () => {
 
       await new Promise((r) => setTimeout(r, 50));
 
-      expect(NotificationService.createNotification).toHaveBeenCalledTimes(2);
-      const call = (NotificationService.createNotification as jest.Mock).mock.calls[0][0];
+      expect(createNotification).toHaveBeenCalledTimes(2);
+      const call = (createNotification as jest.Mock).mock.calls[0][0];
       expect(call.type).toBe('wishlist_unavailable');
       expect(call.data.reason).toBe('sold');
     });
@@ -107,7 +105,7 @@ describe('wishlistAlertService (integration)', () => {
 
       await new Promise((r) => setTimeout(r, 50));
 
-      const calls = (NotificationService.createNotification as jest.Mock).mock.calls;
+      const calls = (createNotification as jest.Mock).mock.calls;
       const recipientIds = calls.map((c) => c[0].recipientId.toString());
       expect(recipientIds).not.toContain(seller._id.toString());
     });

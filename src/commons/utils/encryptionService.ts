@@ -21,7 +21,7 @@ const CURRENT_FORMAT_PREFIX = 'v2';
 
 /** IV historique, uniquement pour déchiffrer les données antérieures. */
 const legacyIv = (): Buffer | null => {
-  const raw = process.env.ENCRYPTION_IV;
+  const raw = env.ENCRYPTION_IV;
   if (!raw || raw.length < IV_BYTES) return null;
   return Buffer.from(raw.slice(0, IV_BYTES), 'utf8');
 };

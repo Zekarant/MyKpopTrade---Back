@@ -3,6 +3,12 @@ import { queryInt } from './query';
 /** Plafond par défaut d'une page de liste ; les catalogues ont leur propre plafond. */
 export const MAX_PAGE_SIZE = 100;
 
+/**
+ * Numéro de page maximal accepté : au-delà, `skip` dépasse ce que Mongo
+ * accepte et la requête finirait en 500 au lieu d'une page vide.
+ */
+export const MAX_PAGE_NUMBER = 100_000;
+
 /** Borne un `limit` de pagination fourni par le client à [1, maxLimit]. */
 export function clampLimit(raw: unknown, defaultLimit: number, maxLimit: number): number {
   const parsed = parseInt(String(raw), 10);
@@ -24,7 +30,7 @@ export function parsePagination(
   query: { page?: unknown; limit?: unknown },
   { defaultLimit = 20, maxLimit = MAX_PAGE_SIZE }: { defaultLimit?: number; maxLimit?: number } = {}
 ): PageRequest {
-  const page = Math.max(1, queryInt(query.page) || 1);
+  const page = Math.min(Math.max(1, queryInt(query.page) || 1), MAX_PAGE_NUMBER);
   const limit = clampLimit(query.limit, defaultLimit, maxLimit);
   return { page, limit, skip: (page - 1) * limit };
 }

@@ -1,10 +1,12 @@
 import mongoose from 'mongoose';
 import path from 'path';
-import fs from 'fs';
+import fs from 'fs/promises';
 import Rating, { IRating } from '../../../models/ratingModel';
 import User from '../../../models/userModel';
-import { HttpError } from '../../../commons/utils/httpError';
-import { NotificationService } from '../../notifications/services/notificationService';
+import { HttpError, notFound, forbidden } from '../../../commons/utils/httpError';
+import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
+import logger from '../../../commons/utils/logger';
+import { createNotification } from '../../notifications/services/notificationService';
 import Payment from '../../../models/paymentModel';
 import { BlockedInteractionError, isBlockedBetween } from '../../users/services/userBlockService';
 
@@ -124,24 +126,22 @@ export const updateUserAverageRating = async (userId: string): Promise<void> => 
 };
 
 /**
- * Supprime les fichiers listés (accepte des chemins absolus ou relatifs à la racine projet).
+ * Supprime les fichiers listés (chemins absolus, ou publics `/uploads/...`
+ * relatifs à la racine du projet). Un fichier déjà absent n'est pas une erreur.
  */
-export function cleanupRatingImages(imagePaths: string[]): void {
-  for (const imagePath of imagePaths) {
-    const fullPath = path.isAbsolute(imagePath)
+async function cleanupRatingImages(imagePaths: string[]): Promise<void> {
+  await Promise.all(imagePaths.map((imagePath) => {
+    const fullPath = path.isAbsolute(imagePath) && !imagePath.startsWith('/uploads/')
       ? imagePath
       : path.join(__dirname, '../../../../', imagePath.replace(/^\//, ''));
-    if (fs.existsSync(fullPath)) {
-      fs.unlinkSync(fullPath);
-    }
-  }
+    return fs.rm(fullPath, { force: true });
+  }));
 }
 
 export async function getUserRatingsWithStats(
   userId: string,
   type: string | undefined,
-  page: number,
-  limit: number
+  pageRequest: PageRequest
 ) {
   const filter: mongoose.QueryFilter<IRating> = { recipient: userId, isHidden: false };
 
@@ -153,8 +153,9 @@ export async function getUserRatingsWithStats(
     Rating.find(filter)
       .populate('reviewer', 'username profilePicture')
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit),
+      .skip(pageRequest.skip)
+      .limit(pageRequest.limit)
+      .lean(),
     Rating.countDocuments(filter)
   ]);
 
@@ -195,12 +196,7 @@ export async function getUserRatingsWithStats(
   return {
     ratings,
     stats: ratingStats,
-    pagination: {
-      page,
-      limit,
-      totalItems: count,
-      totalPages: Math.ceil(count / limit)
-    }
+    pagination: paginationMeta(pageRequest, count)
   };
 }
 
@@ -221,103 +217,121 @@ export async function createUserRating({
   transactionId?: string;
   images: string[];
 }) {
-  const fail = (status: number, message: string): never => {
-    cleanupRatingImages(images);
-    throw new HttpError(status, message);
-  };
+  const newRating = await removeUploadedImagesOnFailure(images, async () => {
+    if (!recipientId || isNaN(rating) || !review || !type) {
+      throw new HttpError(400, 'Tous les champs sont obligatoires');
+    }
+    if (rating < RATING_MIN || rating > RATING_MAX || !Number.isInteger(rating)) {
+      throw new HttpError(400, `La note doit être un entier entre ${RATING_MIN} et ${RATING_MAX}`);
+    }
+    if (type !== 'buyer' && type !== 'seller') {
+      throw new HttpError(400, 'Le type doit être "buyer" ou "seller"');
+    }
+    if (!(await User.exists({ _id: recipientId }))) {
+      throw notFound('Utilisateur destinataire non trouvé', 'USER_NOT_FOUND');
+    }
+    if (reviewerId === recipientId) {
+      throw new HttpError(400, 'Vous ne pouvez pas vous auto-évaluer');
+    }
+    // Laisser un avis est une interaction : refusée entre membres bloqués, dans les deux sens.
+    if (await isBlockedBetween(reviewerId, recipientId)) {
+      throw new BlockedInteractionError();
+    }
 
-  if (!recipientId || isNaN(rating) || !review || !type) {
-    fail(400, 'Tous les champs sont obligatoires');
-  }
-
-  if (rating < RATING_MIN || rating > RATING_MAX || !Number.isInteger(rating)) {
-    fail(400, `La note doit être un entier entre ${RATING_MIN} et ${RATING_MAX}`);
-  }
-
-  if (type !== 'buyer' && type !== 'seller') {
-    fail(400, 'Le type doit être "buyer" ou "seller"');
-  }
-
-  const recipient = await User.findById(recipientId);
-  if (!recipient) {
-    fail(404, 'Utilisateur destinataire non trouvé');
-  }
-
-  if (reviewerId === recipientId) {
-    fail(400, 'Vous ne pouvez pas vous auto-évaluer');
-  }
-
-  // Laisser un avis est une interaction : refusée entre membres bloqués, dans les deux sens.
-  if (await isBlockedBetween(reviewerId, recipientId)) {
-    cleanupRatingImages(images);
-    throw new BlockedInteractionError();
-  }
-
-  let paymentId: mongoose.Types.ObjectId;
-  try {
-    paymentId = await findRatablePayment({
+    const paymentId = await findRatablePayment({
       reviewerId,
       recipientId,
-      type: type as 'buyer' | 'seller',
+      type,
       transactionId: transactionId || undefined
     });
-  } catch (error) {
-    cleanupRatingImages(images);
-    throw error;
-  }
 
-  const newRating = new Rating({
-    reviewer: reviewerId,
-    recipient: recipientId,
-    rating,
-    review,
-    type,
-    transaction: paymentId,
-    isVerifiedPurchase: true,
-    images
+    const created = new Rating({
+      reviewer: reviewerId,
+      recipient: recipientId,
+      rating,
+      review,
+      type,
+      transaction: paymentId,
+      isVerifiedPurchase: true,
+      images
+    });
+
+    try {
+      await created.save();
+    } catch (error) {
+      // Index unique (reviewer, transaction) : deux envois simultanés du même avis.
+      if ((error as { code?: unknown }).code === DUPLICATE_KEY_ERROR) {
+        throw new HttpError(409, ALREADY_RATED_MESSAGE, 'ALREADY_RATED');
+      }
+      throw error;
+    }
+    return created;
   });
 
-  try {
-    await newRating.save();
-  } catch (error) {
-    // Index unique (reviewer, transaction) : deux envois simultanés du même avis.
-    if ((error as { code?: unknown }).code === DUPLICATE_KEY_ERROR) {
-      fail(409, ALREADY_RATED_MESSAGE);
-    }
-    throw error;
-  }
-
   await updateUserAverageRating(recipientId);
-
-  const reviewer = await User.findById(reviewerId).select('username').lean() as { username?: string } | null;
-  await NotificationService.createNotification({
-    recipientId,
-    type: 'rating_received',
-    title: 'Nouvelle évaluation',
-    content: `${reviewer?.username || 'Un utilisateur'} vous a noté ${rating}/5`,
-    link: `/adherents/profile/me`,
-    data: { ratingId: newRating._id, reviewerId, rating }
-  }).catch(() => undefined);
+  await notifyRatingReceived({ recipientId, reviewerId, rating, ratingId: newRating._id });
 
   return await Rating.findById(newRating._id).populate('reviewer', 'username profilePicture');
 }
 
-export async function reportUserRating(userId: string, ratingId: string, reason: string) {
-  if (!reason) {
-    throw new HttpError(400, 'Veuillez indiquer la raison du signalement');
-  }
-
-  const rating = await Rating.findById(ratingId);
-
-  if (!rating) {
-    throw new HttpError(404, 'Évaluation non trouvée');
-  }
-
-  if (rating.recipient.toString() !== userId && rating.reviewer.toString() !== userId) {
-    throw new HttpError(403, 'Vous n\'êtes pas autorisé à signaler cette évaluation');
+/** Exécute `action` ; en cas d'échec, supprime les images reçues, que rien ne référencera. */
+async function removeUploadedImagesOnFailure<T>(imagePaths: string[], action: () => Promise<T>): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    await cleanupRatingImages(imagePaths);
+    throw error;
   }
 }
 
+/** Notification in-app de l'avis reçu ; son échec ne doit pas annuler l'avis. */
+async function notifyRatingReceived({
+  recipientId,
+  reviewerId,
+  rating,
+  ratingId
+}: {
+  recipientId: string;
+  reviewerId: string;
+  rating: number;
+  ratingId: mongoose.Types.ObjectId;
+}): Promise<void> {
+  try {
+    const reviewer = await User.findById(reviewerId).select('username').lean<{ username?: string } | null>();
+    await createNotification({
+      recipientId,
+      type: 'rating_received',
+      title: 'Nouvelle évaluation',
+      content: `${reviewer?.username || 'Un utilisateur'} vous a noté ${rating}/5`,
+      link: `/adherents/profile/me`,
+      data: { ratingId, reviewerId, rating }
+    });
+  } catch (error) {
+    logger.warn('Notification d\'avis reçu non envoyée', {
+      ratingId: String(ratingId),
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+const ratingNotFoundError = () => notFound('Évaluation non trouvée', 'RATING_NOT_FOUND');
+
+/** Charge un avis que seul son auteur peut modifier. */
+async function loadRatingForReviewer(userId: string, ratingId: string) {
+  const rating = await Rating.findById(ratingId);
+  if (!rating) {
+    throw ratingNotFoundError();
+  }
+  if (rating.reviewer.toString() !== userId) {
+    throw forbidden('Vous n\'êtes pas autorisé à modifier cette évaluation');
+  }
+  return rating;
+}
+
+/**
+ * Retire une image d'un avis (auteur uniquement) et supprime son fichier.
+ * @returns les images restantes
+ */
 export async function deleteRatingImageAt({
   userId,
   ratingId,
@@ -325,35 +339,29 @@ export async function deleteRatingImageAt({
 }: {
   userId: string;
   ratingId: string;
-  imageIndex: number;
+  imageIndex: unknown;
 }): Promise<string[]> {
-  if (typeof imageIndex !== 'number' || imageIndex < 0) {
-    throw new HttpError(400, 'Index d\'image invalide');
+  if (typeof imageIndex !== 'number' || !Number.isInteger(imageIndex) || imageIndex < 0) {
+    throw new HttpError(400, 'Index d\'image invalide', 'INVALID_IMAGE_INDEX');
   }
 
-  const rating = await Rating.findById(ratingId);
-
-  if (!rating) {
-    throw new HttpError(404, 'Évaluation non trouvée');
-  }
-
-  if (rating.reviewer.toString() !== userId) {
-    throw new HttpError(403, 'Vous n\'êtes pas autorisé à modifier cette évaluation');
-  }
+  const rating = await loadRatingForReviewer(userId, ratingId);
 
   if (!rating.images || imageIndex >= rating.images.length) {
-    throw new HttpError(400, 'Index d\'image invalide');
+    throw new HttpError(400, 'Index d\'image invalide', 'INVALID_IMAGE_INDEX');
   }
 
-  const imagePath = rating.images[imageIndex];
-  cleanupRatingImages([imagePath]);
-
-  rating.images.splice(imageIndex, 1);
+  const [imagePath] = rating.images.splice(imageIndex, 1);
   await rating.save();
+  await cleanupRatingImages([imagePath]);
 
   return rating.images;
 }
 
+/**
+ * Ajoute à un avis (auteur uniquement) l'image déjà enregistrée par l'upload.
+ * En cas de refus, le fichier reçu est supprimé.
+ */
 export async function addRatingImageForUser({
   userId,
   ratingId,
@@ -363,46 +371,33 @@ export async function addRatingImageForUser({
   ratingId: string;
   filePath: string;
 }): Promise<{ image: string; images: string[] }> {
-  const rating = await Rating.findById(ratingId);
+  return removeUploadedImagesOnFailure([filePath], async () => {
+    const rating = await loadRatingForReviewer(userId, ratingId);
 
-  if (!rating) {
-    cleanupRatingImages([filePath]);
-    throw new HttpError(404, 'Évaluation non trouvée');
-  }
+    if (!rating.images) {
+      rating.images = [];
+    }
+    if (rating.images.length >= MAX_IMAGES_PER_RATING) {
+      throw new HttpError(400, `Nombre maximum d'images atteint (${MAX_IMAGES_PER_RATING})`, 'MAX_IMAGES_REACHED');
+    }
 
-  if (rating.reviewer.toString() !== userId) {
-    cleanupRatingImages([filePath]);
-    throw new HttpError(403, 'Vous n\'êtes pas autorisé à modifier cette évaluation');
-  }
+    const relativePath = `/uploads/ratings/${path.basename(filePath)}`;
+    rating.images.push(relativePath);
+    await rating.save();
 
-  if (!rating.images) {
-    rating.images = [];
-  }
-
-  if (rating.images.length >= MAX_IMAGES_PER_RATING) {
-    cleanupRatingImages([filePath]);
-    throw new HttpError(400, `Nombre maximum d'images atteint (${MAX_IMAGES_PER_RATING})`);
-  }
-
-  const relativePath = `/uploads/ratings/${path.basename(filePath)}`;
-  rating.images.push(relativePath);
-  await rating.save();
-
-  return {
-    image: relativePath,
-    images: rating.images
-  };
+    return { image: relativePath, images: rating.images };
+  });
 }
 
 async function loadRatingForRecipient(userId: string, ratingId: string, permissionMsg: string) {
   const rating = await Rating.findById(ratingId);
 
   if (!rating) {
-    throw new HttpError(404, 'Évaluation non trouvée');
+    throw ratingNotFoundError();
   }
 
   if (rating.recipient.toString() !== userId) {
-    throw new HttpError(403, permissionMsg);
+    throw forbidden(permissionMsg);
   }
 
   return rating;

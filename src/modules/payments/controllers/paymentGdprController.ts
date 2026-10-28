@@ -1,197 +1,53 @@
 import { Request, Response } from 'express';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import Payment, { IPayment } from '../../../models/paymentModel';
-import { IProduct } from '../../../models/productModel';
-import User from '../../../models/userModel';
-import { GdprLogger } from '../../../commons/utils/gdprLogger';
 import {
-  anonymizeBuyerPayments,
-  anonymizeExpiredPayments
-} from '../services/paymentAnonymizationService';
-
-interface ExportedPayment {
-  transaction_id: string;
-  external_reference?: string;
-  date: string;
-  completed_at: string | null;
-  amount: number;
-  currency: string;
-  status: IPayment['status'];
-  payment_method: IPayment['paymentMethod'];
-  product: { id: string; title: string; price: number; currency: string } | null;
-  role: 'buyer' | 'seller';
-  refund?: { amount: number; date: string | null; reference?: string };
-}
+  anonymizeExpiredPaymentsByAdmin,
+  anonymizeOwnPayments,
+  exportUserPayments
+} from '../services/paymentGdprService';
 
 /**
  * Exporte les données de paiement d'un utilisateur (droit à la portabilité)
  * @route GET /api/payments/export
  * @access Private
  */
-export const exportPaymentData = asyncHandler(async (req: Request, res: Response) => {
+export const exportPaymentData = async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  
-  if (!userId) {
-    return res.status(401).json({
-      success: false,
-      message: 'Authentification requise'
-    });
-  }
-  
-  try {
-    // Récupérer tous les paiements de l'utilisateur (achat et vente)
-    const payments = await Payment.find({
-      $or: [{ buyer: userId }, { seller: userId }]
-    })
-    .populate<{ product: Pick<IProduct, '_id' | 'title' | 'price' | 'currency'> | null }>('product', 'title images price currency')
-    .sort({ createdAt: -1 });
+  const data = await exportUserPayments(userId);
 
-    // Formater les données en respectant la portabilité (format commun et lisible)
-    const formattedData = payments.map(payment => {
-      const { product } = payment;
-      const paymentData: ExportedPayment = {
-        transaction_id: payment._id.toString(),
-        external_reference: payment.captureId || payment.paymentIntentId,
-        date: payment.createdAt.toISOString(),
-        completed_at: payment.completedAt ? payment.completedAt.toISOString() : null,
-        amount: payment.amount,
-        currency: payment.currency,
-        status: payment.status,
-        payment_method: payment.paymentMethod,
-        product: product ? {
-          id: product._id.toString(),
-          title: product.title,
-          price: product.price,
-          currency: product.currency
-        } : null,
-        // Pas de détails sur l'autre partie, pour respecter sa vie privée.
-        role: payment.buyer.toString() === userId ? 'buyer' : 'seller'
-      };
-
-      // Ajouter les informations de remboursement si présentes
-      if (payment.refundAmount) {
-        paymentData.refund = {
-          amount: payment.refundAmount,
-          date: payment.refundedAt ? payment.refundedAt.toISOString() : null,
-          reference: payment.refundId
-        };
-      }
-      
-      return paymentData;
-    });
-    
-    // Générer un nom de fichier unique
-    const filename = `mykpoptrade_payments_export_${Date.now()}.json`;
-    
-    // Journal d'audit pour la conformité
-    GdprLogger.logPaymentAction('export_payment_data', { count: formattedData.length }, userId);
-    
-    // Envoyer les données sous forme de fichier JSON téléchargeable
-    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
-    res.setHeader('Content-Type', 'application/json');
-    return res.status(200).json({
-      data: formattedData,
-      exported_at: new Date().toISOString(),
-      user_id: userId
-    });
-  } catch (error) {
-    GdprLogger.logPaymentError(error, userId, { action: 'export_payment_data' });
-    
-    return res.status(500).json({
-      success: false,
-      message: 'Une erreur est survenue lors de l\'export des données de paiement'
-    });
-  }
-});
+  // Envoyer les données sous forme de fichier JSON téléchargeable
+  res.setHeader('Content-Disposition', `attachment; filename=mykpoptrade_payments_export_${Date.now()}.json`);
+  res.setHeader('Content-Type', 'application/json');
+  res.status(200).json({
+    data,
+    exported_at: new Date().toISOString(),
+    user_id: userId
+  });
+};
 
 /**
  * Anonymise les données personnelles d'un utilisateur dans les paiements
  * @route POST /api/payments/gdpr/anonymize
  * @access Private
  */
-export const anonymizeUserPaymentData = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const { password } = req.body;
-  
-  if (!userId) {
-    return res.status(401).json({
-      success: false,
-      message: 'Authentification requise'
-    });
-  }
-  
-  try {
-    // Vérifier le mot de passe pour confirmer l'action
-    const user = await User.findById(userId).select('+password');
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Utilisateur non trouvé'
-      });
-    }
-    
-    const isPasswordValid = await user.comparePassword(password);
-    if (!isPasswordValid) {
-      return res.status(400).json({
-        success: false,
-        message: 'Mot de passe incorrect'
-      });
-    }
-    
-    const count = await anonymizeBuyerPayments(userId);
+export const anonymizeUserPaymentData = async (req: Request, res: Response) => {
+  const count = await anonymizeOwnPayments(req.user!.id, req.body.password);
 
-    // Journal d'audit pour la conformité
-    GdprLogger.logPaymentAction('anonymize_payment_data', { count }, userId);
-    
-    return res.status(200).json({
-      success: true,
-      message: `${count} paiements ont été anonymisés conformément à votre demande.`
-    });
-  } catch (error) {
-    GdprLogger.logPaymentError(error, userId, { action: 'anonymize_payment_data' });
-    
-    return res.status(500).json({
-      success: false,
-      message: 'Une erreur est survenue lors de l\'anonymisation des données'
-    });
-  }
-});
+  res.status(200).json({
+    success: true,
+    message: `${count} paiements ont été anonymisés conformément à votre demande.`
+  });
+};
 
 /**
- * Anonymise les données de paiement anciennes (à exécuter via une tâche cron)
- * Conformité RGPD: conservation limitée dans le temps
+ * Anonymise les données de paiement anciennes (conservation limitée dans le temps).
+ * @route POST /api/payments/gdpr/anonymize-old-payments
+ * @access Admin (requireAdmin)
  */
-export const anonymizeOldPayments = asyncHandler(async (req: Request, res: Response) => {
-  try {
-    // Vérifier que l'utilisateur est admin
-    const userId = req.user!.id;
-    const user = await User.findById(userId);
-    if (!user || user.role !== 'admin') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Action réservée aux administrateurs' 
-      });
-    }
-    
-    const count = await anonymizeExpiredPayments();
+export const anonymizeOldPayments = async (req: Request, res: Response) => {
+  const count = await anonymizeExpiredPaymentsByAdmin(req.user!.id);
 
-    // Log d'audit pour démontrer la conformité
-    GdprLogger.logPaymentAction('anonymize_old_payments', { 
-      count,
-      operationType: 'gdpr_data_retention_policy',
-      retention_period: '3 years'
-    }, userId);
-    
-    return res.status(200).json({
-      success: true,
-      message: `${count} paiements ont été anonymisés conformément à la politique de conservation des données.`
-    });
-  } catch (error) {
-    GdprLogger.logError('Erreur lors de l\'anonymisation des anciennes données de paiement', error);
-    
-    return res.status(500).json({
-      success: false,
-      message: 'Une erreur est survenue lors de l\'anonymisation des données'
-    });
-  }
-});
+  res.status(200).json({
+    success: true,
+    message: `${count} paiements ont été anonymisés conformément à la politique de conservation des données.`
+  });
+};

@@ -1,6 +1,6 @@
 import express from 'express';
-import * as notificationController from './controller/notificationController';
-import * as pushController from './controller/pushController';
+import * as notificationController from './controllers/notificationController';
+import * as pushController from './controllers/pushController';
 import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
 import { sanitizeInputs } from '../../commons/middlewares/sanitizeMiddleware';
 

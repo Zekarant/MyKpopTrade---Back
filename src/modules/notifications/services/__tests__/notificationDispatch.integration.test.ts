@@ -7,14 +7,14 @@ jest.mock('../pushService', () => ({
 
 import { startInMemoryMongo, stopInMemoryMongo, clearAllCollections } from '../../../../tests/helpers/mongoMemory';
 import { createTestUser } from '../../../../tests/helpers/fixtures';
-import { NotificationService } from '../notificationService';
+import { createNotification } from '../notificationService';
 import { sendNotificationEmail } from '../../../../commons/services/emailService';
 import { sendToUser } from '../pushService';
 import Notification from '../../../../models/notificationModel';
 import User from '../../../../models/userModel';
 
 const notify = (recipientId: unknown, type: string, extra: Record<string, unknown> = {}) =>
-  NotificationService.createNotification({
+  createNotification({
     recipientId: recipientId as string,
     type,
     title: 'Titre',
@@ -23,7 +23,7 @@ const notify = (recipientId: unknown, type: string, extra: Record<string, unknow
     ...extra
   });
 
-describe('NotificationService — canaux selon les préférences', () => {
+describe('createNotification — canaux selon les préférences', () => {
   beforeAll(async () => {
     await startInMemoryMongo();
   }, 60000);

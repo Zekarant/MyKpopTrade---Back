@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import User from '../../../models/userModel';
 import Product, { IProduct } from '../../../models/productModel';
 import { IUser } from '../../../models/userModel';
+import { paginationMeta } from '../../../commons/utils/pagination';
 
 /** Statuts visibles de tous ; les annonces retirées ne regardent que leur vendeur. */
 const PUBLIC_INVENTORY_STATUSES = new Set(['available', 'sold']);
@@ -54,7 +55,8 @@ export async function fetchUserInventory({
     Product.find(filter)
       .sort('-createdAt')
       .skip((page - 1) * limit)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     Product.countDocuments(filter)
   ]);
 
@@ -80,12 +82,7 @@ export async function fetchUserInventory({
   return {
     products,
     stats: inventoryStats,
-    pagination: {
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit)
-    }
+    pagination: paginationMeta({ page, limit }, total)
   };
 }
 
@@ -98,12 +95,12 @@ function favoriteUnavailableReason(
 }
 
 export async function fetchUserFavorites(userId: string, page: number, limit: number) {
-  const user = await User.findById(userId, { favorites: 1 });
+  const user = await User.findById(userId, { favorites: 1 }).lean();
 
   if (!user || !user.favorites || user.favorites.length === 0) {
     return {
       products: [],
-      pagination: { page, limit, total: 0, pages: 0 }
+      pagination: paginationMeta({ page, limit }, 0)
     };
   }
 
@@ -126,12 +123,7 @@ export async function fetchUserFavorites(userId: string, page: number, limit: nu
 
   return {
     products: products.map((product) => ({ ...product, unavailableReason: favoriteUnavailableReason(product) })),
-    pagination: {
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit)
-    }
+    pagination: paginationMeta({ page, limit }, total)
   };
 }
 
@@ -145,14 +137,14 @@ type RecommendedProduct = Pick<
 };
 
 async function buildPersonalizedRecommendations(userId: string, limit: number): Promise<RecommendedProduct[]> {
-  const user = await User.findById(userId, { favorites: 1, preferences: 1 });
+  const user = await User.findById(userId, { favorites: 1, preferences: 1 }).lean();
 
   if (!user) return [];
 
   const favoriteProducts = await Product.find(
     { _id: { $in: user.favorites || [] } },
     { kpopGroup: 1, type: 1, kpopMember: 1 }
-  );
+  ).lean();
 
   const preferredGroups = [...new Set(favoriteProducts.map(p => p.kpopGroup).filter(Boolean))];
   const preferredTypes = [...new Set(favoriteProducts.map(p => p.type).filter(Boolean))];
@@ -232,7 +224,7 @@ async function buildPersonalizedRecommendations(userId: string, limit: number): 
 }
 
 export async function fetchRecommendedProducts(userId: string | undefined, limit: number) {
-  let recommendedProducts: Array<RecommendedProduct | mongoose.HydratedDocument<IProduct>> = [];
+  let recommendedProducts: Array<{ _id: mongoose.Types.ObjectId }> = [];
 
   if (userId) {
     recommendedProducts = await buildPersonalizedRecommendations(userId, limit);
@@ -249,7 +241,8 @@ export async function fetchRecommendedProducts(userId: string | undefined, limit
     })
       .populate('seller', 'username profilePicture')
       .sort('-views -favorites -createdAt')
-      .limit(remainingLimit);
+      .limit(remainingLimit)
+      .lean();
 
     recommendedProducts = [...recommendedProducts, ...popularProducts];
   }

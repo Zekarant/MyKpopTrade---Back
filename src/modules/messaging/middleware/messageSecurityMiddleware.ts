@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import Conversation from '../../../models/conversationModel';
 import logger from '../../../commons/utils/logger';
 import { isRateLimiterRes } from '../../../commons/utils/rateLimiterRes';
+import { HttpError, notFound, forbidden } from '../../../commons/utils/httpError';
 
 let messageLimiterInstance: RateLimiterMongo | null = null;
 
@@ -23,64 +24,52 @@ function getMessageLimiter(): RateLimiterMongo {
 /**
  * Middleware pour limiter le nombre de messages (anti-spam)
  */
-export const rateLimitMessages = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const rateLimitMessages = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+  const userId = req.user!.id;
   try {
-    const userId = req.user!.id;
     await getMessageLimiter().consume(userId);
-    next();
   } catch (error) {
     if (isRateLimiterRes(error)) {
-      logger.warn(`Limite de messages dépassée par l'utilisateur ${req.user!.id}`);
-      res.status(429).json({ 
-        message: 'Vous envoyez trop de messages. Veuillez attendre avant d\'en envoyer d\'autres.' 
-      });
-    } else {
-      // Erreur technique (DB pas prête) → on laisse passer
-      next();
+      logger.warn(`Limite de messages dépassée par l'utilisateur ${userId}`);
+      throw new HttpError(
+        429,
+        'Vous envoyez trop de messages. Veuillez attendre avant d\'en envoyer d\'autres.',
+        'TOO_MANY_MESSAGES'
+      );
     }
+    // Panne technique du limiteur (base pas prête) : l'envoi n'est pas bloqué pour autant.
+    logger.warn('Limiteur de messages indisponible, envoi laissé passer', {
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
+  next();
 };
 
 /**
- * Vérifier si l'utilisateur a le droit de participer à une conversation
+ * Vérifie que l'utilisateur participe à la conversation `:id` (ou `conversationId` du corps).
+ * Un identifiant mal formé répond 400 (CastError, cf. errorMiddleware).
  */
-export const verifyConversationAccess = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const verifyConversationAccess = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
   const userId = req.user!.id;
-  const conversationId = req.params.id || req.body.conversationId;
-  
+  const conversationId = req.params.id || req.body?.conversationId;
+
   if (!conversationId) {
-    return next();
+    next();
+    return;
   }
 
-  try {
-    const conversation = await Conversation.findById(conversationId);
-    
-    if (!conversation) {
-      res.status(404).json({ message: 'Conversation non trouvée' });
-      return;
-    }
-    
-    // Vérifier que l'utilisateur est bien un participant de la conversation
-    // Define the participant type for more clarity
-    interface ConversationParticipant {
-      _id: mongoose.Types.ObjectId;
-      toString(): string;
-    }
-    
-    // Type assertion for conversation.participants
-    const participants: ConversationParticipant[] = conversation.participants as ConversationParticipant[];
-    
-    if (!participants.some((p: ConversationParticipant) => p.toString() === userId)) {
-      logger.warn(`Tentative d'accès non autorisé à la conversation ${conversationId} par l'utilisateur ${userId}`);
-      res.status(403).json({ message: 'Vous n\'êtes pas autorisé à accéder à cette conversation' });
-      return;
-    }
-    
-    next();
-  } catch (error) {
-    logger.error(`Erreur lors de la vérification d'accès à la conversation`, { error });
-    res.status(500).json({ message: 'Une erreur est survenue' });
+  const conversation = await Conversation.findById(conversationId).select('participants').lean();
+
+  if (!conversation) {
+    throw notFound('Conversation non trouvée', 'CONVERSATION_NOT_FOUND');
   }
+
+  if (!conversation.participants.some((participant) => participant.toString() === userId)) {
+    logger.warn(`Tentative d'accès non autorisé à la conversation ${conversationId} par l'utilisateur ${userId}`);
+    throw forbidden('Vous n\'êtes pas autorisé à accéder à cette conversation', 'CONVERSATION_FORBIDDEN');
+  }
+
+  next();
 };
 
 /**

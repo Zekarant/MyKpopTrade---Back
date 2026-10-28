@@ -103,6 +103,15 @@ export const envSchema = z.object({
   PAYPAL_PLATFORM_FEE_PERCENT: z.coerce.number().min(0).max(100).default(0),
   PAYPAL_RETURN_URL: z.string().default('http://localhost:3000/payment/success'),
   PAYPAL_CANCEL_URL: z.string().default('http://localhost:3000/payment/cancel'),
+  // URL publique de l'API vers laquelle PayPal renvoie le vendeur en fin
+  // d'onboarding (tunnel ngrok en local). Absente : API_URL.
+  PAYPAL_OAUTH_BASE_URL: z.string().url().optional(),
+
+  // Expéditions : auto-confirmation de la livraison et relance de l'acheteur
+  // (en jours après l'expédition), et fournisseur de suivi transporteur.
+  SHIPMENT_AUTO_CONFIRM_DAYS: z.coerce.number().int().positive().default(14),
+  SHIPMENT_REMINDER_DAYS: z.coerce.number().int().positive().default(7),
+  TRACKING_PROVIDER: z.string().default('noop'),
 
   // URL publique de la marketplace et email de support, pré-remplis sur les
   // comptes vendeurs connectés.
@@ -117,6 +126,15 @@ export const envSchema = z.object({
   // Cette variable était lue directement via process.env, sans validation :
   // son absence faisait échouer le démarrage sur une exception opaque.
   ENCRYPTION_KEY: z.string().min(32).optional(),
+  // IV fixe de l'ancien format de chiffrement : sert uniquement à déchiffrer
+  // les données écrites avant le format `v2` (cf. encryptionService.ts).
+  ENCRYPTION_IV: z.string().optional(),
+
+  // Pièces d'identité chiffrées : répertoire de stockage et durée de conservation.
+  SECURE_STORAGE_PATH: z.string().default(path.join(process.cwd(), 'secure_storage')),
+  DOCUMENT_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+  // Destinataire des alertes de violation de données (RGPD art. 33). Absent : pas d'email.
+  DATA_PROTECTION_EMAIL: z.union([z.string().email(), z.literal('')]).optional(),
 
   // Temps réel (SSE) : flux ouverts simultanément sur ce process, tous
   // utilisateurs confondus. Chaque flux garde une socket ; au-delà, 503.

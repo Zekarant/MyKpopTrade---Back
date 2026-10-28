@@ -1,16 +1,19 @@
-import { Request, Response } from 'express';
-import { asyncHandler } from '../../commons/middlewares/errorMiddleware';
-import Product from '../../models/productModel';
-import KpopGroup from '../../models/kpopGroupModel';
-import KpopAlbum from '../../models/albumModel';
-import env from '../../config/env';
+import Product from '../../../models/productModel';
+import KpopGroup from '../../../models/kpopGroupModel';
+import KpopAlbum from '../../../models/albumModel';
 
-const FRONTEND_URL = env.FRONTEND_URL.replace(/\/$/, '');
 const SITEMAP_PRODUCT_LIMIT = 5000;
 // Bornes des pages catalogue : le sitemap reste sous la limite de 50 000 URLs
 // d'un seul fichier, annonces comprises.
 const SITEMAP_GROUP_LIMIT = 2000;
 const SITEMAP_ALBUM_LIMIT = 5000;
+
+interface SitemapEntry {
+  loc: string;
+  lastmod?: Date;
+  changefreq?: 'always' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'never';
+  priority?: number;
+}
 
 /**
  * Échappe une valeur pour XML. Les URLs peuvent contenir des `&` (params)
@@ -23,13 +26,6 @@ function xmlEscape(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
-}
-
-interface SitemapEntry {
-  loc: string;
-  lastmod?: Date;
-  changefreq?: 'always' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'never';
-  priority?: number;
 }
 
 function renderSitemap(entries: SitemapEntry[]): string {
@@ -47,36 +43,24 @@ ${urls}
 </urlset>`;
 }
 
-/**
- * Sitemap dynamique. On y inclut :
- *   - les pages publiques statiques
- *   - les produits encore disponibles (limite SITEMAP_PRODUCT_LIMIT)
- *   - les pages /groups/:id des groupes actifs et /albums/:id de leurs albums
- *     (un groupe désactivé n'a plus de page à faire indexer)
- *
- * Renvoyé en cache 1h pour limiter la charge DB.
- */
-export const sitemapXml = asyncHandler(async (_req: Request, res: Response) => {
-  const staticPages: SitemapEntry[] = [
-    { loc: `${FRONTEND_URL}/`, changefreq: 'daily', priority: 1.0 },
-    { loc: `${FRONTEND_URL}/login`, changefreq: 'yearly', priority: 0.3 },
-    { loc: `${FRONTEND_URL}/register`, changefreq: 'yearly', priority: 0.3 },
-    { loc: `${FRONTEND_URL}/contact`, changefreq: 'monthly', priority: 0.4 }
-  ];
-
+/** Annonces encore en vente, les plus récemment modifiées d'abord. */
+async function listProductEntries(frontendUrl: string): Promise<SitemapEntry[]> {
   const products = await Product.find({ isAvailable: true, isSold: { $ne: true } })
     .sort('-updatedAt')
     .limit(SITEMAP_PRODUCT_LIMIT)
     .select('_id updatedAt')
     .lean();
 
-  const productEntries: SitemapEntry[] = products.map((p) => ({
-    loc: `${FRONTEND_URL}/products/${p._id}`,
+  return products.map((p) => ({
+    loc: `${frontendUrl}/products/${p._id}`,
     lastmod: p.updatedAt,
     changefreq: 'daily',
     priority: 0.7
   }));
+}
 
+/** Pages des groupes actifs et de leurs albums (un groupe désactivé n'a plus de page à indexer). */
+async function listCatalogEntries(frontendUrl: string): Promise<SitemapEntry[]> {
   const groups = await KpopGroup.find({ isActive: true })
     .sort('-updatedAt')
     .limit(SITEMAP_GROUP_LIMIT)
@@ -88,35 +72,47 @@ export const sitemapXml = asyncHandler(async (_req: Request, res: Response) => {
     .select('_id updatedAt')
     .lean();
 
-  const catalogEntries: SitemapEntry[] = [
+  return [
     ...groups.map((g): SitemapEntry => ({
-      loc: `${FRONTEND_URL}/groups/${g._id}`,
+      loc: `${frontendUrl}/groups/${g._id}`,
       lastmod: g.updatedAt,
       changefreq: 'weekly',
       priority: 0.6
     })),
     ...albums.map((a): SitemapEntry => ({
-      loc: `${FRONTEND_URL}/albums/${a._id}`,
+      loc: `${frontendUrl}/albums/${a._id}`,
       lastmod: a.updatedAt,
       changefreq: 'weekly',
       priority: 0.5
     }))
   ];
+}
 
-  const xml = renderSitemap([...staticPages, ...productEntries, ...catalogEntries]);
-
-  res.set('Content-Type', 'application/xml; charset=utf-8');
-  res.set('Cache-Control', 'public, max-age=3600');
-  return res.status(200).send(xml);
-});
+/**
+ * Sitemap XML : pages publiques statiques, annonces en vente
+ * (SITEMAP_PRODUCT_LIMIT au plus), pages des groupes actifs et de leurs albums.
+ */
+export async function buildSitemapXml(frontendUrl: string): Promise<string> {
+  const staticPages: SitemapEntry[] = [
+    { loc: `${frontendUrl}/`, changefreq: 'daily', priority: 1.0 },
+    { loc: `${frontendUrl}/login`, changefreq: 'yearly', priority: 0.3 },
+    { loc: `${frontendUrl}/register`, changefreq: 'yearly', priority: 0.3 },
+    { loc: `${frontendUrl}/contact`, changefreq: 'monthly', priority: 0.4 }
+  ];
+  const [productEntries, catalogEntries] = await Promise.all([
+    listProductEntries(frontendUrl),
+    listCatalogEntries(frontendUrl)
+  ]);
+  return renderSitemap([...staticPages, ...productEntries, ...catalogEntries]);
+}
 
 /**
  * robots.txt minimal : autorise le crawl public, bloque les routes privées
  * (chemins réels du routeur front) et expose le sitemap. Les profils publics
  * /adherents/profile/:id restent indexables.
  */
-export const robotsTxt = asyncHandler(async (_req: Request, res: Response) => {
-  const body = `User-agent: *
+export function buildRobotsTxt(frontendUrl: string): string {
+  return `User-agent: *
 Allow: /
 Disallow: /adherents/admin
 Disallow: /adherents/payments
@@ -131,9 +127,6 @@ Disallow: /negotiate
 Disallow: /payment/
 Disallow: /api/
 
-Sitemap: ${FRONTEND_URL}/sitemap.xml
+Sitemap: ${frontendUrl}/sitemap.xml
 `;
-  res.set('Content-Type', 'text/plain; charset=utf-8');
-  res.set('Cache-Control', 'public, max-age=86400');
-  return res.status(200).send(body);
-});
+}

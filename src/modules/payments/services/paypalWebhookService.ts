@@ -4,11 +4,11 @@ import User from '../../../models/userModel';
 import { PayPalPartnerService } from './paypalPartnerService';
 import { applyRefundToPayment, notifyRefund } from './refundLedger';
 import { completePayment } from './paymentCompletion';
-import { NotificationService } from '../../notifications/services/notificationService';
+import { createNotification } from '../../notifications/services/notificationService';
 import logger from '../../../commons/utils/logger';
 import { toCents } from '../../../commons/utils/moneyMath';
-import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
-import { PayPalLink, PayPalMoney } from './paypalClient';
+import { ALERT_BURST_COOLDOWN_MS, dispatchAdminAlert } from '../../../commons/services/adminAlertService';
+import { PayPalClient, PayPalLink, PayPalMoney } from './paypalClient';
 
 /**
  * Ressource d'un webhook PayPal. Sa forme dépend de `event_type` (capture,
@@ -71,6 +71,36 @@ function alertCapturedAmountMismatch(
     ],
     data: { paymentId: payment._id, orderId }
   });
+}
+
+/**
+ * Vérifie auprès de PayPal la signature d'un webhook. Un rejet alerte les
+ * admins : tant qu'il dure, aucun paiement n'est confirmé par webhook.
+ */
+export async function isAuthenticWebhook(
+  headers: Record<string, string | string[] | undefined>,
+  event: { event_type: string; id?: string }
+): Promise<boolean> {
+  if (await PayPalClient.verifyWebhookSignature(headers, event)) {
+    return true;
+  }
+
+  logger.warn('Webhook PayPal rejeté : signature invalide', {
+    eventType: event.event_type,
+    eventId: event.id
+  });
+
+  dispatchAdminAlert({
+    event: 'payment.webhook_rejected',
+    severity: 'critical',
+    title: 'Webhook PayPal rejeté (signature invalide)',
+    summary: 'Vérifiez PAYPAL_WEBHOOK_ID. Tant que la signature échoue, aucun paiement n\'est confirmé par webhook.',
+    adminTab: 'audit',
+    fields: [{ name: 'Type d\'évènement', value: String(event.event_type), inline: true }],
+    throttleMs: ALERT_BURST_COOLDOWN_MS
+  });
+
+  return false;
 }
 
 /**
@@ -183,12 +213,15 @@ export class PayPalWebhookService {
   private static async handleRefund(event: PayPalWebhookEvent): Promise<void> {
     try {
       const resource = event.resource;
-      // PAYMENT.CAPTURE.REFUNDED porte toujours l'id, les liens et le montant du remboursement.
-      const captureId = resource.links!.find((link) => link.rel === 'up')?.href.split('/').pop();
+      const captureId = resource.links?.find((link) => link.rel === 'up')?.href.split('/').pop();
 
-      if (!captureId) {
-        logger.warn('Impossible de déterminer le captureId dans l\'événement de remboursement', {
-          resourceId: resource.id
+      // Un événement signé mais incomplet ne deviendra jamais traitable : y
+      // répondre 5xx ferait redélivrer PayPal indéfiniment.
+      if (!captureId || !resource.amount || !resource.id) {
+        logger.warn('Événement de remboursement incomplet, ignoré', {
+          resourceId: resource.id,
+          hasCaptureId: Boolean(captureId),
+          hasAmount: Boolean(resource.amount)
         });
         return;
       }
@@ -200,9 +233,9 @@ export class PayPalWebhookService {
         return;
       }
 
-      const refundAmount = parseFloat(resource.amount!.value);
-      const refundCurrency = resource.amount!.currency_code;
-      const refundId = resource.id!;
+      const refundAmount = parseFloat(resource.amount.value);
+      const refundCurrency = resource.amount.currency_code;
+      const refundId = resource.id;
 
       // Même registre que le remboursement synchrone : idempotent par refundId,
       // donc un webhook redélivré ne double ni le montant ni les notifications.
@@ -265,7 +298,7 @@ export class PayPalWebhookService {
     );
 
     if (PayPalPartnerService.isReady(status)) {
-      await NotificationService.createNotification({
+      await createNotification({
         recipientId: seller._id,
         type: 'system',
         title: 'Compte PayPal connecté',
@@ -345,7 +378,7 @@ export class PayPalWebhookService {
       sellerId: seller._id.toString().substring(0, 5) + '...'
     });
 
-    await NotificationService.createNotification({
+    await createNotification({
       recipientId: seller._id,
       type: 'system',
       title: 'Connexion PayPal révoquée',

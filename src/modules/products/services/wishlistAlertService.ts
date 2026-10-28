@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import User from '../../../models/userModel';
-import { NotificationService } from '../../notifications/services/notificationService';
+import { createNotification } from '../../notifications/services/notificationService';
 import logger from '../../../commons/utils/logger';
 
 /**
@@ -20,7 +20,7 @@ async function broadcastToWishlistOwners(
 
   await Promise.all(
     owners.map((owner) =>
-      NotificationService.createNotification({
+      createNotification({
         recipientId: owner._id,
         type: payload.type,
         title: payload.title,

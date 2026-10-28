@@ -1,16 +1,12 @@
 import mongoose from 'mongoose';
-import type { Request } from 'express';
 import Album, { IKpopAlbum } from '../../../models/albumModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import Product from '../../../models/productModel';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
-import { clampLimit } from '../../../commons/utils/pagination';
-import { queryInt, queryString } from '../../../commons/utils/query';
+import { paginationMeta } from '../../../commons/utils/pagination';
 import { pickFields } from '../../../commons/utils/pickFields';
-
-const CATALOG_MAX_LIMIT = 2000;
 
 /** Corps libre d'une requête admin, validé par le schéma Mongoose à l'écriture. */
 type AlbumInput = Record<string, unknown>;
@@ -55,16 +51,23 @@ export async function createAlbumForGroup(body: AlbumInput) {
   return album;
 }
 
-export async function listAlbums(query: Request['query']) {
-  const page = queryInt(query.page) || 1;
-  // Le panneau admin K-pop charge jusqu'à 2000 albums d'un coup.
-  const limit = clampLimit(query.limit, 20, CATALOG_MAX_LIMIT);
-  const sortBy = queryString(query.sortBy) || 'releaseDate';
-  const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
+export interface AlbumListParams {
+  page: number;
+  limit: number;
+  sortBy: string;
+  sortOrder: 1 | -1;
+  artistId?: string;
+  artistName?: string;
+  search?: string;
+  minTracks?: number;
+  year?: number;
+}
 
+export async function listAlbums({
+  page, limit, sortBy, sortOrder, artistId, artistName, search, minTracks, year
+}: AlbumListParams) {
   const filters: mongoose.QueryFilter<IKpopAlbum> = {};
 
-  const artistId = queryString(query.artistId);
   if (artistId) {
     if (!mongoose.Types.ObjectId.isValid(artistId)) {
       throw new HttpError(400, 'ID d\'artiste invalide');
@@ -72,12 +75,10 @@ export async function listAlbums(query: Request['query']) {
     filters.artistId = artistId;
   }
 
-  const artistName = queryString(query.artistName);
   if (artistName) {
     filters.artistName = { $regex: escapeRegex(artistName), $options: 'i' };
   }
 
-  const search = queryString(query.search);
   if (search) {
     const pattern = escapeRegex(search);
     filters.$or = [
@@ -86,13 +87,11 @@ export async function listAlbums(query: Request['query']) {
     ];
   }
 
-  const minTracks = queryInt(query.minTracks);
-  if (!isNaN(minTracks)) {
+  if (minTracks !== undefined) {
     filters.totalTracks = { $gte: minTracks };
   }
 
-  const year = queryInt(query.year);
-  if (!isNaN(year)) {
+  if (year !== undefined) {
     filters.releaseDate = {
       $gte: new Date(`${year}-01-01`),
       $lt: new Date(`${year + 1}-01-01`)
@@ -111,12 +110,7 @@ export async function listAlbums(query: Request['query']) {
 
   return {
     albums,
-    pagination: {
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit)
-    }
+    pagination: paginationMeta({ page, limit }, total)
   };
 }
 
@@ -190,11 +184,11 @@ export async function searchAlbumsByQuery({
   query,
   limit
 }: {
-  query: unknown;
+  query?: string;
   limit: number;
 }) {
-  if (!query || typeof query !== 'string') {
-    throw new HttpError(400, 'Paramètre de recherche requis');
+  if (!query) {
+    throw new HttpError(400, 'Paramètre de recherche requis', 'SEARCH_QUERY_REQUIRED');
   }
 
   const pattern = escapeRegex(query);

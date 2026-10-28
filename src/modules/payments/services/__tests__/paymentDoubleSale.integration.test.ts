@@ -1,5 +1,5 @@
 jest.mock('../../../notifications/services/notificationService', () => ({
-  NotificationService: { createNotification: jest.fn().mockResolvedValue(undefined) }
+  createNotification: jest.fn().mockResolvedValue(undefined)
 }));
 jest.mock('../paypalClient', () => ({
   PayPalClient: {

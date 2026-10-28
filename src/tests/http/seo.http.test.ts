@@ -22,6 +22,25 @@ describe('HTTP — SEO', () => {
   });
 
   describe('GET /sitemap.xml', () => {
+    it('sert un sitemap XML en cache, pages statiques comprises', async () => {
+      const res = await request(app).get('/sitemap.xml');
+
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toMatch(/application\/xml/);
+      expect(res.headers['cache-control']).toBe('public, max-age=3600');
+      expect(res.text).toMatch(/^<\?xml version="1.0" encoding="UTF-8"\?>/);
+      expect(res.text).toMatch(/<loc>[^<]*\/login<\/loc>/);
+    });
+
+    it('ne liste pas les annonces vendues', async () => {
+      const seller = await createTestUser();
+      const sold = await createTestProduct(seller._id, { isSold: true });
+
+      const res = await request(app).get('/sitemap.xml');
+
+      expect(res.text).not.toContain(String(sold._id));
+    });
+
     it('liste les annonces en vente, pas les annonces retirées', async () => {
       const seller = await createTestUser();
       const listed = await createTestProduct(seller._id);

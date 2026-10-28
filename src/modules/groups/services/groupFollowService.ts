@@ -2,14 +2,8 @@ import mongoose from 'mongoose';
 import KpopGroup, { IKpopGroup } from '../../../models/kpopGroupModel';
 import User from '../../../models/userModel';
 import { HttpError } from '../../../commons/utils/httpError';
+import { paginationMeta } from '../../../commons/utils/pagination';
 import logger from '../../../commons/utils/logger';
-
-/** 404 du statut de suivi : le contrôleur renvoie quand même le nom et le compteur du groupe. */
-export class FollowStatusUserNotFoundError extends HttpError {
-  constructor(public groupName: string, public followersCount: number) {
-    super(404, 'Utilisateur non trouvé');
-  }
-}
 
 export type FollowedGroupSummary = Pick<IKpopGroup, 'name' | 'profileImage' | 'genres' | 'followersCount'>;
 
@@ -132,7 +126,13 @@ export async function getFollowStatusForUser(userId: string, groupId: string) {
   }
 
   if (!user) {
-    throw new FollowStatusUserNotFoundError(group.name, group.followersCount || 0);
+    // Le corps d'erreur garde le nom et le compteur du groupe, comme avant.
+    throw new HttpError(404, 'Utilisateur non trouvé', 'USER_NOT_FOUND', {
+      groupId,
+      groupName: group.name,
+      isFollowing: false,
+      followersCount: group.followersCount || 0
+    });
   }
 
   const isFollowing = user.followedGroups?.some(
@@ -166,12 +166,7 @@ export async function listFollowedGroups(userId: string, page: number, limit: nu
 
   return {
     groups: user.followedGroups || [],
-    pagination: {
-      page,
-      limit,
-      total: user.followedGroupsCount || 0,
-      pages: Math.ceil((user.followedGroupsCount || 0) / limit)
-    }
+    pagination: paginationMeta({ page, limit }, user.followedGroupsCount || 0)
   };
 }
 
@@ -199,11 +194,6 @@ export async function listGroupFollowers(groupId: string, page: number, limit: n
     groupId,
     groupName: group.name,
     followers: group.followers || [],
-    pagination: {
-      page,
-      limit,
-      total: group.followersCount || 0,
-      pages: Math.ceil((group.followersCount || 0) / limit)
-    }
+    pagination: paginationMeta({ page, limit }, group.followersCount || 0)
   };
 }

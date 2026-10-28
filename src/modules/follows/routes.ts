@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
-import * as followController from './controller';
+import * as followController from './controllers/followController';
 
 const router = Router();
 

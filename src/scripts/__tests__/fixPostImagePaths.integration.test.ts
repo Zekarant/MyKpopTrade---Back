@@ -4,7 +4,7 @@ import {
   clearAllCollections
 } from '../../tests/helpers/mongoMemory';
 import { createTestUser } from '../../tests/helpers/fixtures';
-import Post from '../../modules/posts/model';
+import Post from '../../models/postModel';
 import { fixPostImagePaths } from '../fixPostImagePaths';
 
 describe('fixPostImagePaths (integration)', () => {

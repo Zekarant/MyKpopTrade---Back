@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
-import { asyncHandler } from '../../commons/middlewares/errorMiddleware';
-import { mapHttpError } from '../../commons/utils/httpErrorMapper';
-import { HttpError } from '../../commons/utils/httpError';
+import { badRequest } from '../../commons/utils/httpError';
 import { validateSavedSearchCreate, validateSavedSearchUpdate } from './validation';
 import {
   listSavedSearches,
@@ -10,42 +8,30 @@ import {
   deleteSavedSearch
 } from './service';
 
-type Handler = (req: Request, res: Response) => Promise<unknown>;
+const VALIDATION_ERROR_CODE = 'VALIDATION_ERROR';
 
-/**
- * Erreurs métier au format `{ message }` lu par le front ; une erreur
- * inattendue remonte au gestionnaire global (journalisée, 500).
- */
-const handle = (handler: Handler) => asyncHandler(async (req: Request, res: Response) => {
-  try {
-    await handler(req, res);
-  } catch (error) {
-    if (!mapHttpError(res, error)) throw error;
-  }
-});
-
-export const getSavedSearches = handle(async (req, res) => {
+export const getSavedSearches = async (req: Request, res: Response) => {
   const savedSearches = await listSavedSearches(req.user!.id);
   res.status(200).json({ savedSearches });
-});
+};
 
-export const postSavedSearch = handle(async (req, res) => {
+export const postSavedSearch = async (req: Request, res: Response) => {
   const { value, error } = validateSavedSearchCreate(req.body);
-  if (error !== undefined) throw new HttpError(400, error);
+  if (error !== undefined) throw badRequest(error, VALIDATION_ERROR_CODE);
 
   const savedSearch = await createSavedSearch(req.user!.id, value);
   res.location(`/api/saved-searches/${savedSearch._id}`).status(201).json({ savedSearch });
-});
+};
 
-export const patchSavedSearch = handle(async (req, res) => {
+export const patchSavedSearch = async (req: Request, res: Response) => {
   const { value, error } = validateSavedSearchUpdate(req.body);
-  if (error !== undefined) throw new HttpError(400, error);
+  if (error !== undefined) throw badRequest(error, VALIDATION_ERROR_CODE);
 
   const savedSearch = await updateSavedSearch(req.user!.id, String(req.params.id), value);
   res.status(200).json({ savedSearch });
-});
+};
 
-export const removeSavedSearch = handle(async (req, res) => {
+export const removeSavedSearch = async (req: Request, res: Response) => {
   await deleteSavedSearch(req.user!.id, String(req.params.id));
   res.status(204).end();
-});
+};

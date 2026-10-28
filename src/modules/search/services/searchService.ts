@@ -3,8 +3,9 @@ import Product, { IProduct } from '../../../models/productModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import Album from '../../../models/albumModel';
 import SearchHistory from '../../../models/historicSearchModel';
-import { HttpError } from '../../../commons/utils/httpError';
+import { badRequest, notFound } from '../../../commons/utils/httpError';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
+import { paginationMeta } from '../../../commons/utils/pagination';
 import { buildCatalogClauses, parseCatalogCriteria } from '../../products/services/productCatalogService';
 
 export interface SearchFilters {
@@ -110,6 +111,8 @@ export async function runAdvancedSearch({
   sortBy: string;
 }) {
   const { query, groups, members, albums, priceRange, condition, type, albumType, era, company } = filters;
+  // Corps JSON non typé : une requête qui n'est pas du texte ne filtre rien.
+  const queryText = typeof query === 'string' ? query.trim() : '';
 
   const searchFilters = buildProductFilters({ filters, userId, includeOwnProducts });
   const catalogCriteria = parseCatalogCriteria({ ...filters });
@@ -122,16 +125,17 @@ export async function runAdvancedSearch({
       .populate('seller', 'username profilePicture isIdentityVerified statistics.averageRating')
       .sort(getSortOption(sortBy))
       .skip((page - 1) * limit)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     Product.countDocuments(searchFilters)
   ]);
 
-  if (userId && query && query.trim()) {
+  if (userId && queryText) {
     await SearchHistory.findOneAndUpdate(
-      { userId, query: query.toLowerCase().trim() },
+      { userId, query: queryText.toLowerCase() },
       {
         userId,
-        query: query.toLowerCase().trim(),
+        query: queryText.toLowerCase(),
         filters: { groups, members, albums, priceRange, condition, type, albumType, era, company },
         resultCount: total,
         lastSearched: new Date(),
@@ -143,14 +147,9 @@ export async function runAdvancedSearch({
 
   return {
     products,
-    pagination: {
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit)
-    },
+    pagination: paginationMeta({ page, limit }, total),
     searchMetadata: {
-      query: query?.trim(),
+      query: typeof query === 'string' ? queryText : undefined,
       appliedFilters: { groups, members, albums, priceRange, condition, type, albumType, era, company, ...catalogCriteria },
       resultCount: total,
       sortBy,
@@ -170,10 +169,10 @@ export async function removeSearchHistoryItem(userId: string, historyId: string)
   const deleted = await SearchHistory.findOneAndDelete({
     _id: historyId,
     userId
-  });
+  }).lean();
 
   if (!deleted) {
-    throw new HttpError(404, 'Élément d\'historique non trouvé');
+    throw notFound('Élément d\'historique non trouvé');
   }
 }
 
@@ -192,7 +191,7 @@ const MAX_SUGGESTION_QUERY_LENGTH = 100;
  */
 export async function fetchSearchSuggestions(query: unknown) {
   if (!query || typeof query !== 'string' || query.trim().length < 2) {
-    throw new HttpError(400, 'Requête trop courte pour les suggestions');
+    throw badRequest('Requête trop courte pour les suggestions');
   }
   const pattern = escapeRegex(query.trim().slice(0, MAX_SUGGESTION_QUERY_LENGTH));
   const matches = { $regex: pattern, $options: 'i' };

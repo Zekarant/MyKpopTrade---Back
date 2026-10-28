@@ -4,14 +4,9 @@ import {
   clearAllCollections
 } from '../../../../tests/helpers/mongoMemory';
 import { createTestUser, createTestProduct } from '../../../../tests/helpers/fixtures';
-import {
-  initiateNegotiationFlow,
-  respondToNegotiationFlow,
-  cancelOfferFlow,
-  fetchConversationOffers,
-  initiatePayWhatYouWantFlow,
-  makePayWhatYouWantProposalFlow
-} from '../conversationOfferService';
+import { initiateNegotiationFlow, cancelOfferFlow, fetchConversationOffers } from '../conversationOfferService';
+import { respondToNegotiationFlow } from '../negotiationResponseService';
+import { initiatePayWhatYouWantFlow, makePayWhatYouWantProposalFlow } from '../payWhatYouWantService';
 import Conversation from '../../../../models/conversationModel';
 import Message from '../../../../models/messageModel';
 import Product from '../../../../models/productModel';

@@ -3,7 +3,6 @@ import { validateEmail, normalizePhoneNumber, validateUsername } from '../../../
 import { sendVerificationEmail, sendEmailChangedNotice } from '../../../commons/services/emailService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
-import { eraseUserAccount } from '../../users/services/accountErasureService';
 
 async function loadUserOr404(userId: string) {
   const user = await User.findById(userId);
@@ -24,15 +23,8 @@ async function verifyPasswordIfProvided(userId: string, confirmPassword?: string
 
   if (!userWithPassword.password) return;
 
-  try {
-    const isPasswordValid = await userWithPassword.comparePassword(confirmPassword);
-    if (!isPasswordValid) {
-      throw new HttpError(401, 'Mot de passe de confirmation incorrect');
-    }
-  } catch (error) {
-    if (error instanceof HttpError) throw error;
-    logger.error('Erreur lors de la vérification du mot de passe:', error);
-    throw new HttpError(500, 'Erreur lors de la vérification du mot de passe');
+  if (!(await userWithPassword.comparePassword(confirmPassword))) {
+    throw new HttpError(401, 'Mot de passe de confirmation incorrect');
   }
 }
 
@@ -315,34 +307,6 @@ export async function completeFirstProfile(userId: string, body: FirstProfileInp
   await user.save();
 
   return { ...result, profileCompleted: true };
-}
-
-export async function softDeleteAccount(userId: string, password?: string) {
-  // Mongoose crée des sous-documents vides par défaut — on vérifie l'id explicitement
-  // pour savoir si un provider social est vraiment rattaché.
-  const userWithPassword = await User.findById(userId).select('+password');
-  if (!userWithPassword) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
-  }
-
-  const hasSocialAuth = Boolean(
-    userWithPassword.socialAuth?.google?.id ||
-    userWithPassword.socialAuth?.facebook?.id ||
-    userWithPassword.socialAuth?.discord?.id
-  );
-
-  if (!hasSocialAuth) {
-    if (!password) {
-      throw new HttpError(400, 'Mot de passe requis pour confirmer la suppression');
-    }
-
-    const isPasswordValid = await userWithPassword.comparePassword(password);
-    if (!isPasswordValid) {
-      throw new HttpError(401, 'Mot de passe incorrect');
-    }
-  }
-
-  await eraseUserAccount(userId);
 }
 
 export async function setPayPalEmail(userId: string, paypalEmail: string, confirmPassword?: string) {

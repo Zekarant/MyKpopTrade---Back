@@ -1,21 +1,20 @@
 import { Router } from 'express';
 import * as profileController from './controllers/profileController';
 import * as ratingController from './controllers/ratingController';
-import * as verificationController from './controllers/verificationController';
+import * as transactionProofController from './controllers/transactionProofController';
 import { authenticateJWT, optionalAuthenticateJWT } from '../../commons/middlewares/authMiddleware';
 import { profilePictureUpload, ratingImageUpload, profileBannerUpload } from './middleware/fileUploaderMiddleware';
 
 const router = Router();
 
 // Routes de profil
+// La mise à jour du profil passe par PUT /api/auth/profile.
 router.get('/me', authenticateJWT, profileController.getMyProfile);
-router.put('/me', authenticateJWT, profileController.updateProfile);
 router.get('/user/:identifier', profileController.getPublicProfile);
 
-// Routes d'évaluation
+// Routes d'évaluation (les signalements d'avis passent par /api/reports)
 router.get('/ratings/:userId', ratingController.getUserRatings);
 router.post('/ratings', authenticateJWT, ratingImageUpload.array('ratingImages', 5), ratingController.createRating);
-router.post('/ratings/:ratingId/report', authenticateJWT, ratingController.reportRating);
 router.post(
   '/ratings/:ratingId/images',
   authenticateJWT,
@@ -47,11 +46,12 @@ router.delete(
   ratingController.deleteRatingResponse
 );
 
-// Routes de preuves de transaction
-// Public ; `includeAll` n'est honoré que pour l'auteur des preuves ou un admin.
-router.get('/proofs/:userId', optionalAuthenticateJWT, verificationController.getUserProofs);
-router.post('/proofs', authenticateJWT, verificationController.addTransactionProof);
-router.get('/verification-stats/:userId', verificationController.getUserVerificationStats);
+// Routes de preuves de transaction (la vérification d'identité est dans le
+// module `verification`). Public ; `includeAll` n'est honoré que pour
+// l'auteur des preuves ou un admin.
+router.get('/proofs/:userId', optionalAuthenticateJWT, transactionProofController.getUserProofs);
+router.post('/proofs', authenticateJWT, transactionProofController.addTransactionProof);
+router.get('/verification-stats/:userId', transactionProofController.getUserVerificationStats);
 
 router.post(
   '/me/picture',

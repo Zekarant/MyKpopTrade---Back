@@ -7,7 +7,7 @@ import { generateAccessToken } from '../../commons/services/tokenService';
 import Block from '../../models/blockModel';
 import Conversation from '../../models/conversationModel';
 import Message from '../../models/messageModel';
-import Follow from '../../modules/follows/model';
+import Follow from '../../models/followModel';
 
 /** Blocage entre membres : gestion de la liste et refus de chaque interaction, dans les deux sens. */
 const app = createApp();
@@ -93,7 +93,7 @@ describe('HTTP — blocage', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.blockedUsers).toHaveLength(1);
-      expect(res.body.pagination).toMatchObject({ page: 1, limit: 1, totalItems: 2, totalPages: 2 });
+      expect(res.body.pagination).toEqual({ page: 1, limit: 1, total: 2, pages: 2 });
       const all = await request(app).get('/api/users/me/blocked').set('Authorization', auth(me));
       expect(all.body.blockedUsers.map((u: { username: string }) => u.username).sort())
         .toEqual([alice.username, bob.username].sort());

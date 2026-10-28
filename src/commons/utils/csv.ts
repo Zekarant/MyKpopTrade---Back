@@ -30,16 +30,29 @@ export const toCsv = <T>(rows: T[], columns: CsvColumn<T>[]): string => {
 
 export const wantsCsv = (format: unknown): boolean => format === 'csv';
 
+/** Fichier CSV prêt à télécharger : produit par les services, envoyé par les contrôleurs. */
+export interface CsvFile {
+  fileName: string;
+  content: string;
+}
+
+/** Construit le fichier daté `<baseName>-AAAA-MM-JJ.csv` (BOM UTF-8 pour Excel). */
+export const buildCsvFile = <T>(baseName: string, rows: T[], columns: CsvColumn<T>[]): CsvFile => {
+  const stamp = new Date().toISOString().slice(0, 10);
+  return { fileName: `${baseName}-${stamp}.csv`, content: UTF8_BOM + toCsv(rows, columns) };
+};
+
+export const sendCsvFile = (res: Response, file: CsvFile): Response =>
+  res
+    .status(200)
+    .setHeader('Content-Type', 'text/csv; charset=utf-8')
+    .setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`)
+    .send(file.content);
+
+/** @deprecated Préférer `buildCsvFile` (service) + `sendCsvFile` (contrôleur). */
 export const sendCsvDownload = <T>(
   res: Response,
   fileName: string,
   rows: T[],
   columns: CsvColumn<T>[]
-): Response => {
-  const stamp = new Date().toISOString().slice(0, 10);
-  return res
-    .status(200)
-    .setHeader('Content-Type', 'text/csv; charset=utf-8')
-    .setHeader('Content-Disposition', `attachment; filename="${fileName}-${stamp}.csv"`)
-    .send(UTF8_BOM + toCsv(rows, columns));
-};
+): Response => sendCsvFile(res, buildCsvFile(fileName, rows, columns));

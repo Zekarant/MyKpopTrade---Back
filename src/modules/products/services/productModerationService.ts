@@ -3,7 +3,7 @@ import Product, { IProduct } from '../../../models/productModel';
 import logger from '../../../commons/utils/logger';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { isAiChatConfigured, aiChatJson } from '../../../commons/services/aiChatClient';
-import { NotificationService } from '../../notifications/services/notificationService';
+import { createNotification } from '../../notifications/services/notificationService';
 import { dispatchSavedSearchAlerts } from '../../savedSearches/alertService';
 import { findSuspectKeywords } from './suspectKeywords';
 import { buildModerationPrompt } from './productModerationPrompt';
@@ -135,7 +135,7 @@ const runModeration = async (productId: string): Promise<void> => {
 };
 
 const notifySeller = (product: IProduct, result: ProductModerationResult): void => {
-  NotificationService.createNotification({
+  createNotification({
     recipientId: product.seller,
     type: 'product_flagged',
     title: 'Votre annonce a été mise en pause pour vérification',

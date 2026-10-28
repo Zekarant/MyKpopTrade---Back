@@ -1,8 +1,10 @@
 import mongoose from 'mongoose';
 import Dispute, { DisputeReason, DisputeStatus, IDispute } from '../../../models/disputeModel';
 import Payment from '../../../models/paymentModel';
+import User from '../../../models/userModel';
+import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 import { HttpError } from '../../../commons/utils/httpError';
-import { NotificationService } from '../../notifications/services/notificationService';
+import { createNotification } from '../../notifications/services/notificationService';
 import { processRefund } from '../../payments/services/paymentService';
 import logger from '../../../commons/utils/logger';
 import { recordAuditLog } from '../../../commons/utils/auditService';
@@ -141,7 +143,7 @@ export async function openDispute({
 
   // Notifie l'autre partie
   const other = openedByRole === 'buyer' ? payment.seller : payment.buyer;
-  await NotificationService.createNotification({
+  await createNotification({
     recipientId: other,
     type: 'dispute_opened',
     title: 'Un litige a été ouvert sur votre transaction',
@@ -174,6 +176,11 @@ export async function openDispute({
   return dispute;
 }
 
+async function isUserAdmin(userId: string): Promise<boolean> {
+  const user = await User.findById(userId).select('role').lean<{ role?: string } | null>();
+  return user?.role === 'admin';
+}
+
 async function loadDisputeForUser(disputeId: string, userId: string, isAdmin = false) {
   if (!mongoose.Types.ObjectId.isValid(disputeId)) {
     throw new HttpError(400, 'disputeId invalide');
@@ -194,17 +201,17 @@ async function loadDisputeForUser(disputeId: string, userId: string, isAdmin = f
 
 /** Ajoute un message à un litige actif. Tout participant ou admin peut écrire. */
 export async function addDisputeMessage({
-  userId, disputeId, content, attachments, isAdmin = false
+  userId, disputeId, content, attachments
 }: {
   userId: string;
   disputeId: string;
   content: unknown;
   attachments?: unknown;
-  isAdmin?: boolean;
 }) {
   const text = assertString(content, 'content', 2000);
   const files = assertEvidenceUrls(attachments);
 
+  const isAdmin = await isUserAdmin(userId);
   const dispute = await loadDisputeForUser(disputeId, userId, isAdmin);
   if (TERMINAL_STATUSES.includes(dispute.status)) {
     throw new HttpError(400, 'Le litige est clôturé', 'DISPUTE_CLOSED');
@@ -228,7 +235,7 @@ export async function addDisputeMessage({
   const recipients = role === 'admin'
     ? [dispute.buyer, dispute.seller]
     : [role === 'buyer' ? dispute.seller : dispute.buyer];
-  await Promise.all(recipients.map((r) => NotificationService.createNotification({
+  await Promise.all(recipients.map((r) => createNotification({
     recipientId: r,
     // Type litige (et non commande) : l'email suit les préférences « litiges ».
     type: 'dispute_message',
@@ -254,7 +261,7 @@ export async function cancelDispute(userId: string, disputeId: string) {
   dispute.closedAt = new Date();
   await dispute.save();
 
-  await NotificationService.createNotification({
+  await createNotification({
     recipientId: dispute.openedByRole === 'buyer' ? dispute.seller : dispute.buyer,
     type: 'dispute_resolved',
     title: 'Litige retiré',
@@ -285,7 +292,7 @@ export async function takeDisputeUnderReview(adminId: string, disputeId: string)
 
   // Notifier les deux parties que le litige est en cours d'arbitrage.
   await Promise.all([dispute.buyer, dispute.seller].map((r) =>
-    NotificationService.createNotification({
+    createNotification({
       recipientId: r,
       type: 'dispute_message',
       title: 'Votre litige est en cours d\'arbitrage',
@@ -389,7 +396,7 @@ export async function resolveDispute({
       : 'Litige rejeté';
 
   await Promise.all([dispute.buyer, dispute.seller].map((r) =>
-    NotificationService.createNotification({
+    createNotification({
       recipientId: r,
       type: 'dispute_resolved',
       title: verdictLabel,
@@ -415,60 +422,41 @@ export async function resolveDispute({
   return claimed;
 }
 
-export async function getDispute(userId: string, disputeId: string, isAdmin = false) {
-  return loadDisputeForUser(disputeId, userId, isAdmin);
+/** Détail d'un litige, visible par ses deux parties et par les admins. */
+export async function getDispute(userId: string, disputeId: string) {
+  return loadDisputeForUser(disputeId, userId, await isUserAdmin(userId));
 }
 
-export async function listMyDisputes(userId: string, page = 1, limit = 10) {
-  const safeLimit = Math.min(Math.max(limit, 1), 50);
-  const safePage = Math.max(page, 1);
+export async function listMyDisputes(userId: string, { page, limit, skip }: PageRequest) {
   const filter = { $or: [{ buyer: userId }, { seller: userId }] };
   const [disputes, total] = await Promise.all([
     Dispute.find(filter)
       .sort({ createdAt: -1 })
-      .skip((safePage - 1) * safeLimit)
-      .limit(safeLimit)
+      .skip(skip)
+      .limit(limit)
       .populate('payment', 'amount currency status product')
       .populate('buyer', 'username profilePicture')
-      .populate('seller', 'username profilePicture'),
+      .populate('seller', 'username profilePicture')
+      .lean(),
     Dispute.countDocuments(filter)
   ]);
-  return {
-    disputes,
-    pagination: {
-      page: safePage,
-      limit: safeLimit,
-      total,
-      pages: Math.ceil(total / safeLimit)
-    }
-  };
+  return { disputes, pagination: paginationMeta({ page, limit }, total) };
 }
 
-export async function listAllDisputes({
-  status, page = 1, limit = 20
-}: { status?: string; page?: number; limit?: number } = {}) {
-  const safeLimit = Math.min(Math.max(limit, 1), 100);
-  const safePage = Math.max(page, 1);
+export async function listAllDisputes(status: string | undefined, { page, limit, skip }: PageRequest) {
   const filter: mongoose.QueryFilter<IDispute> = {};
   // Valeur libre venue de la query : un statut inconnu ne renvoie aucun litige.
   if (status) filter.status = status as DisputeStatus;
   const [disputes, total] = await Promise.all([
     Dispute.find(filter)
       .sort({ createdAt: -1 })
-      .skip((safePage - 1) * safeLimit)
-      .limit(safeLimit)
+      .skip(skip)
+      .limit(limit)
       .populate('payment', 'amount currency status product')
       .populate('buyer', 'username email')
-      .populate('seller', 'username email'),
+      .populate('seller', 'username email')
+      .lean(),
     Dispute.countDocuments(filter)
   ]);
-  return {
-    disputes,
-    pagination: {
-      page: safePage,
-      limit: safeLimit,
-      total,
-      pages: Math.ceil(total / safeLimit)
-    }
-  };
+  return { disputes, pagination: paginationMeta({ page, limit }, total) };
 }

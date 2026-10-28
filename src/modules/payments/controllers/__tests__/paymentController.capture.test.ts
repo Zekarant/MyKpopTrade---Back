@@ -4,19 +4,13 @@ import { Request, Response } from 'express';
 import { capturePayPalPayment } from '../paymentController';
 import { captureDirectPayment } from '../../services/paymentService';
 import { HttpError } from '../../../../commons/utils/httpError';
+import { errorHandler } from '../../../../commons/middlewares/errorMiddleware';
 
 function fakeResponse() {
-  const res = { status: jest.fn(), json: jest.fn() };
+  const res = { status: jest.fn(), json: jest.fn(), get: jest.fn() };
   res.status.mockReturnValue(res);
   res.json.mockReturnValue(res);
   return res;
-}
-
-async function callCapture(res: ReturnType<typeof fakeResponse>) {
-  const req = { user: { id: 'buyer-1' }, body: { orderId: 'ORDER-1' } } as unknown as Request;
-  capturePayPalPayment(req, res as unknown as Response, jest.fn());
-  // asyncHandler ne renvoie pas la promesse : on laisse la micro-tâche se terminer.
-  await new Promise((resolve) => setImmediate(resolve));
 }
 
 describe('POST /payments/paypal/capture', () => {
@@ -24,9 +18,12 @@ describe('POST /payments/paypal/capture', () => {
     const notApproved = new HttpError(400, 'Le paiement n\'a pas encore été approuvé sur PayPal', 'ORDER_NOT_APPROVED');
     notApproved.details = { approvalUrl: 'https://paypal.test/approve' };
     jest.mocked(captureDirectPayment).mockRejectedValue(notApproved);
+    const req = { method: 'POST', path: '/paypal/capture', user: { id: 'buyer-1' }, body: { orderId: 'ORDER-1' } } as unknown as Request;
     const res = fakeResponse();
 
-    await callCapture(res);
+    // Express 5 transmet la promesse rejetée au gestionnaire d'erreurs central.
+    const error = await capturePayPalPayment(req, res as unknown as Response).catch((e: unknown) => e);
+    errorHandler(error, req, res as unknown as Response, jest.fn());
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith({

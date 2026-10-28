@@ -5,7 +5,7 @@ import KpopAlbum from '../../models/albumModel';
 import SavedSearch from './model';
 import { groupKeysForProduct, matchesCriteria, MatchableProduct, ProductCatalogIds } from './matcher';
 import type { SavedSearchCriteria } from './validation';
-import { NotificationService } from '../notifications/services/notificationService';
+import { createNotification } from '../notifications/services/notificationService';
 import { isBlockedBetween } from '../users/services/userBlockService';
 import logger from '../../commons/utils/logger';
 
@@ -157,7 +157,7 @@ async function notifyOwner(search: ClaimedSearch): Promise<boolean> {
 
   const [latest] = products;
   const othersCount = products.length - 1;
-  await NotificationService.createNotification({
+  await createNotification({
     recipientId: search.user,
     type: 'saved_search_match',
     title: othersCount === 0

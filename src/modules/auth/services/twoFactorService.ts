@@ -12,6 +12,8 @@ import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import env from '../../../config/env';
 import { consumeTwoFactorAttempt } from './twoFactorAttemptLimiter';
+import { JWT_VERIFY_OPTIONS } from '../../../commons/services/tokenService';
+import { accountSuspendedError, maskUserId } from './authCommon';
 
 /**
  * Double authentification par TOTP (RFC 6238).
@@ -331,4 +333,60 @@ export function issueTwoFactorChallengeToken(userId: string): string {
     env.JWT_SECRET,
     { expiresIn: TWO_FACTOR_TOKEN_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
   );
+}
+
+/**
+ * Utilisateur désigné par un jeton de défi 2FA.
+ * @throws HttpError 401 TWO_FACTOR_CHALLENGE_EXPIRED / TWO_FACTOR_CHALLENGE_INVALID
+ */
+function readTwoFactorChallenge(twoFactorToken: string): string {
+  let decoded: { userId?: string; purpose?: string };
+  try {
+    decoded = jwt.verify(twoFactorToken, env.JWT_SECRET, JWT_VERIFY_OPTIONS) as typeof decoded;
+  } catch (error) {
+    if ((error as Error).name === 'TokenExpiredError') {
+      throw new HttpError(401, 'La vérification a expiré. Reconnectez-vous.', 'TWO_FACTOR_CHALLENGE_EXPIRED');
+    }
+    throw new HttpError(401, 'Jeton de vérification invalide.', 'TWO_FACTOR_CHALLENGE_INVALID');
+  }
+
+  // Un jeton d'accès normal ne doit pas pouvoir servir ici : on exige le
+  // `purpose` du défi 2FA.
+  if (decoded.purpose !== TWO_FACTOR_TOKEN_PURPOSE || !decoded.userId) {
+    throw new HttpError(401, 'Jeton de vérification invalide.', 'TWO_FACTOR_CHALLENGE_INVALID');
+  }
+  return decoded.userId;
+}
+
+/**
+ * Deuxième étape de la connexion : valide le défi et le code, puis rend
+ * l'utilisateur dont la session peut être ouverte.
+ *
+ * @throws HttpError 401 défi ou code invalide, 403 compte suspendu
+ */
+export async function completeTwoFactorLogin(twoFactorToken: string, code: string): Promise<{
+  user: IUser;
+  usedRecoveryCode: boolean;
+  remainingRecoveryCodes: number;
+}> {
+  const userId = readTwoFactorChallenge(twoFactorToken);
+  const { usedRecoveryCode, remainingRecoveryCodes } = await verifyTwoFactorCode(userId, code);
+
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new HttpError(401, 'Utilisateur introuvable.', 'USER_NOT_FOUND');
+  }
+  if (user.accountStatus === 'suspended') {
+    throw accountSuspendedError();
+  }
+
+  user.lastLogin = new Date();
+  await user.save();
+
+  logger.info('Connexion réussie après double authentification', {
+    userId: maskUserId(userId),
+    usedRecoveryCode
+  });
+
+  return { user, usedRecoveryCode, remainingRecoveryCodes };
 }

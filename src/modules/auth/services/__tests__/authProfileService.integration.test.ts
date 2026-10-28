@@ -16,7 +16,6 @@ import { createTestUser } from '../../../../tests/helpers/fixtures';
 import {
   getPublicProfileData,
   updateProfileData,
-  softDeleteAccount,
   setPayPalEmail,
   clearPayPalEmail
 } from '../authProfileService';
@@ -207,36 +206,6 @@ describe('authProfileService (integration)', () => {
       });
       expect(result.message).toContain('email');
       expect(result.message).toContain('téléphone');
-    });
-  });
-
-  describe('softDeleteAccount', () => {
-    it('marque le compte deleted et efface email et pseudo d\'origine (RGPD art. 17)', async () => {
-      const user = await createTestUser();
-      const originalEmail = user.email;
-      const originalUsername = user.username;
-
-      await softDeleteAccount(user._id.toString(), 'Password1!');
-
-      const refreshed = await User.findById(user._id);
-      expect(refreshed?.accountStatus).toBe('deleted');
-      expect(refreshed?.email).toContain('deleted_');
-      expect(refreshed?.email).not.toContain(originalEmail);
-      expect(refreshed?.username).not.toContain(originalUsername);
-    });
-
-    it('401 si mot de passe incorrect', async () => {
-      const user = await createTestUser();
-      await expect(
-        softDeleteAccount(user._id.toString(), 'wrong_password')
-      ).rejects.toMatchObject({ statusCode: 401 });
-    });
-
-    it('400 si mot de passe manquant (user non-social)', async () => {
-      const user = await createTestUser();
-      await expect(
-        softDeleteAccount(user._id.toString(), undefined)
-      ).rejects.toMatchObject({ statusCode: 400 });
     });
   });
 

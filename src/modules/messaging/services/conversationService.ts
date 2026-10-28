@@ -3,18 +3,25 @@ import Conversation, { IConversation, IOfferHistory } from '../../../models/conv
 import Message from '../../../models/messageModel';
 import User from '../../../models/userModel';
 import Product from '../../../models/productModel';
-import { MessagingUtilsService } from './messagingUtilsService';
+import {
+  verifyConversationAccess,
+  markConversationAsRead,
+  formatConversationMedia,
+  formatCategory,
+  generateMessagePreview
+} from './messagingUtilsService';
 import {
   LeanConversation,
   isArchivedByUser,
   isFavoritedByUser,
   formatOfferHistory
 } from '../types/conversationTypes';
-import { HttpError } from '../../../commons/utils/httpError';
+import { badRequest, notFound } from '../../../commons/utils/httpError';
+import { paginationMeta } from '../../../commons/utils/pagination';
 import { assertNotBlocked, getBlockStatus } from '../../users/services/userBlockService';
 import { realtimePublisher } from '../../realtime/services/realtimePublisher';
 
-export { HttpError };
+const conversationNotFound = () => notFound('Conversation non trouvée', 'CONVERSATION_NOT_FOUND');
 
 const OFFER_STATUS = {
   PENDING: 'pending',
@@ -27,7 +34,7 @@ const CONVERSATION_TYPE = {
 
 /**
  * Filtres Mongo par type de média, alignés sur la classification par
- * extension de MessagingUtilsService.formatConversationMedia.
+ * extension de formatConversationMedia (messagingUtilsService).
  */
 const IMAGE_ATTACHMENT = /\.(jpe?g|png|gif|webp)$/i;
 const PDF_ATTACHMENT = /\.pdf$/i;
@@ -95,7 +102,7 @@ async function addUserToConversationField(
     { returnDocument: 'after' }
   );
   if (!conversation) {
-    throw new HttpError(404, 'Conversation non trouvée');
+    throw conversationNotFound();
   }
   return conversation;
 }
@@ -111,7 +118,7 @@ async function removeUserFromConversationField(
     { returnDocument: 'after' }
   );
   if (!conversation) {
-    throw new HttpError(404, 'Conversation non trouvée');
+    throw conversationNotFound();
   }
   return conversation;
 }
@@ -122,7 +129,7 @@ export async function fetchConversation(
   page: number,
   limit: number
 ) {
-  await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+  await verifyConversationAccess(conversationId, userId);
 
   const conversationRaw = await Conversation.findById(conversationId)
     .populate('participants', DETAIL_PARTICIPANT_FIELDS)
@@ -134,7 +141,7 @@ export async function fetchConversation(
     .lean();
 
   if (!conversationRaw) {
-    throw new HttpError(404, 'Conversation non trouvée');
+    throw conversationNotFound();
   }
 
   const conversation = conversationRaw as LeanConversation & {
@@ -165,7 +172,7 @@ export async function fetchConversation(
     conversation.isOwner = conversation.productId.seller.toString() === userId;
 
     if (conversation.productId.category) {
-      conversation.productId.categoryLabel = MessagingUtilsService.formatCategory(conversation.productId.category);
+      conversation.productId.categoryLabel = formatCategory(conversation.productId.category);
     }
   }
 
@@ -197,7 +204,7 @@ export async function fetchConversation(
     .populate('sender', 'username profilePicture')
     .lean();
 
-  const markedCount = await MessagingUtilsService.markConversationAsRead(conversationId, userId);
+  const markedCount = await markConversationAsRead(conversationId, userId);
 
   const mediaQuery = {
     conversation: new mongoose.Types.ObjectId(conversationId),
@@ -211,7 +218,7 @@ export async function fetchConversation(
     .sort({ createdAt: -1 })
     .lean();
 
-  const media = MessagingUtilsService.formatConversationMedia(mediaMessages);
+  const media = formatConversationMedia(mediaMessages);
 
   return {
     conversation,
@@ -223,12 +230,7 @@ export async function fetchConversation(
       currentStatus: conversation.negotiation?.status,
       latestOffer: resolveLatestOffer(conversation.offerHistory)
     } : null,
-    pagination: {
-      total: totalMessages,
-      page,
-      limit,
-      pages: Math.ceil(totalMessages / limit)
-    }
+    pagination: paginationMeta({ page, limit }, totalMessages)
   };
 }
 
@@ -329,7 +331,7 @@ export async function listUserConversations(
 
     let messagePreview = '';
     if (lastMessage && !Array.isArray(lastMessage)) {
-      messagePreview = MessagingUtilsService.generateMessagePreview(lastMessage);
+      messagePreview = generateMessagePreview(lastMessage);
     }
 
     const hasActiveOffer = conversation.type === CONVERSATION_TYPE.NEGOTIATION &&
@@ -356,12 +358,7 @@ export async function listUserConversations(
 
   return {
     conversations: conversationsWithMetadata,
-    pagination: {
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit)
-    }
+    pagination: paginationMeta({ page, limit }, total)
   };
 }
 
@@ -379,24 +376,24 @@ export async function createConversationForUser({
   type: IConversation['type'];
 }) {
   if (!recipientId) {
-    throw new HttpError(400, 'Destinataire requis');
+    throw badRequest('Destinataire requis', 'RECIPIENT_REQUIRED');
   }
 
   if (recipientId === userId) {
-    throw new HttpError(400, 'Vous ne pouvez pas créer une conversation avec vous-même');
+    throw badRequest('Vous ne pouvez pas créer une conversation avec vous-même', 'SELF_CONVERSATION');
   }
 
-  const recipient = await User.findById(recipientId);
+  const recipient = await User.exists({ _id: recipientId });
   if (!recipient) {
-    throw new HttpError(404, 'Destinataire non trouvé');
+    throw notFound('Destinataire non trouvé', 'RECIPIENT_NOT_FOUND');
   }
 
   await assertNotBlocked(userId, recipientId);
 
   if (productId) {
-    const product = await Product.findById(productId);
+    const product = await Product.exists({ _id: productId });
     if (!product) {
-      throw new HttpError(404, 'Produit non trouvé');
+      throw notFound('Produit non trouvé', 'PRODUCT_NOT_FOUND');
     }
   }
 
@@ -460,12 +457,12 @@ export async function fetchConversationMedia({
   limit: number;
   type?: string;
 }) {
-  await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+  await verifyConversationAccess(conversationId, userId);
 
   const typeFilter = type && type !== 'all' ? MEDIA_TYPE_FILTERS.get(type) : {};
   // Type inconnu : aucun média ne peut correspondre (comportement historique).
   if (!typeFilter) {
-    return { media: [], pagination: { total: 0, page, limit, pages: 0 } };
+    return { media: [], pagination: paginationMeta({ page, limit }, 0) };
   }
 
   // La pagination porte sur les pièces jointes, pas sur les messages : un
@@ -500,24 +497,19 @@ export async function fetchConversationMedia({
 
   await Message.populate(result.items, { path: 'sender', select: 'username profilePicture' });
 
-  const media = MessagingUtilsService.formatConversationMedia(
+  const media = formatConversationMedia(
     result.items.map(({ attachment, ...item }) => ({ ...item, attachments: [attachment] }))
   );
   const total = result.total[0]?.count ?? 0;
 
   return {
     media,
-    pagination: {
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit)
-    }
+    pagination: paginationMeta({ page, limit }, total)
   };
 }
 
 export async function softDeleteConversation(userId: string, conversationId: string) {
-  await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+  await verifyConversationAccess(conversationId, userId);
 
   const conversation = await addUserToConversationField(conversationId, userId, 'deletedBy');
 
@@ -530,22 +522,18 @@ export async function softDeleteConversation(userId: string, conversationId: str
 }
 
 export async function archiveConversationForUser(userId: string, conversationId: string) {
-  await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+  await verifyConversationAccess(conversationId, userId);
   await addUserToConversationField(conversationId, userId, 'archivedBy');
 }
 
 export async function unarchiveConversationForUser(userId: string, conversationId: string) {
-  await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
+  await verifyConversationAccess(conversationId, userId);
   await removeUserFromConversationField(conversationId, userId, 'archivedBy');
 }
 
 export async function toggleFavoriteConversationForUser(userId: string, conversationId: string) {
-  await MessagingUtilsService.verifyConversationAccess(conversationId, userId);
-
-  const conversation = await Conversation.findById(conversationId);
-  if (!conversation) {
-    throw new HttpError(404, 'Conversation non trouvée');
-  }
+  // verifyConversationAccess rend déjà la conversation : pas de seconde lecture.
+  const conversation = await verifyConversationAccess(conversationId, userId);
 
   const wasFavorited = conversation.favoritedBy.some(
     (id: mongoose.Types.ObjectId) => id.toString() === userId

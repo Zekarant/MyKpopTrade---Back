@@ -1,6 +1,4 @@
 import { Request, Response } from 'express';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import { mapHttpError } from '../../../commons/utils/httpErrorMapper';
 import {
   submitIdentityVerification,
   fetchVerificationStatus,
@@ -10,147 +8,99 @@ import {
   cancelUserVerification,
   getVerificationDocumentForAdmin
 } from '../services/identityVerificationService';
-import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
-import { queryInt } from '../../../commons/utils/query';
+import { parsePagination } from '../../../commons/utils/pagination';
+
+const PENDING_VERIFICATIONS_DEFAULT_LIMIT = 20;
 
 /**
  * Soumettre une demande de vérification d'identité
  */
-export const submitVerification = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
+export const submitVerification = async (req: Request, res: Response) => {
   const { documentType, consentGiven } = req.body;
 
-  try {
-    const verification = await submitIdentityVerification({
-      userId,
-      documentType,
-      consentGiven,
-      fileBuffer: req.file?.buffer,
-      mimetype: req.file?.mimetype
-    });
+  const verification = await submitIdentityVerification({
+    userId: req.user!.id,
+    documentType,
+    consentGiven,
+    fileBuffer: req.file?.buffer,
+    mimetype: req.file?.mimetype
+  });
 
-    return res.status(201).json({
-      message: 'Votre demande de vérification d\'identité a été soumise et sera traitée dans les plus brefs délais',
-      verification
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
+  res.status(201).json({
+    message: 'Votre demande de vérification d\'identité a été soumise et sera traitée dans les plus brefs délais',
+    verification
+  });
+};
 
 /**
  * Vérifier le statut d'une demande de vérification
  */
-export const checkVerificationStatus = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-
-  try {
-    const result = await fetchVerificationStatus(userId);
-    return res.status(200).json(result);
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
+export const checkVerificationStatus = async (req: Request, res: Response) => {
+  const result = await fetchVerificationStatus(req.user!.id);
+  res.status(200).json(result);
+};
 
 /**
  * Approuver une demande de vérification (accès administrateur)
  */
-export const approveVerification = asyncHandler(async (req: Request, res: Response) => {
-  const verificationId = String(req.params.id || req.params.verificationId || '');
-  const adminId = req.user!.id;
+export const approveVerification = async (req: Request, res: Response) => {
+  await approveIdentityVerification({
+    verificationId: String(req.params.id || ''),
+    adminId: req.user!.id
+  });
 
-  try {
-    await approveIdentityVerification({ verificationId, adminId });
-    return res.status(200).json({
-      message: 'Demande de vérification approuvée avec succès'
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
+  res.status(200).json({
+    message: 'Demande de vérification approuvée avec succès'
+  });
+};
 
 /**
  * Rejeter une demande de vérification (accès administrateur)
  */
-export const rejectVerification = asyncHandler(async (req: Request, res: Response) => {
-  const verificationId = String(req.params.id || req.params.verificationId || '');
-  const adminId = req.user!.id;
-  const { reason } = req.body;
+export const rejectVerification = async (req: Request, res: Response) => {
+  await rejectIdentityVerification({
+    verificationId: String(req.params.id || ''),
+    adminId: req.user!.id,
+    reason: req.body.reason
+  });
 
-  try {
-    await rejectIdentityVerification({ verificationId, adminId, reason });
-    return res.status(200).json({
-      message: 'Demande de vérification rejetée'
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
+  res.status(200).json({
+    message: 'Demande de vérification rejetée'
+  });
+};
 
 /**
  * Liste des demandes de vérification en attente (accès administrateur)
  */
-export const getPendingVerifications = asyncHandler(async (req: Request, res: Response) => {
-  const adminId = req.user!.id;
-  const page = queryInt(req.query.page) || 1;
-  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
-
-  try {
-    const result = await listPendingVerifications(adminId, page, limit);
-    return res.status(200).json(result);
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
+export const getPendingVerifications = async (req: Request, res: Response) => {
+  const { page, limit } = parsePagination(req.query, { defaultLimit: PENDING_VERIFICATIONS_DEFAULT_LIMIT });
+  const result = await listPendingVerifications(req.user!.id, page, limit);
+  res.status(200).json(result);
+};
 
 /**
  * Affiche le document d'une demande en attente (accès administrateur).
  * no-store : une pièce d'identité ne doit rester dans aucun cache.
  */
-export const getVerificationDocument = asyncHandler(async (req: Request, res: Response) => {
-  const verificationId = String(req.params.id || '');
-  const adminId = req.user!.id;
+export const getVerificationDocument = async (req: Request, res: Response) => {
+  const { buffer, contentType } = await getVerificationDocumentForAdmin(String(req.params.id || ''), req.user!.id);
 
-  try {
-    const { buffer, contentType } = await getVerificationDocumentForAdmin(verificationId, adminId);
-    res.set({
-      'Content-Type': contentType,
-      'Content-Disposition': 'inline',
-      'Cache-Control': 'no-store, private',
-      'X-Content-Type-Options': 'nosniff'
-    });
-    return res.status(200).send(buffer);
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
+  res.set({
+    'Content-Type': contentType,
+    'Content-Disposition': 'inline',
+    'Cache-Control': 'no-store, private',
+    'X-Content-Type-Options': 'nosniff'
+  });
+  res.status(200).send(buffer);
+};
 
 /**
  * Annuler une demande de vérification
  */
-export const cancelVerification = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
+export const cancelVerification = async (req: Request, res: Response) => {
+  await cancelUserVerification(req.user!.id);
 
-  try {
-    await cancelUserVerification(userId);
-    return res.status(200).json({
-      message: 'Votre demande de vérification a été annulée avec succès'
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
+  res.status(200).json({
+    message: 'Votre demande de vérification a été annulée avec succès'
+  });
+};

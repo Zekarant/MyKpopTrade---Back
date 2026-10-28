@@ -1,14 +1,14 @@
 import mongoose from 'mongoose';
 import path from 'path';
-import fs from 'fs';
+import { rm } from 'fs/promises';
 import Product, { IProduct } from '../../../models/productModel';
 import User from '../../../models/userModel';
 import Payment, { IPayment } from '../../../models/paymentModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import KpopAlbum from '../../../models/albumModel';
 import { HttpError } from '../../../commons/utils/httpError';
-import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
-import { queryInt, queryString } from '../../../commons/utils/query';
+import { MAX_PAGE_SIZE, paginationMeta, parsePagination } from '../../../commons/utils/pagination';
+import { queryString } from '../../../commons/utils/query';
 import { validateProductData, validateProductUpdate } from './productValidationService';
 import { notifyWishlistPriceDrop, notifyWishlistUnavailable } from './wishlistAlertService';
 import { dispatchProductModeration, awaitsModerationVerdict } from './productModerationService';
@@ -17,7 +17,6 @@ import { assertCatalogConsistency, buildCatalogClauses, parseCatalogCriteria } f
 
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = MAX_PAGE_SIZE;
-const DEFAULT_LIST_PAGE = 1;
 const DEFAULT_LIST_SORT = '-createdAt';
 
 /**
@@ -96,13 +95,10 @@ async function loadKpopEntities(
   return byKey;
 }
 
-function cleanupUploadedFiles(files?: Express.Multer.File[]) {
-  if (!files || !Array.isArray(files)) return;
-  for (const file of files) {
-    if (fs.existsSync(file.path)) {
-      fs.unlinkSync(file.path);
-    }
-  }
+/** Efface du disque les images reçues pour une annonce qui ne sera pas créée. */
+async function cleanupUploadedFiles(files?: Express.Multer.File[]): Promise<void> {
+  if (!files?.length) return;
+  await Promise.all(files.map((file) => rm(file.path, { force: true })));
 }
 
 async function withKpopNames(products: IProduct[]): Promise<EnrichedProduct[]> {
@@ -161,33 +157,20 @@ async function revertManualSaleStatistics(sellerId: string, buyerId?: mongoose.T
 
 /**
  * Chemins publics des images reçues par multer. `req.body.images` est ignoré :
- * un chemin fourni par le client finirait dans fs.unlinkSync à la suppression.
+ * un chemin fourni par le client finirait effacé du disque à la suppression.
  */
-export function resolveProductImages(req: Pick<Express.Request, 'files'>): string[] {
-  if (!req.files || !Array.isArray(req.files)) return [];
-  return (req.files as Express.Multer.File[]).map(file =>
-    `/uploads/products/${path.basename(file.path)}`
-  );
+function toProductImageUrls(files: Express.Multer.File[]): string[] {
+  return files.map((file) => `/uploads/products/${path.basename(file.path)}`);
 }
 
-export async function createProductForSeller({
-  sellerId,
-  productData,
-  imageUrls,
-  uploadedFiles
-}: {
-  sellerId: string;
-  productData: Record<string, unknown>;
-  imageUrls: string[];
-  uploadedFiles?: Express.Multer.File[];
-}) {
+/** Vérifie le vendeur et les données, puis enregistre l'annonce (sans effets de bord). */
+async function saveNewProduct(sellerId: string, productData: Record<string, unknown>, imageUrls: string[]) {
   // Vérifier que le vendeur peut encaisser. PayPal est désormais le seul canal :
   // Stripe a été retiré de la plateforme.
   const seller = await User.findById(sellerId).select(
     'paypalConnected paypalMerchantId paypalOnboarding'
-  );
+  ).lean();
   if (!seller) {
-    cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(404, 'Utilisateur non trouvé');
   }
 
@@ -199,7 +182,6 @@ export async function createProductForSeller({
   );
 
   if (!canReceiveViaPayPal) {
-    cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(
       403,
       'Vous devez connecter votre compte PayPal avant de pouvoir vendre. Rendez-vous dans Paramètres > Paiements.',
@@ -208,32 +190,25 @@ export async function createProductForSeller({
   }
 
   if (imageUrls.length === 0) {
-    cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(400, 'Au moins une image est requise pour créer un produit');
   }
 
-  productData.images = imageUrls;
+  const data: Record<string, unknown> = { ...productData, images: imageUrls };
 
-  if (typeof productData.shippingOptions === 'string') {
+  if (typeof data.shippingOptions === 'string') {
     try {
-      productData.shippingOptions = JSON.parse(productData.shippingOptions);
+      data.shippingOptions = JSON.parse(data.shippingOptions);
     } catch {
       throw new HttpError(400, 'shippingOptions est mal formé');
     }
   }
 
-  const { error, value } = validateProductData(productData);
+  const { error, value } = validateProductData(data);
   if (error !== undefined) {
-    cleanupUploadedFiles(uploadedFiles);
     throw new HttpError(400, error);
   }
 
-  try {
-    await assertCatalogConsistency(value);
-  } catch (catalogError) {
-    cleanupUploadedFiles(uploadedFiles);
-    throw catalogError;
-  }
+  await assertCatalogConsistency(value);
 
   const product = new Product({
     ...value,
@@ -244,6 +219,29 @@ export async function createProductForSeller({
   });
 
   await product.save();
+  return product;
+}
+
+/**
+ * Crée une annonce avec les images reçues par multer. Si l'annonce n'est pas
+ * créée (refus ou erreur), ces images sont effacées du disque.
+ */
+export async function createProductForSeller({
+  sellerId,
+  productData,
+  uploadedFiles = []
+}: {
+  sellerId: string;
+  productData: Record<string, unknown>;
+  uploadedFiles?: Express.Multer.File[];
+}) {
+  let product;
+  try {
+    product = await saveNewProduct(sellerId, productData, toProductImageUrls(uploadedFiles));
+  } catch (error) {
+    await cleanupUploadedFiles(uploadedFiles);
+    throw error;
+  }
 
   await User.findByIdAndUpdate(sellerId, {
     $inc: { 'statistics.totalListings': 1 }
@@ -309,8 +307,7 @@ export async function fetchProductById(productId: string, userId?: string) {
 }
 
 export async function listProducts(query: Record<string, unknown>) {
-  const page = queryInt(query.page) || DEFAULT_LIST_PAGE;
-  const limit = clampLimit(query.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
+  const pageRequest = parsePagination(query, { defaultLimit: DEFAULT_LIST_LIMIT, maxLimit: MAX_LIST_LIMIT });
   const sort = queryString(query.sort) || DEFAULT_LIST_SORT;
   if (!ALLOWED_LIST_SORTS.has(sort)) {
     throw new HttpError(400, `Tri non supporté. Valeurs acceptées : ${[...ALLOWED_LIST_SORTS].join(', ')}`);
@@ -353,19 +350,14 @@ export async function listProducts(query: Record<string, unknown>) {
     Product.find(filter)
       .populate('seller', 'username profilePicture isIdentityVerified')
       .sort(sort)
-      .skip((page - 1) * limit)
-      .limit(limit),
+      .skip(pageRequest.skip)
+      .limit(pageRequest.limit),
     Product.countDocuments(filter)
   ]);
 
   return {
     products: await withKpopNames(products),
-    pagination: {
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit)
-    }
+    pagination: paginationMeta(pageRequest, total)
   };
 }
 
@@ -500,8 +492,9 @@ export async function markAsSold({
   const product = await findProductOr404(productId);
   assertOwnership(product, userId, 'Vous n\'êtes pas autorisé à modifier ce produit');
 
-  // Le front transmet l'identifiant du vendeur lui-même quand il ne connaît pas
-  // l'acheteur : la vente est alors enregistrée sans acheteur.
+  // Le front n'envoie plus d'acheteur pour une vente hors plateforme, mais
+  // d'anciens clients transmettent encore l'identifiant du vendeur lui-même :
+  // dans les deux cas, la vente est enregistrée sans acheteur.
   const declaredBuyerId = buyerId && buyerId !== userId ? buyerId : undefined;
   // Le corps JSON n'est pas typé : un tableau ou un objet ne passe pas.
   if (declaredBuyerId && (typeof declaredBuyerId !== 'string' || !mongoose.Types.ObjectId.isValid(declaredBuyerId))) {

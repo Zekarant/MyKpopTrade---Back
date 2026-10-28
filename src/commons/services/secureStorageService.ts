@@ -1,11 +1,12 @@
 import crypto from 'crypto';
-import fs from 'fs';
+import fs from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
 import logger from '../utils/logger';
+import env from '../../config/env';
 
 // Clé de chiffrement à stocker en sécurité dans les variables d'environnement
-const rawKey = process.env.ENCRYPTION_KEY || '';
+const rawKey = env.ENCRYPTION_KEY || '';
 // Créer une clé de longueur fixe (32 octets) pour AES-256
 const ENCRYPTION_KEY = crypto
   .createHash('sha256')
@@ -15,8 +16,8 @@ const ENCRYPTION_KEY = crypto
 const IV_LENGTH = 16;
 
 // Constantes
-const SECURE_STORAGE_PATH = process.env.SECURE_STORAGE_PATH || path.join(process.cwd(), 'secure_storage');
-const DOCUMENT_RETENTION_DAYS = parseInt(process.env.DOCUMENT_RETENTION_DAYS || '30');
+const SECURE_STORAGE_PATH = env.SECURE_STORAGE_PATH;
+const DOCUMENT_RETENTION_DAYS = env.DOCUMENT_RETENTION_DAYS;
 
 export interface SecureDocumentMetadata {
   id: string;
@@ -31,17 +32,25 @@ export interface SecureDocumentMetadata {
 /**
  * Vérifie et crée si nécessaire le répertoire de stockage sécurisé
  */
-const ensureStorageDirectory = (): void => {
-  if (!fs.existsSync(SECURE_STORAGE_PATH)) {
-    // Créer avec des permissions restreintes
-    fs.mkdirSync(SECURE_STORAGE_PATH, { recursive: true, mode: 0o700 });
-    
-    // mkdirSync applique l'umask au mode : on le force.
-    if (process.platform !== 'win32') {
-      fs.chmodSync(SECURE_STORAGE_PATH, 0o700);
-    }
+const ensureStorageDirectory = async (): Promise<void> => {
+  // Créer avec des permissions restreintes. `mkdir` renvoie le premier
+  // répertoire créé, undefined s'il existait déjà.
+  const created = await fs.mkdir(SECURE_STORAGE_PATH, { recursive: true, mode: 0o700 });
+
+  // mkdir applique l'umask au mode : on le force.
+  if (created && process.platform !== 'win32') {
+    await fs.chmod(SECURE_STORAGE_PATH, 0o700);
   }
 };
+
+/** Chemins du fichier chiffré et de ses métadonnées. */
+const documentPaths = (fileId: string) => ({
+  encryptedFilePath: path.join(SECURE_STORAGE_PATH, `${fileId}.enc`),
+  metadataPath: path.join(SECURE_STORAGE_PATH, `${fileId}.meta`)
+});
+
+const isMissingFileError = (error: unknown): boolean =>
+  (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 
 /**
  * Version simplifiée de floutage des zones sensibles basée uniquement sur des positions prédéfinies
@@ -169,8 +178,8 @@ export const secureStoreDocument = async (
     throw new Error('Clé de chiffrement non configurée');
   }
 
-  ensureStorageDirectory();
-  
+  await ensureStorageDirectory();
+
   // Appliquer le floutage si c'est une image
   let processedBuffer = fileBuffer;
   if (fileType.startsWith('image/')) {
@@ -204,11 +213,10 @@ export const secureStoreDocument = async (
   };
   
   // Écrire le fichier chiffré et les métadonnées
-  const encryptedFilePath = path.join(SECURE_STORAGE_PATH, `${fileId}.enc`);
-  const metadataPath = path.join(SECURE_STORAGE_PATH, `${fileId}.meta`);
+  const { encryptedFilePath, metadataPath } = documentPaths(fileId);
 
-  fs.writeFileSync(encryptedFilePath, encrypted, { mode: 0o600 });
-  fs.writeFileSync(metadataPath, JSON.stringify(metadata), { mode: 0o600 });
+  await fs.writeFile(encryptedFilePath, encrypted, { mode: 0o600 });
+  await fs.writeFile(metadataPath, JSON.stringify(metadata), { mode: 0o600 });
   
   logger.info('Document stocké de façon sécurisée avec zones sensibles floutées', {
     documentType,
@@ -223,20 +231,28 @@ export const secureStoreDocument = async (
  * @param fileId Identifiant du document
  * @returns Le document déchiffré et ses métadonnées
  */
-export const retrieveSecureDocument = (fileId: string): { buffer: Buffer, metadata: SecureDocumentMetadata } => {
+export const retrieveSecureDocument = async (
+  fileId: string
+): Promise<{ buffer: Buffer, metadata: SecureDocumentMetadata }> => {
   if (!rawKey) {
     throw new Error('Clé de chiffrement non configurée');
   }
-  
-  const encryptedFilePath = path.join(SECURE_STORAGE_PATH, `${fileId}.enc`);
-  const metadataPath = path.join(SECURE_STORAGE_PATH, `${fileId}.meta`);
-  
-  if (!fs.existsSync(encryptedFilePath) || !fs.existsSync(metadataPath)) {
-    throw new Error('Document non trouvé');
+
+  const { encryptedFilePath, metadataPath } = documentPaths(fileId);
+
+  let metadataRaw: string;
+  let encrypted: Buffer;
+  try {
+    [metadataRaw, encrypted] = await Promise.all([
+      fs.readFile(metadataPath, 'utf8'),
+      fs.readFile(encryptedFilePath)
+    ]);
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      throw new Error('Document non trouvé', { cause: error });
+    }
+    throw error;
   }
-  
-  // Lire les métadonnées
-  const metadataRaw = fs.readFileSync(metadataPath, 'utf8');
   const metadata: SecureDocumentMetadata = JSON.parse(metadataRaw);
 
   // Vérifier si le document a expiré
@@ -244,10 +260,7 @@ export const retrieveSecureDocument = (fileId: string): { buffer: Buffer, metada
   if (expiryDate < new Date()) {
     throw new Error('Document expiré');
   }
-  
-  // Lire le fichier chiffré
-  const encrypted = fs.readFileSync(encryptedFilePath);
-  
+
   // Déchiffrer le fichier
   const iv = Buffer.from(metadata.iv, 'hex');
   const decipher = crypto.createDecipheriv(
@@ -266,43 +279,38 @@ export const retrieveSecureDocument = (fileId: string): { buffer: Buffer, metada
  * Supprime définitivement un document stocké de manière sécurisée
  * @param fileId Identifiant du document
  */
-export const deleteSecureDocument = (fileId: string): void => {
-  const encryptedFilePath = path.join(SECURE_STORAGE_PATH, `${fileId}.enc`);
-  const metadataPath = path.join(SECURE_STORAGE_PATH, `${fileId}.meta`);
-  
-  // Supprimer les fichiers s'ils existent
-  if (fs.existsSync(encryptedFilePath)) {
-    fs.unlinkSync(encryptedFilePath);
-  }
-  
-  if (fs.existsSync(metadataPath)) {
-    fs.unlinkSync(metadataPath);
-  }
+export const deleteSecureDocument = async (fileId: string): Promise<void> => {
+  const { encryptedFilePath, metadataPath } = documentPaths(fileId);
+
+  // `force` : un fichier déjà absent n'est pas une erreur.
+  await Promise.all([
+    fs.rm(encryptedFilePath, { force: true }),
+    fs.rm(metadataPath, { force: true })
+  ]);
 };
 
 /**
  * Tâche de nettoyage des documents expirés
  * À exécuter régulièrement via un cron job
  */
-export const cleanExpiredDocuments = (): void => {
-  ensureStorageDirectory();
-  
+export const cleanExpiredDocuments = async (): Promise<void> => {
+  await ensureStorageDirectory();
+
   // Lister tous les fichiers de métadonnées
-  const files = fs.readdirSync(SECURE_STORAGE_PATH)
+  const files = (await fs.readdir(SECURE_STORAGE_PATH))
     .filter(file => file.endsWith('.meta'));
-  
+
   const now = new Date();
-  
-  files.forEach(file => {
-    const metadataPath = path.join(SECURE_STORAGE_PATH, file);
-    const metadataRaw = fs.readFileSync(metadataPath, 'utf8');
+
+  for (const file of files) {
+    const metadataRaw = await fs.readFile(path.join(SECURE_STORAGE_PATH, file), 'utf8');
     const metadata: SecureDocumentMetadata = JSON.parse(metadataRaw);
 
     // Vérifier si le document a expiré
     const expiryDate = new Date(metadata.expiresAt);
     if (expiryDate < now) {
       // Supprimer le document expiré
-      deleteSecureDocument(metadata.id);
+      await deleteSecureDocument(metadata.id);
     }
-  });
+  }
 };

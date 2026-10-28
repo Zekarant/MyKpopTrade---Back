@@ -1,24 +1,18 @@
 import { Request, Response } from 'express';
-import User from '../../../models/userModel';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import { escapeRegex } from '../../../commons/utils/escapeRegex';
+import { badRequest } from '../../../commons/utils/httpError';
+import { queryString } from '../../../commons/utils/query';
+import { searchPublicUsers } from '../services/userSearchService';
 
-const USER_SEARCH_MAX_RESULTS = 20;
+const USER_SEARCH_MIN_LENGTH = 2;
 
 /**
  * Recherche d'utilisateurs par nom partiel (insensible à la casse)
- * @route GET /users/search?query=xxx
+ * @route GET /api/users/search?query=xxx
  */
-export const searchUsers = asyncHandler(async (req: Request, res: Response) => {
-    const { query } = req.query;
-    if (!query || typeof query !== 'string' || query.length < 2) {
-        return res.status(400).json({ message: 'Veuillez fournir au moins 2 caractères pour la recherche.' });
-    }
-    // Route publique : jamais d'email dans la réponse, résultats bornés.
-    const users = await User.find({
-        username: { $regex: escapeRegex(query), $options: 'i' }
-    })
-        .select('username profilePicture location bio')
-        .limit(USER_SEARCH_MAX_RESULTS);
-    res.json({ users });
-});
+export const searchUsers = async (req: Request, res: Response) => {
+  const query = queryString(req.query.query);
+  if (!query || query.length < USER_SEARCH_MIN_LENGTH) {
+    throw badRequest(`Veuillez fournir au moins ${USER_SEARCH_MIN_LENGTH} caractères pour la recherche.`);
+  }
+  return res.status(200).json({ users: await searchPublicUsers(query) });
+};

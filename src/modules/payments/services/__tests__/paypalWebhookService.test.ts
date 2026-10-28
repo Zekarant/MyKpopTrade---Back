@@ -1,7 +1,7 @@
 import { PayPalWebhookService } from '../paypalWebhookService';
 import Payment from '../../../../models/paymentModel';
 import Product from '../../../../models/productModel';
-import { NotificationService } from '../../../notifications/services/notificationService';
+import { createNotification } from '../../../notifications/services/notificationService';
 import { dispatchAdminAlert } from '../../../../commons/services/adminAlertService';
 import { completePayment } from '../paymentCompletion';
 
@@ -48,7 +48,7 @@ function captureCompletedEvent() {
 beforeEach(() => {
   jest.clearAllMocks();
   (Product.findByIdAndUpdate as jest.Mock).mockResolvedValue(undefined);
-  (NotificationService.createNotification as jest.Mock).mockResolvedValue(undefined);
+  (createNotification as jest.Mock).mockResolvedValue(undefined);
   (completePayment as jest.Mock).mockResolvedValue('completed');
 });
 
@@ -114,7 +114,7 @@ describe('CHECKOUT.ORDER.APPROVED', () => {
     expect(payment.status).toBe('pending');
     expect(payment.save).not.toHaveBeenCalled();
     expect(Product.findByIdAndUpdate).not.toHaveBeenCalled();
-    expect(NotificationService.createNotification).not.toHaveBeenCalled();
+    expect(createNotification).not.toHaveBeenCalled();
   });
 });
 
@@ -134,5 +134,18 @@ describe('PAYMENT.CAPTURE.DENIED', () => {
       { _id: 'prod1', soldTo: 'buyer1' },
       { $set: { isAvailable: true, isSold: false }, $unset: { soldAt: 1, soldTo: 1 } }
     );
+  });
+});
+
+describe('PAYMENT.CAPTURE.REFUNDED', () => {
+  it.each([
+    ['sans liens', { id: 'REFUND-1', amount: { value: '5.00', currency_code: 'EUR' } }],
+    ['sans montant', { id: 'REFUND-1', links: [{ rel: 'up', href: `https://api.paypal.test/v2/payments/captures/${CAPTURE_ID}` }] }]
+  ])('ignore sans erreur un événement incomplet (%s) : PayPal ne le redélivre pas en boucle', async (_case, resource) => {
+    await expect(
+      PayPalWebhookService.handleWebhook({ event_type: 'PAYMENT.CAPTURE.REFUNDED', resource } as never)
+    ).resolves.not.toThrow();
+
+    expect(mockedPayment.findOne).not.toHaveBeenCalled();
   });
 });

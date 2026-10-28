@@ -1,5 +1,5 @@
 import User from '../../../models/userModel';
-import { HttpError } from '../../../commons/utils/httpError';
+import { notFound } from '../../../commons/utils/httpError';
 import {
   NOTIFICATION_CATEGORIES,
   NOTIFICATION_CHANNELS,
@@ -9,12 +9,13 @@ import {
 } from '../../notifications/notificationPreferences';
 
 const NOTIFICATIONS_PATH = 'preferences.notifications';
+const USER_NOT_FOUND_MESSAGE = 'Utilisateur non trouvé';
 
 /** Préférences effectives du membre (choix enregistrés complétés par les défauts). */
 export async function getNotificationPreferences(userId: string): Promise<NotificationPreferences> {
   const user = await User.findById(userId).select(NOTIFICATIONS_PATH).lean();
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw notFound(USER_NOT_FOUND_MESSAGE);
   }
   return resolveNotificationPreferences(user.preferences?.notifications);
 }
@@ -40,7 +41,7 @@ export async function updateNotificationPreferences(
     .select(NOTIFICATIONS_PATH)
     .lean();
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw notFound(USER_NOT_FOUND_MESSAGE);
   }
   return resolveNotificationPreferences(user.preferences?.notifications);
 }

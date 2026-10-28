@@ -1,7 +1,4 @@
 import { Request, Response } from 'express';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import logger from '../../../commons/utils/logger';
-import { mapHttpError } from '../../../commons/utils/httpErrorMapper';
 import {
   createAlbumForGroup,
   listAlbums,
@@ -11,178 +8,103 @@ import {
   updateAlbumById,
   deleteAlbumById
 } from '../services/albumsService';
-import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { clampLimit, parsePagination, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
+import { queryInt, queryString } from '../../../commons/utils/query';
+
+const DEFAULT_LIMIT = 20;
+/** Le panneau admin K-pop charge jusqu'à 2000 albums d'un coup. */
+const CATALOG_MAX_LIMIT = 2000;
+
+/** Entier optionnel de la query : absent ou invalide → pas de filtre. */
+function optionalInt(value: unknown): number | undefined {
+  const parsed = queryInt(value);
+  return isNaN(parsed) ? undefined : parsed;
+}
 
 /**
  * Créer un nouvel album (Admin uniquement)
  */
-export const createAlbum = asyncHandler(async (req: Request, res: Response) => {
-  const albumData = req.body;
-
-  try {
-    const album = await createAlbumForGroup(albumData);
-    return res.status(201).json({
-      message: 'Album créé avec succès',
-      album
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la création de l\'album', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      albumData: albumData.name
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la création de l\'album'
-    });
-  }
-});
+export const createAlbum = async (req: Request, res: Response) => {
+  const album = await createAlbumForGroup(req.body ?? {});
+  res.status(201).json({
+    message: 'Album créé avec succès',
+    album
+  });
+};
 
 /**
  * Récupérer tous les albums avec pagination et filtres
  */
-export const getAlbums = asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const result = await listAlbums(req.query);
-    return res.status(200).json(result);
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    logger.error('Erreur lors de la récupération des albums', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue'
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la récupération des albums'
-    });
-  }
-});
+export const getAlbums = async (req: Request, res: Response) => {
+  const { page, limit } = parsePagination(req.query, { defaultLimit: DEFAULT_LIMIT, maxLimit: CATALOG_MAX_LIMIT });
+
+  const result = await listAlbums({
+    page,
+    limit,
+    sortBy: queryString(req.query.sortBy) || 'releaseDate',
+    sortOrder: req.query.sortOrder === 'asc' ? 1 : -1,
+    artistId: queryString(req.query.artistId),
+    artistName: queryString(req.query.artistName),
+    search: queryString(req.query.search),
+    minTracks: optionalInt(req.query.minTracks),
+    year: optionalInt(req.query.year)
+  });
+  res.status(200).json(result);
+};
 
 /**
  * Récupérer un album par son ID avec produits disponibles
  */
-export const getAlbumById = asyncHandler(async (req: Request, res: Response) => {
-  const albumId = req.params.albumId as string;
-
-  try {
-    const result = await fetchAlbumById(albumId);
-    return res.status(200).json(result);
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la récupération de l\'album', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      albumId
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la récupération de l\'album'
-    });
-  }
-});
+export const getAlbumById = async (req: Request, res: Response) => {
+  const result = await fetchAlbumById(req.params.albumId as string);
+  res.status(200).json(result);
+};
 
 /**
  * Récupérer les albums d'un groupe
  */
-export const getAlbumsByGroup = asyncHandler(async (req: Request, res: Response) => {
-  const groupId = req.params.groupId as string;
+export const getAlbumsByGroup = async (req: Request, res: Response) => {
+  const { albums, empty } = await fetchAlbumsByGroup(req.params.groupId as string);
 
-  try {
-    const { albums, empty } = await fetchAlbumsByGroup(groupId);
-
-    if (empty) {
-      return res.status(200).json({
-        albums: [],
-        message: 'Aucun album trouvé pour ce groupe'
-      });
-    }
-
-    return res.status(200).json({ albums });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la récupération des albums du groupe', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      groupId
+  if (empty) {
+    res.status(200).json({
+      albums: [],
+      message: 'Aucun album trouvé pour ce groupe'
     });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la récupération des albums'
-    });
+    return;
   }
-});
+
+  res.status(200).json({ albums });
+};
 
 /**
  * Recherche d'albums par nom ou artiste
  */
-export const searchAlbums = asyncHandler(async (req: Request, res: Response) => {
-  const { query } = req.query;
-  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
-
-  try {
-    const result = await searchAlbumsByQuery({ query, limit });
-    return res.status(200).json(result);
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la recherche d\'albums', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      query
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la recherche'
-    });
-  }
-});
+export const searchAlbums = async (req: Request, res: Response) => {
+  const result = await searchAlbumsByQuery({
+    query: queryString(req.query.query),
+    limit: clampLimit(req.query.limit, DEFAULT_LIMIT, MAX_PAGE_SIZE)
+  });
+  res.status(200).json(result);
+};
 
 /**
  * Mettre à jour un album (Admin uniquement)
  */
-export const updateAlbum = asyncHandler(async (req: Request, res: Response) => {
-  const albumId = req.params.albumId as string;
-
-  try {
-    const album = await updateAlbumById(albumId, req.body);
-    return res.status(200).json({
-      message: 'Album mis à jour avec succès',
-      album
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la mise à jour de l\'album', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      albumId
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la mise à jour de l\'album'
-    });
-  }
-});
+export const updateAlbum = async (req: Request, res: Response) => {
+  const album = await updateAlbumById(req.params.albumId as string, req.body ?? {});
+  res.status(200).json({
+    message: 'Album mis à jour avec succès',
+    album
+  });
+};
 
 /**
  * Supprimer un album (Admin uniquement)
  */
-export const deleteAlbum = asyncHandler(async (req: Request, res: Response) => {
-  const albumId = req.params.albumId as string;
-
-  try {
-    await deleteAlbumById(albumId);
-    return res.status(200).json({
-      message: 'Album supprimé avec succès'
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-
-    logger.error('Erreur lors de la suppression de l\'album', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      albumId
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la suppression de l\'album'
-    });
-  }
-});
+export const deleteAlbum = async (req: Request, res: Response) => {
+  await deleteAlbumById(req.params.albumId as string);
+  res.status(200).json({
+    message: 'Album supprimé avec succès'
+  });
+};

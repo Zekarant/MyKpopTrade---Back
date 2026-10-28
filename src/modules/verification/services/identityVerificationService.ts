@@ -12,6 +12,7 @@ import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
+import { paginationMeta } from '../../../commons/utils/pagination';
 
 const VALID_DOCUMENT_TYPES = ['id_card', 'passport', 'driver_license'];
 
@@ -43,9 +44,9 @@ export function detectIdentityImageType(buffer: Buffer): 'image/jpeg' | 'image/p
 const EXPIRED_REJECTION_REASON =
   'Demande expirée sans examen : votre document a été supprimé, vous pouvez en soumettre un nouveau.';
 
-function safelyDeleteDocument(referenceId: string) {
+async function safelyDeleteDocument(referenceId: string) {
   try {
-    deleteSecureDocument(referenceId);
+    await deleteSecureDocument(referenceId);
   } catch (error) {
     logger.error('Erreur lors de la suppression du document d\'identité', { error });
   }
@@ -87,7 +88,7 @@ async function loadPendingVerification(verificationId: string) {
   }
 
   if (verification.status !== 'pending') {
-    throw new HttpError(400, 'Cette demande a déjà été traitée');
+    throw new HttpError(400, 'Cette demande a déjà été traitée', 'VERIFICATION_ALREADY_PROCESSED');
   }
 
   return verification;
@@ -132,7 +133,7 @@ export async function submitIdentityVerification({
   });
 
   if (existingVerification) {
-    throw new HttpError(409, 'Une demande de vérification est déjà en cours de traitement');
+    throw new HttpError(409, 'Une demande de vérification est déjà en cours de traitement', 'VERIFICATION_PENDING');
   }
 
   const documentReferenceId = await secureStoreDocument(fileBuffer, detectedType, documentType);
@@ -155,8 +156,8 @@ export async function submitIdentityVerification({
     // soumissions quasi simultanées ont toutes les deux passé le contrôle
     // `existingVerification` ci-dessus avant que l'une des deux n'insère.
     if ((error as { code?: number }).code === 11000) {
-      safelyDeleteDocument(documentReferenceId);
-      throw new HttpError(409, 'Une demande de vérification est déjà en cours de traitement');
+      await safelyDeleteDocument(documentReferenceId);
+      throw new HttpError(409, 'Une demande de vérification est déjà en cours de traitement', 'VERIFICATION_PENDING');
     }
     throw error;
   }
@@ -188,7 +189,8 @@ export async function submitIdentityVerification({
 
 export async function fetchVerificationStatus(userId: string) {
   const verification = await IdentityVerification.findOne({ user: userId })
-    .sort({ submittedAt: -1 });
+    .sort({ submittedAt: -1 })
+    .lean();
 
   if (!verification) {
     throw new HttpError(404, 'Aucune demande de vérification trouvée');
@@ -198,7 +200,7 @@ export async function fetchVerificationStatus(userId: string) {
     isIdentityVerified: 1,
     identityVerifiedAt: 1,
     verificationLevel: 1
-  });
+  }).lean();
 
   return {
     verification: {
@@ -238,7 +240,7 @@ export async function approveIdentityVerification({
   await verification.save();
   // Supprimé avant l'email : la demande n'étant plus « pending », un échec
   // d'envoi laisserait le document sur le disque pour toujours.
-  safelyDeleteDocument(verification.documentReferenceId);
+  await safelyDeleteDocument(verification.documentReferenceId);
 
   await User.findByIdAndUpdate(verification.user, {
     isIdentityVerified: true,
@@ -282,7 +284,7 @@ export async function rejectIdentityVerification({
   verification.processedBy = new mongoose.Types.ObjectId(adminId);
   verification.rejectionReason = reason;
   await verification.save();
-  safelyDeleteDocument(verification.documentReferenceId);
+  await safelyDeleteDocument(verification.documentReferenceId);
 
   await notifyVerificationResult(String(verification.user), false, reason);
 
@@ -313,18 +315,14 @@ export async function listPendingVerifications(adminId: string, page: number, li
       .populate('user', 'username email')
       .sort({ submittedAt: 1 })
       .skip((page - 1) * limit)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     IdentityVerification.countDocuments({ status: 'pending' })
   ]);
 
   return {
     verifications,
-    pagination: {
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit)
-    }
+    pagination: paginationMeta({ page, limit }, total)
   };
 }
 
@@ -337,7 +335,7 @@ export async function getVerificationDocumentForAdmin(verificationId: string, ad
 
   let document;
   try {
-    document = retrieveSecureDocument(verification.documentReferenceId);
+    document = await retrieveSecureDocument(verification.documentReferenceId);
   } catch (error) {
     logger.error('Document d\'identité illisible', {
       verificationId,
@@ -365,14 +363,14 @@ export async function expireStaleVerifications(now = new Date()) {
   const stale = await IdentityVerification.find({ status: 'pending', expiresAt: { $lt: now } });
 
   for (const verification of stale) {
-    safelyDeleteDocument(verification.documentReferenceId);
+    await safelyDeleteDocument(verification.documentReferenceId);
     verification.status = 'rejected';
     verification.processedAt = now;
     verification.rejectionReason = EXPIRED_REJECTION_REASON;
     await verification.save();
   }
 
-  cleanExpiredDocuments();
+  await cleanExpiredDocuments();
 
   if (stale.length > 0) {
     logger.info('Demandes de vérification expirées clôturées', { count: stale.length });
@@ -390,7 +388,7 @@ export async function cancelUserVerification(userId: string) {
     throw new HttpError(404, 'Aucune demande de vérification en cours trouvée');
   }
 
-  safelyDeleteDocument(verification.documentReferenceId);
+  await safelyDeleteDocument(verification.documentReferenceId);
 
   await verification.deleteOne();
 

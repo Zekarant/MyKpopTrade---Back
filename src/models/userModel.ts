@@ -159,9 +159,6 @@ export interface IUser extends Document {
     legalName?: string;
     checkedAt?: Date;
   };
-  stripeAccountId?: string;
-  stripePayoutsEnabled?: boolean;
-  stripeChargesEnabled?: boolean;
   isSellerVerified?: boolean;
   sellerRating?: number;
   
@@ -276,25 +273,6 @@ const UserSchema: Schema = new Schema({
     scopes: { type: [String], default: [] },
     legalName: { type: String },
     checkedAt: { type: Date }
-  },
-  stripeAccountId: {
-    type: String,
-    index: {
-      unique: true,
-      // Mongo's `sparse: true` n'exclut PAS les docs où le champ vaut null —
-      // seulement ceux où il est absent. Avec un schema partagé, plusieurs users
-      // peuvent finir avec `null` et faire collision sur l'index unique.
-      // partialFilterExpression vise explicitement les valeurs string non vides.
-      partialFilterExpression: { stripeAccountId: { $type: 'string' } }
-    }
-  },
-  stripePayoutsEnabled: {
-    type: Boolean,
-    default: false
-  },
-  stripeChargesEnabled: {
-    type: Boolean,
-    default: false
   },
   // Champs RGPD
   privacyPolicyAccepted: {

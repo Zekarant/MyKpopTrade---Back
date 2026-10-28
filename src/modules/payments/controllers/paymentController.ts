@@ -1,15 +1,9 @@
 import { Request, Response } from 'express';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import {
-  ALERT_BURST_COOLDOWN_MS,
-  dispatchAdminAlert
-} from '../../../commons/services/adminAlertService';
-import { PayPalService } from '../services/paypalService';
-import User from '../../../models/userModel';
 import {
   buildOnboardingLink,
   getPayPalAccountStatus,
   disconnectPayPalForUser,
+  completeOnboardingReturn,
   initiateDirectPayment,
   captureDirectPayment,
   cancelDirectPayment,
@@ -23,67 +17,28 @@ import {
   confirmDelivery,
   getShipment
 } from '../services/shipmentService';
-import { HttpError } from '../../../commons/utils/httpError';
+import { PayPalService } from '../services/paypalService';
+import { isAuthenticWebhook } from '../services/paypalWebhookService';
+import { badRequest, HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
-import { GdprLogger } from '../../../commons/utils/gdprLogger';
-import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
-import { queryInt, queryString } from '../../../commons/utils/query';
+import env from '../../../config/env';
+import { parsePagination } from '../../../commons/utils/pagination';
+import { queryString } from '../../../commons/utils/query';
 
-function devErrorDetails(error: unknown) {
-  return process.env.NODE_ENV === 'development'
-    ? (error instanceof Error ? error.message : String(error))
-    : undefined;
-}
-
-const USER_ID_LOG_PREFIX_LENGTH = 5;
-
-function truncatedUserId(userId: string): string {
-  return userId.substring(0, USER_ID_LOG_PREFIX_LENGTH) + '...';
-}
-
-function replyHttpError(
-  res: Response,
-  error: HttpError,
-  options: { withSuccess?: boolean } = {}
-) {
-  const body: Record<string, unknown> = {};
-  if (options.withSuccess) body.success = false;
-  body.message = error.message;
-  if (error.code) body.code = error.code;
-  if (error.details) Object.assign(body, error.details);
-  return res.status(error.statusCode).json(body);
-}
+const MY_PAYMENTS_DEFAULT_LIMIT = 10;
 
 /**
  * Génère le lien d'inscription PayPal (Partner Referrals) d'un vendeur.
  */
-export const generateOnboardingLink = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
+export const generateOnboardingLink = async (req: Request, res: Response) => {
+  const actionUrl = await buildOnboardingLink(req.user!.id);
 
-  try {
-    const actionUrl = await buildOnboardingLink(userId);
-
-    logger.info('Lien d\'onboarding PayPal généré', { userId: truncatedUserId(userId) });
-
-    return res.status(200).json({
-      success: true,
-      actionUrl,
-      message: 'Lien d\'inscription PayPal généré avec succès'
-    });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error);
-    }
-    logger.error('Erreur lors de la génération du lien d\'onboarding PayPal', {
-      error: error instanceof Error ? error.message : String(error),
-      userId: truncatedUserId(userId)
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la génération du lien d\'inscription PayPal',
-      error: devErrorDetails(error)
-    });
-  }
-});
+  res.status(200).json({
+    success: true,
+    actionUrl,
+    message: 'Lien d\'inscription PayPal généré avec succès'
+  });
+};
 
 /**
  * Retour du vendeur après le parcours d'onboarding PayPal.
@@ -94,8 +49,8 @@ export const generateOnboardingLink = asyncHandler(async (req: Request, res: Res
  * Le rapprochement avec le vendeur MyKpopTrade se fait sur le `tracking_id`,
  * jamais sur un identifiant fourni par le client.
  */
-export const handleOnboardingReturn = asyncHandler(async (req: Request, res: Response) => {
-  const frontendSettings = `${process.env.FRONTEND_URL}/settings`;
+export const handleOnboardingReturn = async (req: Request, res: Response) => {
+  const frontendSettings = `${env.FRONTEND_URL}/settings`;
   const { merchantIdInPayPal, merchantId: trackingId } = req.query;
 
   // Chaînes uniquement : un paramètre répété devient un tableau, que Mongoose
@@ -105,21 +60,13 @@ export const handleOnboardingReturn = asyncHandler(async (req: Request, res: Res
     return res.redirect(`${frontendSettings}?paypal_error=missing_parameters`);
   }
 
+  // Le vendeur arrive ici par une redirection de navigateur : une erreur doit le
+  // ramener sur ses paramètres avec `paypal_error`, pas lui afficher du JSON.
   try {
-    const seller = await User.findOne({ paypalTrackingId: trackingId }).select('_id');
-    if (!seller) {
-      logger.warn('Retour d\'onboarding PayPal avec un tracking_id inconnu', { trackingId });
+    const outcome = await completeOnboardingReturn(merchantIdInPayPal, trackingId);
+    if (outcome === 'unknown_tracking_id') {
       return res.redirect(`${frontendSettings}?paypal_error=unknown_tracking_id`);
     }
-
-    // Rien n'est enregistré si PayPal ne confirme pas ce marchand : l'erreur
-    // renvoie le vendeur vers ses paramètres avec `paypal_error`.
-    await PayPalService.completeOnboarding(
-      seller._id.toString(),
-      merchantIdInPayPal,
-      trackingId
-    );
-
     return res.redirect(`${frontendSettings}?paypal_onboarding=complete`);
   } catch (error) {
     logger.error('Erreur lors du retour d\'onboarding PayPal', {
@@ -128,174 +75,88 @@ export const handleOnboardingReturn = asyncHandler(async (req: Request, res: Res
     });
     return res.redirect(`${frontendSettings}?paypal_error=server_error`);
   }
-});
+};
 
 /**
  * Statut d'onboarding PayPal du vendeur (merchant ID, drapeaux, permissions).
  * `?refresh=true` force un appel « show seller status » auprès de PayPal.
  */
-export const checkPayPalConnection = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
+export const checkPayPalConnection = async (req: Request, res: Response) => {
+  const status = await getPayPalAccountStatus(req.user!.id, {
+    refresh: req.query.refresh === 'true'
+  });
 
-  try {
-    const status = await getPayPalAccountStatus(userId, {
-      refresh: req.query.refresh === 'true'
-    });
-
-    return res.status(200).json({ success: true, ...status });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error);
-    }
-    logger.error('Erreur lors de la vérification du statut PayPal', {
-      error: error instanceof Error ? error.message : String(error),
-      userId: truncatedUserId(userId)
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la vérification du statut PayPal',
-      error: devErrorDetails(error)
-    });
-  }
-});
+  res.status(200).json({ success: true, ...status });
+};
 
 /**
  * Déconnecte le compte PayPal du vendeur
  */
-export const disconnectPayPal = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
+export const disconnectPayPal = async (req: Request, res: Response) => {
+  await disconnectPayPalForUser(req.user!.id);
 
-  try {
-    await disconnectPayPalForUser(userId);
-
-    logger.info('Compte PayPal déconnecté', { userId: truncatedUserId(userId) });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Compte PayPal déconnecté avec succès'
-    });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error);
-    }
-    logger.error('Erreur lors de la déconnexion du compte PayPal', {
-      error: error instanceof Error ? error.message : String(error),
-      userId: truncatedUserId(userId)
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la déconnexion du compte PayPal',
-      error: devErrorDetails(error)
-    });
-  }
-});
+  res.status(200).json({
+    success: true,
+    message: 'Compte PayPal déconnecté avec succès'
+  });
+};
 
 /**
  * Initie un paiement PayPal pour un produit
  */
-export const initiatePayPalPayment = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
+export const initiatePayPalPayment = async (req: Request, res: Response) => {
   const { productId, shippingMethod, shippingAddress } = req.body;
 
-  try {
-    const paymentResponse = await initiateDirectPayment(userId, productId, {
-      shippingMethod,
-      shippingAddress
-    });
+  const paymentResponse = await initiateDirectPayment(req.user!.id, productId, {
+    shippingMethod,
+    shippingAddress
+  });
 
-    return res.status(200).json({
-      success: true,
-      payment: {
-        id: paymentResponse.paymentId,
-        paypalOrderId: paymentResponse.orderId,
-        amount: paymentResponse.amount,
-        productAmount: paymentResponse.productAmount,
-        shippingAmount: paymentResponse.shippingAmount,
-        shippingMethod: paymentResponse.shippingMethod,
-        currency: paymentResponse.currency,
-        approvalUrl: paymentResponse.approvalUrl
-      },
-      message: 'Paiement initié avec succès'
-    });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error);
-    }
-    logger.error('Erreur lors de l\'initiation du paiement PayPal', {
-      error: error instanceof Error ? error.message : String(error),
-      productId,
-      userId: truncatedUserId(userId)
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la création du paiement',
-      error: devErrorDetails(error)
-    });
-  }
-});
+  res.status(200).json({
+    success: true,
+    payment: {
+      id: paymentResponse.paymentId,
+      paypalOrderId: paymentResponse.orderId,
+      amount: paymentResponse.amount,
+      productAmount: paymentResponse.productAmount,
+      shippingAmount: paymentResponse.shippingAmount,
+      shippingMethod: paymentResponse.shippingMethod,
+      currency: paymentResponse.currency,
+      approvalUrl: paymentResponse.approvalUrl
+    },
+    message: 'Paiement initié avec succès'
+  });
+};
 
 /**
  * Capture un paiement après approbation par l'acheteur
  */
-export const capturePayPalPayment = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const { orderId } = req.body;
+export const capturePayPalPayment = async (req: Request, res: Response) => {
+  const result = await captureDirectPayment(req.user!.id, req.body.orderId);
 
-  try {
-    const result = await captureDirectPayment(userId, orderId);
-
-    return res.status(200).json({
-      success: true,
-      payment: result,
-      message: 'Paiement capturé avec succès'
-    });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error);
-    }
-    logger.error('Erreur lors de la capture du paiement PayPal', {
-      error: error instanceof Error ? error.message : String(error),
-      orderId,
-      userId: truncatedUserId(userId)
-    });
-
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la capture du paiement',
-      error: devErrorDetails(error)
-    });
-  }
-});
+  res.status(200).json({
+    success: true,
+    payment: result,
+    message: 'Paiement capturé avec succès'
+  });
+};
 
 /**
  * Annule un paiement PayPal en attente
  */
-export const cancelPayPalPayment = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const { orderId } = req.body;
-
-  try {
-    const result = await cancelDirectPayment(userId, orderId);
-    return res.status(200).json({ success: true, ...result });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error);
-    }
-    logger.error('Erreur lors de l\'annulation du paiement PayPal', {
-      error: error instanceof Error ? error.message : String(error),
-      orderId,
-      userId: truncatedUserId(userId)
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de l\'annulation du paiement',
-      error: devErrorDetails(error)
-    });
-  }
-});
+export const cancelPayPalPayment = async (req: Request, res: Response) => {
+  const result = await cancelDirectPayment(req.user!.id, req.body.orderId);
+  res.status(200).json({ success: true, ...result });
+};
 
 /**
  * Confirme un paiement après redirection depuis PayPal
  */
-export const confirmPayPalPayment = asyncHandler(async (req: Request, res: Response) => {
+export const confirmPayPalPayment = async (req: Request, res: Response) => {
   const { orderId } = req.query;
-  const frontend = process.env.FRONTEND_URL;
+  const frontend = env.FRONTEND_URL;
 
+  // Redirection de navigateur : une erreur renvoie vers la page d'erreur du front.
   try {
     const outcome = await resolveConfirmPayment(orderId);
 
@@ -324,105 +185,58 @@ export const confirmPayPalPayment = asyncHandler(async (req: Request, res: Respo
     });
     return res.redirect(`${frontend}/payment/error?code=server_error`);
   }
-});
+};
 
 /**
  * Gère les webhooks PayPal pour les notifications automatiques de paiement
  * @route POST /api/payments/webhook/paypal
  * @access public - Ne nécessite pas d'authentification (appelé par PayPal)
+ *
+ * Un échec de traitement remonte en 5xx : PayPal redélivre alors l'événement.
+ * C'est sans risque, le traitement étant idempotent (completePayment, registre
+ * des remboursements). Un événement ignoré ou déjà traité répond 200.
  */
-export const handleWebhook = asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const event = req.body;
+export const handleWebhook = async (req: Request, res: Response) => {
+  const event = req.body;
 
-    if (!event || !event.event_type) {
-      logger.warn('Webhook PayPal reçu avec un format invalide');
-      return res.status(400).json({ message: 'Format de webhook invalide' });
-    }
-
-    logger.debug('Webhook PayPal reçu', {
-      eventType: event.event_type,
-      eventId: event.id,
-      resourceType: event.resource_type || 'non spécifié'
-    });
-
-    // Vérification systématique de la signature : sans elle, n'importe qui
-    // connaissant l'URL peut forger un PAYMENT.CAPTURE.COMPLETED et faire
-    // passer une commande en payée.
-    const isAuthentic = await PayPalService.verifyWebhookSignature(req.headers, event);
-    if (!isAuthentic) {
-      logger.warn('Webhook PayPal rejeté : signature invalide', {
-        eventType: event.event_type,
-        eventId: event.id
-      });
-
-      dispatchAdminAlert({
-        event: 'payment.webhook_rejected',
-        severity: 'critical',
-        title: 'Webhook PayPal rejeté (signature invalide)',
-        summary: 'Vérifiez PAYPAL_WEBHOOK_ID. Tant que la signature échoue, aucun paiement n\'est confirmé par webhook.',
-        adminTab: 'audit',
-        fields: [{ name: 'Type d\'évènement', value: String(event.event_type), inline: true }],
-        throttleMs: ALERT_BURST_COOLDOWN_MS
-      });
-
-      return res.status(401).json({ message: 'Signature de webhook invalide' });
-    }
-
-    await PayPalService.handleWebhook(event);
-
-    return res.status(200).json({
-      received: true,
-      eventType: event.event_type
-    });
-  } catch (error) {
-    logger.error('Erreur lors du traitement du webhook PayPal', {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined
-    });
-
-    return res.status(200).json({
-      received: true,
-      processingError: process.env.NODE_ENV === 'development'
-        ? (error instanceof Error ? error.message : String(error))
-        : 'Une erreur est survenue lors du traitement'
-    });
+  if (!event || !event.event_type) {
+    logger.warn('Webhook PayPal reçu avec un format invalide');
+    throw badRequest('Format de webhook invalide', 'INVALID_WEBHOOK');
   }
-});
+
+  logger.debug('Webhook PayPal reçu', {
+    eventType: event.event_type,
+    eventId: event.id,
+    resourceType: event.resource_type || 'non spécifié'
+  });
+
+  // Vérification systématique de la signature : sans elle, n'importe qui
+  // connaissant l'URL peut forger un PAYMENT.CAPTURE.COMPLETED et faire
+  // passer une commande en payée.
+  if (!(await isAuthenticWebhook(req.headers, event))) {
+    throw new HttpError(401, 'Signature de webhook invalide', 'INVALID_WEBHOOK_SIGNATURE');
+  }
+
+  await PayPalService.handleWebhook(event);
+
+  res.status(200).json({
+    received: true,
+    eventType: event.event_type
+  });
+};
 
 /**
  * Vérifie et met à jour le statut d'un paiement
  */
-export const checkPaymentStatus = asyncHandler(async (req: Request, res: Response) => {
-  const { paymentId } = req.params;
-  const userId = req.user!.id;
+export const checkPaymentStatus = async (req: Request, res: Response) => {
+  const { status, payment } = await fetchPaymentStatus(req.user!.id, String(req.params.paymentId));
 
-  if (!userId) {
-    return res.status(401).json({
-      success: false,
-      message: 'Authentification requise'
-    });
-  }
-
-  try {
-    const { status, payment } = await fetchPaymentStatus(userId, String(paymentId));
-
-    return res.status(200).json({
-      success: true,
-      status,
-      payment
-    });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error, { withSuccess: true });
-    }
-    GdprLogger.logPaymentError(error, userId, { action: 'check_payment_status', paymentId });
-    return res.status(500).json({
-      success: false,
-      message: 'Une erreur est survenue lors de la vérification du statut du paiement'
-    });
-  }
-});
+  res.status(200).json({
+    success: true,
+    status,
+    payment
+  });
+};
 
 /**
  * Effectue un remboursement total ou partiel pour un paiement
@@ -432,166 +246,76 @@ export const checkPaymentStatus = asyncHandler(async (req: Request, res: Respons
  * Initie le remboursement côté PayPal. La mise à jour de l'état du Payment
  * (status, refundAmount, refundedAt) est assurée par le webhook PAYMENT.CAPTURE.REFUNDED.
  */
-export const refundPayment = asyncHandler(async (req: Request, res: Response) => {
-  const { paymentId } = req.params;
+export const refundPayment = async (req: Request, res: Response) => {
   const { amount, reason, password } = req.body;
-  const userId = req.user!.id;
 
-  if (!userId) {
-    return res.status(401).json({
-      success: false,
-      message: 'Authentification requise'
-    });
-  }
+  const refund = await processRefund({
+    userId: req.user!.id,
+    paymentId: String(req.params.paymentId),
+    amount,
+    reason,
+    password
+  });
 
-  try {
-    const refund = await processRefund({
-      userId,
-      paymentId: String(paymentId),
-      amount,
-      reason,
-      password
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Remboursement initié avec succès',
-      refund
-    });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error, { withSuccess: true });
-    }
-
-    GdprLogger.logPaymentError(error, userId, { action: 'refund_payment', paymentId });
-
-    return res.status(500).json({
-      success: false,
-      message: 'Une erreur est survenue lors du remboursement'
-    });
-  }
-});
+  res.status(200).json({
+    success: true,
+    message: 'Remboursement initié avec succès',
+    refund
+  });
+};
 
 /**
  * Récupère la liste des paiements de l'utilisateur
  */
-export const getMyPayments = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  try {
-    const { data, pagination } = await listUserPayments(
-      userId,
-      queryString(req.query.role) || 'all',
-      queryString(req.query.status),
-      queryInt(req.query.page) || 1,
-      clampLimit(req.query.limit, 10, MAX_PAGE_SIZE)
-    );
+export const getMyPayments = async (req: Request, res: Response) => {
+  const { data, pagination } = await listUserPayments(
+    req.user!.id,
+    { role: queryString(req.query.role) || 'all', status: queryString(req.query.status) },
+    parsePagination(req.query, { defaultLimit: MY_PAYMENTS_DEFAULT_LIMIT })
+  );
 
-    return res.status(200).json({
-      success: true,
-      data,
-      pagination
-    });
-  } catch (error) {
-    logger.error('Erreur lors de la récupération des paiements', {
-      error: error instanceof Error ? error.message : String(error),
-      userId: truncatedUserId(userId)
-    });
-    return res.status(500).json({
-      message: 'Une erreur est survenue lors de la récupération des paiements',
-      error: devErrorDetails(error)
-    });
-  }
-});
+  res.status(200).json({
+    success: true,
+    data,
+    pagination
+  });
+};
 
 /**
  * Le vendeur enregistre l'expédition (transporteur + numéro de suivi).
  * @route POST /api/payments/:paymentId/shipment
  * @access Private - Vendeur uniquement
  */
-export const createShipment = asyncHandler(async (req: Request, res: Response) => {
-  const { paymentId } = req.params;
-  const userId = req.user!.id;
+export const createShipment = async (req: Request, res: Response) => {
   const { carrier, trackingNumber, trackingUrl } = req.body;
 
-  try {
-    const shipment = await markShipped({
-      userId,
-      paymentId: String(paymentId),
-      carrier,
-      trackingNumber,
-      trackingUrl
-    });
+  const shipment = await markShipped({
+    userId: req.user!.id,
+    paymentId: String(req.params.paymentId),
+    carrier,
+    trackingNumber,
+    trackingUrl
+  });
 
-    return res.status(201).json({ success: true, shipment });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error, { withSuccess: true });
-    }
-    logger.error('Erreur lors de l\'enregistrement de l\'expédition', {
-      error: error instanceof Error ? error.message : String(error),
-      paymentId,
-      userId: truncatedUserId(userId)
-    });
-    return res.status(500).json({
-      success: false,
-      message: 'Une erreur est survenue lors de l\'enregistrement de l\'expédition'
-    });
-  }
-});
+  res.status(201).json({ success: true, shipment });
+};
 
 /**
  * L'acheteur confirme la réception du colis.
  * @route POST /api/payments/:paymentId/shipment/delivered
  * @access Private - Acheteur uniquement
  */
-export const markShipmentDelivered = asyncHandler(async (req: Request, res: Response) => {
-  const { paymentId } = req.params;
-  const userId = req.user!.id;
-
-  try {
-    const shipment = await confirmDelivery(userId, String(paymentId));
-    return res.status(200).json({ success: true, shipment });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error, { withSuccess: true });
-    }
-    logger.error('Erreur lors de la confirmation de réception', {
-      error: error instanceof Error ? error.message : String(error),
-      paymentId,
-      userId: truncatedUserId(userId)
-    });
-    return res.status(500).json({
-      success: false,
-      message: 'Une erreur est survenue lors de la confirmation de réception'
-    });
-  }
-});
+export const markShipmentDelivered = async (req: Request, res: Response) => {
+  const shipment = await confirmDelivery(req.user!.id, String(req.params.paymentId));
+  res.status(200).json({ success: true, shipment });
+};
 
 /**
  * Récupère les infos de suivi d'un paiement.
  * @route GET /api/payments/:paymentId/shipment
  * @access Private - Acheteur ou vendeur du paiement
  */
-export const fetchShipment = asyncHandler(async (req: Request, res: Response) => {
-  const { paymentId } = req.params;
-  const userId = req.user!.id;
-
-  try {
-    const shipment = await getShipment(userId, String(paymentId));
-    return res.status(200).json({ success: true, shipment });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return replyHttpError(res, error, { withSuccess: true });
-    }
-    logger.error('Erreur lors de la récupération de l\'expédition', {
-      error: error instanceof Error ? error.message : String(error),
-      paymentId,
-      userId: truncatedUserId(userId)
-    });
-    return res.status(500).json({
-      success: false,
-      message: 'Une erreur est survenue lors de la récupération de l\'expédition'
-    });
-  }
-});
-
+export const fetchShipment = async (req: Request, res: Response) => {
+  const shipment = await getShipment(req.user!.id, String(req.params.paymentId));
+  res.status(200).json({ success: true, shipment });
+};

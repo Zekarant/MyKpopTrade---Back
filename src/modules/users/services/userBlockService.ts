@@ -1,8 +1,9 @@
 import { Types } from 'mongoose';
 import Block from '../../../models/blockModel';
 import User from '../../../models/userModel';
-import Follow from '../../follows/model';
-import { HttpError } from '../../../commons/utils/httpError';
+import Follow from '../../../models/followModel';
+import { HttpError, notFound } from '../../../commons/utils/httpError';
+import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 
 type UserIdLike = string | Types.ObjectId;
 
@@ -79,7 +80,7 @@ export async function blockUser(blockerId: string, blockedId: string): Promise<v
     throw new HttpError(400, 'Vous ne pouvez pas vous bloquer vous-même', 'CANNOT_BLOCK_SELF');
   }
   if (!(await User.exists({ _id: blockedId }))) {
-    throw new HttpError(404, 'Utilisateur introuvable');
+    throw notFound('Utilisateur introuvable');
   }
 
   const alreadyBlocked = await Block.exists({ blocker: blockerId, blocked: blockedId });
@@ -109,13 +110,13 @@ export async function unblockUser(blockerId: string, blockedId: string): Promise
 type BlockedUserRef = { _id: Types.ObjectId; username: string; profilePicture?: string };
 
 /** Membres bloqués par `blockerId`, du plus récent au plus ancien. */
-export async function listBlockedUsers(blockerId: string, page: number, limit: number) {
+export async function listBlockedUsers(blockerId: string, pageRequest: PageRequest) {
   const filter = { blocker: blockerId };
-  const [blocks, totalItems] = await Promise.all([
+  const [blocks, total] = await Promise.all([
     Block.find(filter)
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
+      .skip(pageRequest.skip)
+      .limit(pageRequest.limit)
       .populate<{ blocked: BlockedUserRef | null }>('blocked', 'username profilePicture')
       .lean(),
     Block.countDocuments(filter)
@@ -131,11 +132,6 @@ export async function listBlockedUsers(blockerId: string, page: number, limit: n
         profilePicture: block.blocked!.profilePicture,
         blockedAt: block.createdAt
       })),
-    pagination: {
-      page,
-      limit,
-      totalItems,
-      totalPages: Math.ceil(totalItems / limit)
-    }
+    pagination: paginationMeta(pageRequest, total)
   };
 }

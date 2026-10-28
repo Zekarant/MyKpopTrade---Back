@@ -212,8 +212,8 @@ export const sendVerificationResultEmail = async (
       content,
       ctaText: isApproved ? 'Accéder à mon profil' : 'Soumettre une nouvelle demande',
       ctaUrl: isApproved 
-        ? `${process.env.FRONTEND_URL}/profile` 
-        : `${process.env.FRONTEND_URL}/verification`
+        ? `${BASE_URL}/profile`
+        : `${BASE_URL}/verification`
     })
   });
 };
@@ -374,9 +374,9 @@ export async function sendEmail(options: { to: string; subject: string; html: st
     logger.error('Erreur lors de l\'envoi de l\'email', {
       error: error instanceof Error ? error.message : String(error)
     });
-    // En développement, on peut choisir de ne pas propager l'erreur
-    // En production, il peut être préférable de la propager pour une gestion centralisée
-    if (process.env.NODE_ENV === 'production') {
+    // Hors production, le transporteur est un compte Ethereal jetable (cf.
+    // buildTransporter) : son indisponibilité ne doit pas faire échouer l'appelant.
+    if (env.NODE_ENV === 'production') {
       throw error;
     }
   }

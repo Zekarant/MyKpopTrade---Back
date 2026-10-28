@@ -1,8 +1,9 @@
 import mongoose from 'mongoose';
 import Payment, { IPayment } from '../../../models/paymentModel';
-import { NotificationService } from '../../notifications/services/notificationService';
+import { createNotification } from '../../notifications/services/notificationService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import env from '../../../config/env';
 import { sendShipmentReminderEmail } from '../../../commons/services/emailService';
 import User, { IUser } from '../../../models/userModel';
 import { getTrackingProvider } from './tracking';
@@ -27,8 +28,8 @@ const ERROR_CODES = {
  * REMINDER_DAYS     : envoie une relance email à l'acheteur après ce délai.
  * REMINDER_COOLDOWN_DAYS : délai minimum entre deux relances pour un même colis.
  */
-const AUTO_CONFIRM_DAYS = Number(process.env.SHIPMENT_AUTO_CONFIRM_DAYS) || 14;
-const REMINDER_DAYS = Number(process.env.SHIPMENT_REMINDER_DAYS) || 7;
+const AUTO_CONFIRM_DAYS = env.SHIPMENT_AUTO_CONFIRM_DAYS;
+const REMINDER_DAYS = env.SHIPMENT_REMINDER_DAYS;
 const REMINDER_COOLDOWN_DAYS = 5;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -203,7 +204,7 @@ export async function markShipped({
 
   // L'email d'expédition (avec le suivi) part de cette notification, selon
   // les préférences de l'acheteur : pas d'envoi direct en plus.
-  await NotificationService.createNotification({
+  await createNotification({
     recipientId: payment.buyer,
     type: 'order_status',
     title: 'Votre commande a été expédiée',
@@ -271,7 +272,7 @@ export async function confirmDelivery(userId: string, paymentId: string) {
 
   await applyDelivery(payment, 'buyer');
 
-  await NotificationService.createNotification({
+  await createNotification({
     recipientId: payment.seller,
     type: 'order_status',
     title: 'Livraison confirmée',
@@ -407,7 +408,7 @@ export async function autoConfirmStaleShipments(): Promise<{ confirmed: number }
 
         // Les emails d'auto-confirmation partent de ces notifications.
         await Promise.all([
-          NotificationService.createNotification({
+          createNotification({
             recipientId: payment.buyer,
             type: 'order_status',
             title: 'Livraison auto-confirmée',
@@ -415,7 +416,7 @@ export async function autoConfirmStaleShipments(): Promise<{ confirmed: number }
             link: `/account/purchases/${payment._id}`,
             data: { paymentId: payment._id, autoConfirmed: true }
           }),
-          NotificationService.createNotification({
+          createNotification({
             recipientId: payment.seller,
             type: 'order_status',
             title: 'Livraison auto-confirmée',

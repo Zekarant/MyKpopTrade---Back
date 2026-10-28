@@ -13,7 +13,7 @@ import Product from '../../../../models/productModel';
 import SearchHistory from '../../../../models/historicSearchModel';
 import RefreshToken from '../../../../models/tokenModel';
 import IdentityVerification from '../../../../models/identityVerificationModel';
-import Follow from '../../../follows/model';
+import Follow from '../../../../models/followModel';
 import { deleteSecureDocument } from '../../../../commons/services/secureStorageService';
 import { eraseAccountsDueForDeletion, eraseUserAccount } from '../accountErasureService';
 

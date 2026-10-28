@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import logger from './logger';
 import { EncryptionService } from './encryptionService';
 import User from '../../models/userModel';
+import env from '../../config/env';
 
 /**
  * Logger compatible RGPD qui masque les données sensibles
@@ -231,22 +232,23 @@ export class GdprLogger {
       timestamp: new Date().toISOString()
     });
     
-    // Si une adresse email est configurée pour les alertes de sécurité, envoyer un email
-    this.sendSecurityAlert(userId, resourceType, count);
+    // Si une adresse email est configurée pour les alertes de sécurité, envoyer un email.
+    // En tâche de fond : la requête n'attend pas l'email, et son échec est journalisé.
+    void this.sendSecurityAlert(userId, resourceType, count);
   }
 
   /**
    * Envoie une alerte de sécurité par email au DPO
    */
   private static async sendSecurityAlert(userId: string, resourceType: string, requestCount: number): Promise<void> {
-    if (process.env.DATA_PROTECTION_EMAIL) {
+    if (env.DATA_PROTECTION_EMAIL) {
       try {
         const user = await User.findById(userId).select('email username');
         // Import différé, comme l'ancien require() : charger le service d'emails au démarrage n'est pas nécessaire ici.
         const { sendEmail } = await import('../services/emailService');
 
         await sendEmail({
-          to: process.env.DATA_PROTECTION_EMAIL,
+          to: env.DATA_PROTECTION_EMAIL,
           subject: 'ALERTE - Activité suspecte détectée',
           html: `
             <p>Une activité suspecte a été détectée:</p>

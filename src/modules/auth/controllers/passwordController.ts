@@ -1,217 +1,78 @@
 import { Request, Response } from 'express';
-import User, { hashOneTimeToken } from '../../../models/userModel';
-import { sendPasswordResetEmail } from '../../../commons/services/emailService';
 import { validatePassword } from '../../../commons/utils/validators';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import logger from '../../../commons/utils/logger';
-import {
-  invalidateAllUserRefreshTokens,
-  invalidateOtherUserRefreshTokens
-} from '../../../commons/services/tokenService';
-import { readRefreshTokenCookie } from '../services/refreshTokenCookie';
+import { HttpError } from '../../../commons/utils/httpError';
+import { requestPasswordReset, resetPasswordWithToken, changePassword } from '../services/passwordService';
+import { readRefreshTokenCookie } from './refreshTokenCookie';
+import { PASSWORD_RULES_MESSAGE, isNonEmptyString } from './validation';
 
 const FORGOT_PASSWORD_RESPONSE =
   'Si cet email est associé à un compte, un lien de réinitialisation a été envoyé.';
 
-interface AuthenticatedRequest extends Request {
-  user?: {
-    id: string;
-    email: string;
-    role: string;
-  };
-}
-
 /**
  * Demande de réinitialisation de mot de passe
+ * @route POST /api/auth/forgot-password
  */
-export const forgotPassword = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+export const forgotPassword = async (req: Request, res: Response): Promise<void> => {
   const { email } = req.body;
 
-  if (typeof email !== 'string' || !email) {
-    res.status(400).json({ message: 'Email requis' });
-    return;
+  if (!isNonEmptyString(email)) {
+    throw new HttpError(400, 'Email requis');
   }
 
-  const user = await User.findOne({ email });
+  await requestPasswordReset(email);
 
-  if (!user) {
-    // Pour des raisons de sécurité, ne pas révéler si l'email existe
-    res.status(200).json({ message: FORGOT_PASSWORD_RESPONSE });
-    return;
-  }
-
-  // Générer un token de réinitialisation
-  const resetToken = user.generatePasswordResetToken();
-  await user.save();
-
-  // Envoyer l'email
-  await sendPasswordResetEmail(user, resetToken);
-
-  logger.info('Demande de réinitialisation de mot de passe', { 
-    email: user.email,
-    userId: user._id 
-  });
-
-  // Même réponse que pour un email inconnu : sinon la route révèle quels
+  // Même réponse que l'email soit connu ou non : sinon la route révèle quels
   // emails ont un compte.
   res.status(200).json({ message: FORGOT_PASSWORD_RESPONSE });
-});
+};
 
 /**
  * Réinitialisation du mot de passe avec token
+ * @route POST /api/auth/reset-password/:token
  */
-export const resetPassword = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-  const { token } = req.params;
+export const resetPassword = async (req: Request, res: Response): Promise<void> => {
   const { password, confirmPassword } = req.body;
-  
-  if (!password || !confirmPassword) {
-    res.status(400).json({ 
-      message: 'Les champs mot de passe et confirmation sont requis' 
-    });
-    return;
-  }
 
+  if (!isNonEmptyString(password) || !isNonEmptyString(confirmPassword)) {
+    throw new HttpError(400, 'Les champs mot de passe et confirmation sont requis');
+  }
   if (password !== confirmPassword) {
-    res.status(400).json({ 
-      message: 'Les mots de passe ne correspondent pas' 
-    });
-    return;
+    throw new HttpError(400, 'Les mots de passe ne correspondent pas');
   }
-
   if (!validatePassword(password)) {
-    res.status(400).json({ 
-      message: 'Le mot de passe doit contenir au moins 8 caractères dont une majuscule, une minuscule, un chiffre et un caractère spécial' 
-    });
-    return;
+    throw new HttpError(400, PASSWORD_RULES_MESSAGE);
   }
 
-  const user = await User.findOne({
-    passwordResetToken: hashOneTimeToken(String(token)),
-    passwordResetExpires: { $gt: Date.now() },
-    accountStatus: { $ne: 'deleted' }
+  await resetPasswordWithToken(String(req.params.token), password);
+
+  res.status(200).json({
+    message: 'Mot de passe réinitialisé avec succès. Vous pouvez maintenant vous connecter.'
   });
-
-  if (!user) {
-    res.status(400).json({ 
-      message: 'Token de réinitialisation invalide ou expiré' 
-    });
-    return;
-  }
-
-  // Mettre à jour le mot de passe
-  user.password = password;
-  user.passwordResetToken = undefined;
-  user.passwordResetExpires = undefined;
-  await user.save();
-
-  // Une réinitialisation sert souvent après une compromission : les sessions
-  // ouvertes avec l'ancien mot de passe ne doivent plus pouvoir se rafraîchir.
-  await invalidateAllUserRefreshTokens(user._id.toString());
-
-  logger.info('Mot de passe réinitialisé avec succès', {
-    userId: user._id,
-    email: user.email 
-  });
-
-  res.status(200).json({ 
-    message: 'Mot de passe réinitialisé avec succès. Vous pouvez maintenant vous connecter.' 
-  });
-});
+};
 
 /**
  * Mise à jour du mot de passe de l'utilisateur connecté
+ * @route PUT /api/auth/update-password
  */
-export const updatePassword = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const userId = req.user?.id;
-  
-  if (!userId) {
-    res.status(401).json({ message: 'Authentification requise' });
-    return;
-  }
-  
-  const user = await User.findById(userId).select('+password');
-  
-  if (!user) {
-    res.status(404).json({ message: 'Utilisateur non trouvé' });
-    return;
-  }
-  
+export const updatePassword = async (req: Request, res: Response): Promise<void> => {
   const { currentPassword, newPassword, confirmPassword } = req.body;
-  
-  if (!currentPassword || !newPassword || !confirmPassword) {
-    res.status(400).json({ 
-      message: 'Tous les champs sont obligatoires' 
-    });
-    return;
-  }
 
-  // Vérification du mot de passe actuel
-  try {
-    const isPasswordValid = await user.comparePassword(currentPassword);
-    if (!isPasswordValid) {
-      res.status(401).json({ 
-        message: 'Mot de passe actuel incorrect' 
-      });
-      return;
-    }
-  } catch (error) {
-    logger.error('Erreur lors de la vérification du mot de passe actuel', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      userId
-    });
-    res.status(500).json({ 
-      message: 'Erreur lors de la vérification du mot de passe' 
-    });
-    return;
+  if (![currentPassword, newPassword, confirmPassword].every(isNonEmptyString)) {
+    throw new HttpError(400, 'Tous les champs sont obligatoires');
   }
-
-  // Vérification de la correspondance des nouveaux mots de passe
   if (newPassword !== confirmPassword) {
-    res.status(400).json({ 
-      message: 'Les nouveaux mots de passe ne correspondent pas' 
-    });
-    return;
+    throw new HttpError(400, 'Les nouveaux mots de passe ne correspondent pas');
   }
-
-  // Vérification de la complexité du nouveau mot de passe
   if (!validatePassword(newPassword)) {
-    res.status(400).json({ 
-      message: 'Le mot de passe doit contenir au moins 8 caractères dont une majuscule, une minuscule, un chiffre et un caractère spécial' 
-    });
-    return;
+    throw new HttpError(400, PASSWORD_RULES_MESSAGE);
   }
 
-  // Vérification que le nouveau mot de passe est différent de l'ancien
-  try {
-    const isSamePassword = await user.comparePassword(newPassword);
-    if (isSamePassword) {
-      res.status(400).json({ 
-        message: 'Le nouveau mot de passe doit être différent de l\'ancien' 
-      });
-      return;
-    }
-  } catch (error) {
-    logger.error('Erreur lors de la comparaison avec l\'ancien mot de passe', {
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-      userId
-    });
-  }
-
-  // Mise à jour du mot de passe
-  user.password = newPassword;
-  user.lastLoginAt = new Date(); // Mettre à jour la dernière activité
-  await user.save();
-
-  // Changer de mot de passe doit déconnecter un éventuel intrus : les autres
-  // sessions ne peuvent plus se rafraîchir, seule celle qui a fait le changement reste.
-  await invalidateOtherUserRefreshTokens(userId, readRefreshTokenCookie(req));
-
-  logger.info('Mot de passe mis à jour avec succès', { 
-    userId: user._id,
-    email: user.email 
+  await changePassword({
+    userId: req.user!.id,
+    currentPassword,
+    newPassword,
+    keptRefreshToken: readRefreshTokenCookie(req)
   });
-  
-  res.status(200).json({ 
-    message: 'Mot de passe mis à jour avec succès' 
-  });
-});
+
+  res.status(200).json({ message: 'Mot de passe mis à jour avec succès' });
+};

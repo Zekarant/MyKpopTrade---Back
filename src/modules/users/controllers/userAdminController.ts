@@ -1,746 +1,206 @@
 import { Request, Response } from 'express';
-import mongoose from 'mongoose';
-import User, { IUser } from '../../../models/userModel';
-import Product from '../../../models/productModel';
-import AuditLog from '../../../models/auditLogModel';
-import Report from '../../../models/reportModel';
-import Dispute, { DisputeStatus } from '../../../models/disputeModel';
-import IdentityVerification from '../../../models/identityVerificationModel';
-import Payment from '../../../models/paymentModel';
-import Post from '../../posts/model';
-import { asyncHandler } from '../../../commons/middlewares/errorMiddleware';
-import { recordAuditLog } from '../../../commons/utils/auditService';
-import { mapHttpError } from '../../../commons/utils/httpErrorMapper';
-import { escapeRegex } from '../../../commons/utils/escapeRegex';
-import { eraseUserAccount } from '../services/accountErasureService';
-import { CSV_EXPORT_ROW_LIMIT, sendCsvDownload, wantsCsv } from '../../../commons/utils/csv';
-import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
+import { badRequest } from '../../../commons/utils/httpError';
+import { sendCsvFile, wantsCsv } from '../../../commons/utils/csv';
+import { parsePagination } from '../../../commons/utils/pagination';
+import { queryString } from '../../../commons/utils/query';
 import { reactivateUser, suspendUser } from '../services/userSanctionService';
-import { clampLimit, MAX_PAGE_SIZE } from '../../../commons/utils/pagination';
-import { queryInt, queryString } from '../../../commons/utils/query';
+import {
+  addUserNote as addNote,
+  changeUserRole,
+  deleteUserNote as deleteNote,
+  getUserDetail as loadUserDetail,
+  listUsers,
+  UserListFilters
+} from '../services/adminUserService';
+import { buildUsersCsv } from '../services/adminExportService';
+import { getDailyActivity, getUserCounts, TIMESERIES_DAYS } from '../services/adminStatsService';
+import { getAdminQueue as loadAdminQueue } from '../services/adminQueueService';
+import { searchAdminEverything } from '../services/adminSearchService';
+import {
+  anonymizeUserByIdentifier,
+  cancelDeletionRequestByAdmin,
+  confirmAccountDeletion,
+  exportUserDataByIdentifier,
+  getConsentCounts,
+  listDeletionRequests
+} from '../services/adminRgpdService';
+
+const USER_LIST_DEFAULT_LIMIT = 20;
+const SANCTION_STATUSES = ['active', 'suspended'];
 
 /**
- * Liste tous les utilisateurs avec pagination et filtrage (admin)
+ * Liste tous les utilisateurs avec pagination et filtrage (admin) ; `format=csv` les exporte.
+ * @route GET /api/users/admin/list
  */
-export const getUsers = asyncHandler(async (req: Request, res: Response) => {
-  const page = queryInt(req.query.page) || 1;
-  const limit = clampLimit(req.query.limit, 20, MAX_PAGE_SIZE);
-  const search = queryString(req.query.search);
-  const role = queryString(req.query.role);
-  const status = queryString(req.query.status);
-
-  const filter: mongoose.QueryFilter<IUser> = {};
-
-  if (search) {
-    const pattern = escapeRegex(String(search));
-    filter.$or = [
-      { username: { $regex: pattern, $options: 'i' } },
-      { email: { $regex: pattern, $options: 'i' } }
-    ];
-  }
-
-  if (role && ['user', 'moderator', 'admin'].includes(role)) {
-    filter.role = role as IUser['role'];
-  }
-
-  if (status && ['active', 'suspended', 'deleted'].includes(status)) {
-    filter.accountStatus = status as IUser['accountStatus'];
-  }
-
-  const listFields =
-    'username email profilePicture role accountStatus suspension sanctions isEmailVerified isIdentityVerified createdAt lastLogin';
-
-  if (wantsCsv(req.query.format)) {
-    const rows = await User.find(filter)
-      .select(listFields)
-      .sort({ createdAt: -1 })
-      .limit(CSV_EXPORT_ROW_LIMIT);
-
-    return sendCsvDownload(res, 'utilisateurs', rows, [
-      { header: 'Pseudo', value: (u) => u.username },
-      { header: 'Email', value: (u) => u.email },
-      { header: 'Rôle', value: (u) => u.role },
-      { header: 'Statut', value: (u) => u.accountStatus },
-      { header: 'Motif suspension', value: (u) => u.suspension?.reason },
-      { header: 'Suspension jusqu\'au', value: (u) => u.suspension?.until },
-      { header: 'Email vérifié', value: (u) => (u.isEmailVerified ? 'oui' : 'non') },
-      { header: 'Identité vérifiée', value: (u) => (u.isIdentityVerified ? 'oui' : 'non') },
-      { header: 'Inscrit le', value: (u) => u.createdAt },
-      { header: 'Dernière connexion', value: (u) => u.lastLogin }
-    ]);
-  }
-
-  const [users, count] = await Promise.all([
-    User.find(filter)
-      .select(listFields)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit),
-    User.countDocuments(filter)
-  ]);
-
-  return res.status(200).json({
-    users,
-    pagination: {
-      page,
-      limit,
-      totalItems: count,
-      totalPages: Math.ceil(count / limit)
-    }
-  });
-});
-
-/**
- * Obtenir les statistiques admin
- */
-export const getAdminStats = asyncHandler(async (req: Request, res: Response) => {
-  const [totalUsers, activeUsers, suspendedUsers] = await Promise.all([
-    User.countDocuments({}),
-    User.countDocuments({ accountStatus: 'active' }),
-    User.countDocuments({ accountStatus: 'suspended' })
-  ]);
-
-  // Utilisateurs créés dans les 30 derniers jours
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const newUsers = await User.countDocuments({ createdAt: { $gte: thirtyDaysAgo } });
-
-  return res.status(200).json({
-    totalUsers,
-    activeUsers,
-    suspendedUsers,
-    newUsers
-  });
-});
-
-const ADMIN_NOTE_MAX_LENGTH = 2000;
-
-export const getUserDetail = asyncHandler(async (req: Request, res: Response) => {
-  const { userId } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(userId as string)) {
-    return res.status(400).json({ message: 'ID d\'utilisateur invalide' });
-  }
-
-  const user = await User.findById(userId)
-    .select(
-      'username email profilePicture role accountStatus suspension sanctions adminNotes ' +
-        'bio location isEmailVerified isIdentityVerified createdAt lastLogin statistics'
-    )
-    .populate('adminNotes.author', 'username')
-    .populate('sanctions.by', 'username');
-
-  if (!user) {
-    return res.status(404).json({ message: 'Utilisateur non trouvé' });
-  }
-
-  const [listings, reportsAgainst, reportsFiled, disputes] = await Promise.all([
-    Product.countDocuments({ seller: userId }),
-    Report.countDocuments({ targetType: 'user', targetId: userId }),
-    Report.countDocuments({ reporter: userId }),
-    Dispute.countDocuments({ $or: [{ buyer: userId }, { seller: userId }] })
-  ]);
-
-  return res.status(200).json({
-    user,
-    activity: { listings, reportsAgainst, reportsFiled, disputes }
-  });
-});
-
-export const addUserNote = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.params.userId as string;
-  const { content } = req.body;
-  const adminId = req.user!.id;
-
-  if (typeof content !== 'string' || !content.trim()) {
-    return res.status(400).json({ message: 'Le contenu de la note est obligatoire' });
-  }
-
-  const note = {
-    content: content.trim().slice(0, ADMIN_NOTE_MAX_LENGTH),
-    author: adminId,
-    createdAt: new Date()
+export const getUsers = async (req: Request, res: Response) => {
+  const filters: UserListFilters = {
+    search: queryString(req.query.search),
+    role: queryString(req.query.role),
+    status: queryString(req.query.status)
   };
 
-  const user = await User.findByIdAndUpdate(
-    userId,
-    { $push: { adminNotes: note } },
-    { returnDocument: 'after', runValidators: false }
-  )
-    .select('adminNotes username')
-    .populate('adminNotes.author', 'username');
-
-  if (!user) {
-    return res.status(404).json({ message: 'Utilisateur non trouvé' });
+  if (wantsCsv(req.query.format)) {
+    return sendCsvFile(res, await buildUsersCsv(filters));
   }
 
-  await recordAuditLog({
-    adminId,
-    action: 'add_user_note',
-    targetType: 'user',
-    targetId: userId,
-    details: `Note interne ajoutée sur ${user.username}`
+  const pageRequest = parsePagination(req.query, { defaultLimit: USER_LIST_DEFAULT_LIMIT });
+  return res.status(200).json(await listUsers(filters, pageRequest));
+};
+
+/**
+ * Statistiques des membres
+ * @route GET /api/users/admin/stats
+ */
+export const getAdminStats = async (_req: Request, res: Response) => {
+  return res.status(200).json(await getUserCounts());
+};
+
+/**
+ * @route GET /api/users/admin/:userId/detail
+ */
+export const getUserDetail = async (req: Request, res: Response) => {
+  return res.status(200).json(await loadUserDetail(String(req.params.userId)));
+};
+
+/**
+ * @route POST /api/users/admin/:userId/notes
+ */
+export const addUserNote = async (req: Request, res: Response) => {
+  const adminNotes = await addNote({
+    adminId: req.user!.id,
+    userId: String(req.params.userId),
+    content: req.body.content
   });
+  return res.status(201).json({ message: 'Note ajoutée', adminNotes });
+};
 
-  return res.status(201).json({ message: 'Note ajoutée', adminNotes: user.adminNotes });
-});
-
-export const deleteUserNote = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.params.userId as string;
-  const noteId = req.params.noteId as string;
-  const adminId = req.user!.id;
-
-  const user = await User.findByIdAndUpdate(
-    userId,
-    { $pull: { adminNotes: { _id: noteId } } },
-    { returnDocument: 'after', runValidators: false }
-  )
-    .select('adminNotes username')
-    .populate('adminNotes.author', 'username');
-
-  if (!user) {
-    return res.status(404).json({ message: 'Utilisateur non trouvé' });
-  }
-
-  await recordAuditLog({
-    adminId,
-    action: 'delete_user_note',
-    targetType: 'user',
-    targetId: userId,
-    details: `Note interne supprimée sur ${user.username}`
+/**
+ * @route DELETE /api/users/admin/:userId/notes/:noteId
+ */
+export const deleteUserNote = async (req: Request, res: Response) => {
+  const adminNotes = await deleteNote({
+    adminId: req.user!.id,
+    userId: String(req.params.userId),
+    noteId: String(req.params.noteId)
   });
+  return res.status(200).json({ message: 'Note supprimée', adminNotes });
+};
 
-  return res.status(200).json({ message: 'Note supprimée', adminNotes: user.adminNotes });
-});
-
-const GLOBAL_SEARCH_LIMIT = 6;
-const GLOBAL_SEARCH_MIN_LENGTH = 2;
-
-export const adminGlobalSearch = asyncHandler(async (req: Request, res: Response) => {
-  const term = String(req.query.q ?? '').trim();
-
-  if (term.length < GLOBAL_SEARCH_MIN_LENGTH) {
-    return res.status(200).json({ results: [] });
-  }
-
-  const pattern = new RegExp(escapeRegex(term), 'i');
-
-  const [users, products, posts] = await Promise.all([
-    User.find({ $or: [{ username: pattern }, { email: pattern }] })
-      .select('username email accountStatus role')
-      .limit(GLOBAL_SEARCH_LIMIT),
-    Product.find({ title: pattern })
-      .select('title price currency isSold')
-      .limit(GLOBAL_SEARCH_LIMIT),
-    Post.find({ content: pattern })
-      .select('content isReply author')
-      .populate<{ author: Pick<IUser, 'username'> | null }>('author', 'username')
-      .limit(GLOBAL_SEARCH_LIMIT)
-  ]);
-
-  const results = [
-    ...users.map((user) => ({
-      kind: 'user',
-      id: String(user._id),
-      label: user.username,
-      detail: `${user.email} · ${user.accountStatus}`,
-      tab: 'users',
-      search: user.username
-    })),
-    ...products.map((product) => ({
-      kind: 'product',
-      id: String(product._id),
-      label: product.title,
-      detail: `${product.price} ${product.currency}${product.isSold ? ' · vendu' : ''}`,
-      tab: 'products',
-      search: product.title
-    })),
-    ...posts.map((post) => ({
-      kind: 'post',
-      id: String(post._id),
-      label: post.content.slice(0, 80),
-      detail: `${post.isReply ? 'Réponse' : 'Publication'} de ${post.author?.username || 'inconnu'}`,
-      tab: 'moderation',
-      search: post.content.slice(0, 40)
-    }))
-  ];
-
+/**
+ * Recherche transverse (membres, annonces, publications)
+ * @route GET /api/users/admin/search?q=
+ */
+export const adminGlobalSearch = async (req: Request, res: Response) => {
+  const results = await searchAdminEverything(queryString(req.query.q) ?? '');
   return res.status(200).json({ results });
-});
-
-const QUEUE_ITEMS_PER_SOURCE = 25;
-
-const DISPUTE_PENDING_STATUSES: DisputeStatus[] = ['opened', 'under_review'];
-
-const VERIFICATION_DOCUMENT_LABELS: Record<string, string> = {
-  id_card: 'Carte d\'identité',
-  passport: 'Passeport',
-  driver_license: 'Permis de conduire'
 };
 
-const DISPUTE_REASON_LABELS: Record<string, string> = {
-  not_received: 'Colis non reçu',
-  damaged: 'Colis endommagé',
-  not_as_described: 'Non conforme',
-  counterfeit: 'Contrefaçon',
-  wrong_item: 'Mauvais article',
-  partial_delivery: 'Livraison partielle',
-  seller_unresponsive: 'Vendeur silencieux',
-  buyer_abuse: 'Comportement acheteur',
-  other: 'Autre'
+/**
+ * File de travail admin
+ * @route GET /api/users/admin/queue
+ */
+export const getAdminQueue = async (_req: Request, res: Response) => {
+  return res.status(200).json(await loadAdminQueue());
 };
 
-const QUEUE_REASON_LABELS: Record<string, string> = {
-  inappropriate_content: 'Contenu inapproprié',
-  offensive_language: 'Langage offensant',
-  false_information: 'Fausses informations',
-  spam: 'Spam',
-  fraud: 'Fraude',
-  copyright_violation: 'Violation de droit d\'auteur',
-  other: 'Autre'
+/**
+ * @route GET /api/users/admin/stats/timeseries
+ */
+export const getStatsTimeseries = async (_req: Request, res: Response) => {
+  return res.status(200).json({ days: TIMESERIES_DAYS, series: await getDailyActivity() });
 };
-
-const MODERATION_CATEGORY_LABELS: Record<string, string> = {
-  counterfeit: 'Contrefaçon',
-  off_platform_payment: 'Paiement hors plateforme',
-  prohibited_item: 'Objet interdit',
-  other: 'Autre'
-};
-
-type PopulatedUsername = Pick<IUser, 'username'> | null;
-
-interface QueueItem {
-  kind: 'report' | 'dispute' | 'verification' | 'deletion' | 'product_flagged';
-  id: string;
-  label: string;
-  detail: string;
-  subject: string;
-  waitingSince: Date;
-  tab: string;
-}
-
-export const getAdminQueue = asyncHandler(async (_req: Request, res: Response) => {
-  const [reports, disputes, verifications, deletions, flaggedProducts] = await Promise.all([
-    Report.find({ status: 'pending' })
-      .populate<{ reporter: PopulatedUsername }>('reporter', 'username')
-      .select('reason targetType createdAt reporter')
-      .sort({ createdAt: 1 })
-      .limit(QUEUE_ITEMS_PER_SOURCE),
-    Dispute.find({ status: { $in: DISPUTE_PENDING_STATUSES } })
-      .populate<{ buyer: PopulatedUsername }>('buyer', 'username')
-      .populate<{ seller: PopulatedUsername }>('seller', 'username')
-      .select('reason status createdAt buyer seller')
-      .sort({ createdAt: 1 })
-      .limit(QUEUE_ITEMS_PER_SOURCE),
-    IdentityVerification.find({ status: 'pending' })
-      .populate<{ user: PopulatedUsername }>('user', 'username')
-      .select('documentType submittedAt user')
-      .sort({ submittedAt: 1 })
-      .limit(QUEUE_ITEMS_PER_SOURCE),
-    User.find({ scheduledForDeletion: true })
-      .select('username scheduledDeletionDate updatedAt')
-      .sort({ scheduledDeletionDate: 1 })
-      .limit(QUEUE_ITEMS_PER_SOURCE),
-    Product.find({
-      isAvailable: false,
-      'moderationFlag.suspect': true,
-      'moderationFlag.reviewDecision': { $exists: false }
-    })
-      .populate<{ seller: PopulatedUsername }>('seller', 'username')
-      .select('title moderationFlag seller')
-      .sort({ 'moderationFlag.analyzedAt': 1 })
-      .limit(QUEUE_ITEMS_PER_SOURCE)
-  ]);
-
-  const items: QueueItem[] = [
-    ...reports.map((report) => ({
-      kind: 'report' as const,
-      id: String(report._id),
-      label: 'Signalement',
-      detail: `${QUEUE_REASON_LABELS[report.reason] || report.reason} — ${report.targetType === 'product' ? 'produit' : 'avis'}`,
-      subject: report.reporter?.username || 'inconnu',
-      waitingSince: report.createdAt,
-      tab: 'reports'
-    })),
-    ...disputes.map((dispute) => ({
-      kind: 'dispute' as const,
-      id: String(dispute._id),
-      label: dispute.status === 'under_review' ? 'Litige en arbitrage' : 'Litige ouvert',
-      detail: DISPUTE_REASON_LABELS[dispute.reason] || dispute.reason,
-      subject: `${dispute.buyer?.username || '?'} → ${dispute.seller?.username || '?'}`,
-      waitingSince: dispute.createdAt,
-      tab: 'disputes'
-    })),
-    ...verifications.map((verification) => ({
-      kind: 'verification' as const,
-      id: String(verification._id),
-      label: 'Vérification d\'identité',
-      detail: VERIFICATION_DOCUMENT_LABELS[verification.documentType] || verification.documentType,
-      subject: verification.user?.username || 'inconnu',
-      waitingSince: verification.submittedAt,
-      tab: 'verifications'
-    })),
-    ...deletions.map((user) => ({
-      kind: 'deletion' as const,
-      id: String(user._id),
-      label: 'Suppression de compte',
-      detail: user.scheduledDeletionDate
-        ? `Échéance le ${new Date(user.scheduledDeletionDate).toLocaleDateString('fr-FR')}`
-        : 'Échéance non planifiée',
-      subject: user.username,
-      waitingSince: user.updatedAt,
-      tab: 'rgpd'
-    })),
-    ...flaggedProducts.map((product) => ({
-      kind: 'product_flagged' as const,
-      id: String(product._id),
-      label: 'Annonce suspendue',
-      detail: (product.moderationFlag?.categories || [])
-        .map((category: string) => MODERATION_CATEGORY_LABELS[category] || category)
-        .join(', ') || 'Modération IA',
-      subject: `${product.title} — ${product.seller?.username || 'inconnu'}`,
-      waitingSince: product.moderationFlag?.analyzedAt as Date,
-      tab: 'suspended'
-    }))
-  ].sort((a, b) => new Date(a.waitingSince).getTime() - new Date(b.waitingSince).getTime());
-
-  const [reportsTotal, disputesTotal, verificationsTotal, deletionsTotal, suspendedTotal] = await Promise.all([
-    Report.countDocuments({ status: 'pending' }),
-    Dispute.countDocuments({ status: { $in: DISPUTE_PENDING_STATUSES } }),
-    IdentityVerification.countDocuments({ status: 'pending' }),
-    User.countDocuments({ scheduledForDeletion: true }),
-    Product.countDocuments({
-      isAvailable: false,
-      'moderationFlag.suspect': true,
-      'moderationFlag.reviewDecision': { $exists: false }
-    })
-  ]);
-
-  const oldest = items[0]?.waitingSince;
-
-  return res.status(200).json({
-    items,
-    counts: {
-      report: reportsTotal,
-      dispute: disputesTotal,
-      verification: verificationsTotal,
-      deletion: deletionsTotal,
-      suspended: suspendedTotal
-    },
-    total: reportsTotal + disputesTotal + verificationsTotal + deletionsTotal + suspendedTotal,
-    oldestWaitingSince: oldest ?? null
-  });
-});
-
-const TIMESERIES_DAYS = 30;
-
-const toDayKey = (date: Date): string => date.toISOString().slice(0, 10);
-
-interface DailyBucket {
-  _id: string;
-  count: number;
-  amount: number;
-}
-
-const indexDailyBuckets = (buckets: DailyBucket[], field: 'count' | 'amount' = 'count'): Record<string, number> =>
-  buckets.reduce((acc: Record<string, number>, bucket) => {
-    acc[bucket._id] = bucket[field] ?? 0;
-    return acc;
-  }, {});
-
-const dailyCountPipeline = (dateField: string, since: Date, match: Record<string, unknown> = {}) => [
-  { $match: { ...match, [dateField]: { $gte: since } } },
-  {
-    $group: {
-      _id: { $dateToString: { format: '%Y-%m-%d', date: `$${dateField}` } },
-      count: { $sum: 1 },
-      amount: { $sum: '$amount' }
-    }
-  }
-];
-
-export const getStatsTimeseries = asyncHandler(async (_req: Request, res: Response) => {
-  const since = new Date();
-  since.setUTCHours(0, 0, 0, 0);
-  since.setUTCDate(since.getUTCDate() - (TIMESERIES_DAYS - 1));
-
-  const [signups, listings, sales, reports] = await Promise.all([
-    User.aggregate<DailyBucket>(dailyCountPipeline('createdAt', since)),
-    Product.aggregate<DailyBucket>(dailyCountPipeline('createdAt', since)),
-    Payment.aggregate<DailyBucket>(dailyCountPipeline('completedAt', since, { status: 'completed' })),
-    Report.aggregate<DailyBucket>(dailyCountPipeline('createdAt', since))
-  ]);
-
-  const signupsByDay = indexDailyBuckets(signups);
-  const listingsByDay = indexDailyBuckets(listings);
-  const salesByDay = indexDailyBuckets(sales);
-  const revenueByDay = indexDailyBuckets(sales, 'amount');
-  const reportsByDay = indexDailyBuckets(reports);
-
-  const series = Array.from({ length: TIMESERIES_DAYS }, (_, offset) => {
-    const day = new Date(since);
-    day.setUTCDate(day.getUTCDate() + offset);
-    const key = toDayKey(day);
-
-    return {
-      date: key,
-      signups: signupsByDay[key] ?? 0,
-      listings: listingsByDay[key] ?? 0,
-      sales: salesByDay[key] ?? 0,
-      revenue: Number((revenueByDay[key] ?? 0).toFixed(2)),
-      reports: reportsByDay[key] ?? 0
-    };
-  });
-
-  return res.status(200).json({ days: TIMESERIES_DAYS, series });
-});
 
 /**
  * Modifier le statut d'un utilisateur (suspendre/réactiver)
+ * @route PUT /api/users/admin/:userId/status
  */
-export const updateUserStatus = asyncHandler(async (req: Request, res: Response) => {
-  const { userId } = req.params;
+export const updateUserStatus = async (req: Request, res: Response) => {
   const { accountStatus, reason, durationDays } = req.body;
-  const adminId = req.user!.id;
-
-  if (!accountStatus || !['active', 'suspended'].includes(accountStatus)) {
-    return res.status(400).json({ message: 'Statut invalide. Doit être "active" ou "suspended"' });
+  if (!SANCTION_STATUSES.includes(accountStatus)) {
+    throw badRequest('Statut invalide. Doit être "active" ou "suspended"');
   }
 
-  try {
-    const user =
-      accountStatus === 'suspended'
-        ? await suspendUser({ adminId, userId: userId as string, reason, durationDays })
-        : await reactivateUser({ adminId, userId: userId as string, reason });
+  const sanction = { adminId: req.user!.id, userId: String(req.params.userId), reason };
+  const isSuspension = accountStatus === 'suspended';
+  const user = isSuspension
+    ? await suspendUser({ ...sanction, durationDays })
+    : await reactivateUser(sanction);
 
-    return res.status(200).json({
-      message: `Utilisateur ${accountStatus === 'suspended' ? 'suspendu' : 'réactivé'} avec succès`,
-      user: {
-        id: user._id,
-        username: user.username,
-        accountStatus: user.accountStatus,
-        suspension: user.suspension
-      }
-    });
-  } catch (error) {
-    const mapped = mapHttpError(res, error);
-    if (mapped) return mapped;
-    throw error;
-  }
-});
+  return res.status(200).json({
+    message: `Utilisateur ${isSuspension ? 'suspendu' : 'réactivé'} avec succès`,
+    user: {
+      id: user._id,
+      username: user.username,
+      accountStatus: user.accountStatus,
+      suspension: user.suspension
+    }
+  });
+};
 
 /**
  * Modifier le rôle d'un utilisateur
+ * @route PUT /api/users/admin/:userId/role
  */
-export const updateUserRole = asyncHandler(async (req: Request, res: Response) => {
-  const { userId } = req.params;
-  const { role } = req.body;
-
-  if (!role || !['user', 'moderator', 'admin'].includes(role)) {
-    return res.status(400).json({ message: 'Rôle invalide' });
-  }
-
-  const user = await User.findById(userId);
-  if (!user) {
-    return res.status(404).json({ message: 'Utilisateur non trouvé' });
-  }
-
-  const oldRole = user.role;
-  user.role = role;
-  await user.save({ validateBeforeSave: false });
-
-  await AuditLog.create({
-    admin: req.user!.id,
-    action: 'change_role',
-    targetType: 'user',
-    targetId: user._id,
-    details: `Rôle de ${user.username} changé: ${oldRole} → ${role}`
-  });
-
-  dispatchAdminAlert({
-    event: 'user.role_changed',
-    severity: role === 'user' ? 'info' : 'warning',
-    title: `Rôle modifié : ${user.username}`,
-    summary: `${oldRole} → ${role}`,
-    adminTab: 'users',
-    fields: [
-      { name: 'Ancien rôle', value: oldRole, inline: true },
-      { name: 'Nouveau rôle', value: role, inline: true }
-    ],
-    data: { userId, oldRole, newRole: role }
-  });
+export const updateUserRole = async (req: Request, res: Response) => {
+  const user = await changeUserRole({ adminId: req.user!.id, userId: String(req.params.userId), role: req.body.role });
 
   return res.status(200).json({
-    message: `Rôle modifié en "${role}" avec succès`,
+    message: `Rôle modifié en "${user.role}" avec succès`,
     user: {
       id: user._id,
       username: user.username,
       role: user.role
     }
   });
-});
+};
 
 /**
  * RGPD: Obtenir les demandes de suppression en attente
+ * @route GET /api/users/admin/deletion-requests
  */
-export const getDeletionRequests = asyncHandler(async (req: Request, res: Response) => {
-  const users = await User.find({ scheduledForDeletion: true })
-    .select('username email scheduledDeletionDate createdAt')
-    .sort({ scheduledDeletionDate: 1 });
-
-  return res.status(200).json({ users });
-});
+export const getDeletionRequests = async (_req: Request, res: Response) => {
+  return res.status(200).json({ users: await listDeletionRequests() });
+};
 
 /**
  * RGPD: Statistiques de consentement
+ * @route GET /api/users/admin/rgpd-stats
  */
-export const getRgpdStats = asyncHandler(async (req: Request, res: Response) => {
-  const [privacyAccepted, dataProcessing, marketing] = await Promise.all([
-    User.countDocuments({ privacyPolicyAccepted: true }),
-    User.countDocuments({ dataProcessingConsent: true }),
-    User.countDocuments({ marketingConsent: true })
-  ]);
-
-  return res.status(200).json({ privacyAccepted, dataProcessing, marketing });
-});
+export const getRgpdStats = async (_req: Request, res: Response) => {
+  return res.status(200).json(await getConsentCounts());
+};
 
 /**
  * RGPD: Export des données d'un utilisateur (Art. 15 - Droit d'accès)
+ * @route GET /api/users/admin/export-data?search=
  */
-export const adminExportUserData = asyncHandler(async (req: Request, res: Response) => {
-  const search = req.query.search;
-  if (!search || typeof search !== 'string') {
-    return res.status(400).json({ message: 'Paramètre de recherche requis' });
-  }
-
-  const exactPattern = `^${escapeRegex(search)}$`;
-  const user = await User.findOne({
-    $or: [
-      { username: { $regex: exactPattern, $options: 'i' } },
-      { email: { $regex: exactPattern, $options: 'i' } }
-    ]
-  }).select('-password -emailVerificationToken -passwordResetToken -phoneVerificationCode -adminNotes');
-
-  if (!user) {
-    return res.status(404).json({ message: 'Utilisateur introuvable' });
-  }
-
-  const products = await Product.find({ seller: user._id }).select('-__v');
-
-  return res.status(200).json({
-    exportDate: new Date().toISOString(),
-    user: user.toObject(),
-    products,
-  });
-});
+export const adminExportUserData = async (req: Request, res: Response) => {
+  return res.status(200).json(await exportUserDataByIdentifier(req.query.search));
+};
 
 /**
  * RGPD: Anonymiser un utilisateur (Art. 17 - Droit à l'effacement)
+ * @route POST /api/users/admin/anonymize
  */
-export const adminAnonymizeUser = asyncHandler(async (req: Request, res: Response) => {
-  const { search } = req.body;
-  if (!search || typeof search !== 'string') {
-    return res.status(400).json({ message: 'Paramètre de recherche requis' });
-  }
-
-  // Correspondance exacte : un motif comme `.*` ne doit jamais désigner
-  // un utilisateur arbitraire pour une anonymisation irréversible.
-  const exactPattern = `^${escapeRegex(search)}$`;
-  const user = await User.findOne({
-    $or: [
-      { username: { $regex: exactPattern, $options: 'i' } },
-      { email: { $regex: exactPattern, $options: 'i' } }
-    ]
-  });
-
-  if (!user) {
-    return res.status(404).json({ message: 'Utilisateur introuvable' });
-  }
-
-  if (user.role === 'admin') {
-    return res.status(403).json({ message: 'Impossible d\'anonymiser un administrateur' });
-  }
-
-  const { pseudonym: anonymizedId } = await eraseUserAccount(user._id.toString());
-
-  await AuditLog.create({
-    admin: req.user!.id,
-    action: 'anonymize_user',
-    targetType: 'user',
-    targetId: user._id,
-    details: `Utilisateur anonymisé (RGPD Art. 17)`,
-    metadata: { anonymizedId }
-  });
-
-  dispatchAdminAlert({
-    event: 'gdpr.user_anonymized',
-    severity: 'info',
-    title: 'Utilisateur anonymisé',
-    summary: `Anonymisation effectuée par un administrateur (RGPD Art. 17).`,
-    adminTab: 'rgpd',
-    fields: [{ name: 'Identifiant anonymisé', value: anonymizedId, inline: true }],
-    data: { anonymizedId }
-  });
-
+export const adminAnonymizeUser = async (req: Request, res: Response) => {
+  await anonymizeUserByIdentifier({ adminId: req.user!.id, identifier: req.body.search });
   return res.status(200).json({ message: 'Utilisateur anonymisé avec succès' });
-});
+};
 
 /**
  * RGPD: Confirmer la suppression d'un compte
+ * @route POST /api/users/admin/:userId/confirm-deletion
  */
-export const confirmDeletion = asyncHandler(async (req: Request, res: Response) => {
-  const { userId } = req.params;
-
-  const user = await User.findById(userId);
-  if (!user) {
-    return res.status(404).json({ message: 'Utilisateur non trouvé' });
-  }
-
-  const { pseudonym: anonymizedId } = await eraseUserAccount(user._id.toString());
-
-  await AuditLog.create({
-    admin: req.user!.id,
-    action: 'confirm_deletion',
-    targetType: 'user',
-    targetId: user._id,
-    details: 'Suppression de compte confirmée et anonymisée'
-  });
-
-  dispatchAdminAlert({
-    event: 'gdpr.deletion_confirmed',
-    severity: 'info',
-    title: 'Suppression de compte confirmée',
-    summary: 'Un administrateur a exécuté une demande de suppression de compte.',
-    adminTab: 'rgpd',
-    fields: [{ name: 'Identifiant anonymisé', value: anonymizedId, inline: true }],
-    data: { anonymizedId }
-  });
-
+export const confirmDeletion = async (req: Request, res: Response) => {
+  await confirmAccountDeletion({ adminId: req.user!.id, userId: String(req.params.userId) });
   return res.status(200).json({ message: 'Compte supprimé et anonymisé' });
-});
+};
 
 /**
  * RGPD: Annuler une demande de suppression
+ * @route POST /api/users/admin/:userId/cancel-deletion
  */
-export const adminCancelDeletion = asyncHandler(async (req: Request, res: Response) => {
-  const { userId } = req.params;
-
-  const user = await User.findById(userId);
-  if (!user) {
-    return res.status(404).json({ message: 'Utilisateur non trouvé' });
-  }
-
-  user.scheduledForDeletion = false;
-  user.scheduledDeletionDate = undefined;
-  await user.save({ validateBeforeSave: false });
-
-  await AuditLog.create({
-    admin: req.user!.id,
-    action: 'cancel_deletion',
-    targetType: 'user',
-    targetId: user._id,
-    details: 'Demande de suppression annulée'
-  });
-
+export const adminCancelDeletion = async (req: Request, res: Response) => {
+  await cancelDeletionRequestByAdmin({ adminId: req.user!.id, userId: String(req.params.userId) });
   return res.status(200).json({ message: 'Demande de suppression annulée' });
-});
+};

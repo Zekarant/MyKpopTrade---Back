@@ -15,6 +15,7 @@ import {
 } from './paypalClient';
 import { PayPalPartnerService, SELLER_BLOCK_MESSAGES } from './paypalPartnerService';
 import { paymentConfig } from '../../../config/paymentConfig';
+import env from '../../../config/env';
 import logger from '../../../commons/utils/logger';
 import { formatForPayPal } from '../../../commons/utils/moneyMath';
 import { CheckoutBreakdown, resolveCheckout, ShippingAddress, ShippingMethod } from './checkoutService';
@@ -288,8 +289,8 @@ export class PayPalPaymentService {
               // « Prefill » de l'IWT).
               email_address: buyer?.email,
               experience_context: {
-                return_url: `${process.env.FRONTEND_URL}/payment/success?source=paypal`,
-                cancel_url: `${process.env.FRONTEND_URL}/payment/cancel?source=paypal`,
+                return_url: `${env.FRONTEND_URL}/payment/success?source=paypal`,
+                cancel_url: `${env.FRONTEND_URL}/payment/cancel?source=paypal`,
                 brand_name: 'MyKpopTrade',
                 shipping_preference: address ? 'SET_PROVIDED_ADDRESS' : 'NO_SHIPPING',
                 user_action: 'PAY_NOW',

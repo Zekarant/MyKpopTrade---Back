@@ -1,5 +1,5 @@
 jest.mock('../../../notifications/services/notificationService', () => ({
-  NotificationService: { createNotification: jest.fn().mockResolvedValue(undefined) }
+  createNotification: jest.fn().mockResolvedValue(undefined)
 }));
 jest.mock('../../../../commons/services/adminAlertService', () => ({
   dispatchAdminAlert: jest.fn()
@@ -14,7 +14,7 @@ import {
 import { createTestProduct, createTestUser } from '../../../../tests/helpers/fixtures';
 import Payment from '../../../../models/paymentModel';
 import Product from '../../../../models/productModel';
-import { NotificationService } from '../../../notifications/services/notificationService';
+import { createNotification } from '../../../notifications/services/notificationService';
 import { dispatchAdminAlert } from '../../../../commons/services/adminAlertService';
 import { PayPalService } from '../paypalService';
 import { PayPalWebhookService } from '../paypalWebhookService';
@@ -92,7 +92,7 @@ describe('finalisation d\'un paiement (integration)', () => {
     expect(String(sold?.soldTo)).toBe(String(buyer._id));
     expect(sold?.soldAt).toEqual(soldAt);
     // Une seule annonce : vendeur + acheteur.
-    expect(NotificationService.createNotification).toHaveBeenCalledTimes(2);
+    expect(createNotification).toHaveBeenCalledTimes(2);
   });
 
   it('deux finalisations simultanées : une seule fait la transition', async () => {
@@ -105,7 +105,7 @@ describe('finalisation d\'un paiement (integration)', () => {
 
     expect(outcomes.sort()).toEqual(['already_completed', 'completed']);
     // Une seule annonce : vendeur + acheteur.
-    expect(NotificationService.createNotification).toHaveBeenCalledTimes(2);
+    expect(createNotification).toHaveBeenCalledTimes(2);
   });
 
   it('webhook seul : finalise le paiement et vend le produit à l\'acheteur', async () => {
@@ -139,7 +139,7 @@ describe('finalisation d\'un paiement (integration)', () => {
 
     expect(outcome).toBe('already_completed');
     expect((await Payment.findById(payment._id))?.captureId).toBe(CAPTURE_ID);
-    expect(NotificationService.createNotification).not.toHaveBeenCalled();
+    expect(createNotification).not.toHaveBeenCalled();
   });
 
   it('ne ramène pas à « completed » un paiement remboursé (webhook redélivré)', async () => {
@@ -164,7 +164,7 @@ describe('finalisation d\'un paiement (integration)', () => {
     expect(dispatchAdminAlert).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'payment.product_already_sold', severity: 'critical' })
     );
-    expect(NotificationService.createNotification).not.toHaveBeenCalled();
+    expect(createNotification).not.toHaveBeenCalled();
   });
 
   it('capture d\'un ordre non approuvé : 400 ORDER_NOT_APPROVED avec l\'URL d\'approbation, produit remis en vente', async () => {
