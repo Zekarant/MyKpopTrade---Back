@@ -4,8 +4,8 @@ import { createApp } from '../../app';
 import { startInMemoryMongo, stopInMemoryMongo, clearAllCollections } from '../helpers/mongoMemory';
 import { createTestUser } from '../helpers/fixtures';
 import { generateAccessToken } from '../../commons/services/tokenService';
-import SavedSearch from '../../modules/savedSearches/model';
-import { MAX_SAVED_SEARCHES_PER_USER } from '../../modules/savedSearches/service';
+import SavedSearch from '../../models/savedSearchModel';
+import { MAX_SAVED_SEARCHES_PER_USER } from '../../modules/savedSearches/services/savedSearchService';
 
 /** Recherches sauvegardées : CRUD réservé à leur propriétaire, critères en liste blanche. */
 const app = createApp();

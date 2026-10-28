@@ -1,13 +1,13 @@
 import mongoose from 'mongoose';
-import Product from '../../models/productModel';
-import KpopGroup from '../../models/kpopGroupModel';
-import KpopAlbum from '../../models/albumModel';
-import SavedSearch from './model';
-import { groupKeysForProduct, matchesCriteria, MatchableProduct, ProductCatalogIds } from './matcher';
-import type { SavedSearchCriteria } from './validation';
-import { createNotification } from '../notifications/services/notificationService';
-import { isBlockedBetween } from '../users/services/userBlockService';
-import logger from '../../commons/utils/logger';
+import Product from '../../../models/productModel';
+import KpopGroup from '../../../models/kpopGroupModel';
+import KpopAlbum from '../../../models/albumModel';
+import SavedSearch from '../../../models/savedSearchModel';
+import { groupKeysForProduct, matchesCriteria, MatchableProduct, ProductCatalogIds } from './savedSearchMatcher';
+import type { SavedSearchCriteria } from './savedSearchValidationService';
+import { createNotification } from '../../notifications/services/notificationService';
+import { isBlockedBetween } from '../../users/services/userBlockService';
+import logger from '../../../commons/utils/logger';
 
 /** Au plus une alerte par recherche et par heure : les annonces suivantes sont regroupées. */
 export const SAVED_SEARCH_ALERT_COOLDOWN_MS = 60 * 60 * 1000;

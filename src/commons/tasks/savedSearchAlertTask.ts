@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import logger from '../utils/logger';
-import { flushDueSavedSearchAlerts } from '../../modules/savedSearches/alertService';
+import { flushDueSavedSearchAlerts } from '../../modules/savedSearches/services/savedSearchAlertService';
 
 /** Un quart d'heure : une alerte regroupée part au plus 15 min après la fin de son délai. */
 const FLUSH_SCHEDULE = '*/15 * * * *';

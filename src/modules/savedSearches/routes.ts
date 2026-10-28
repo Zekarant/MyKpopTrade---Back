@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticateJWT } from '../../commons/middlewares/authMiddleware';
-import * as savedSearchController from './controller';
+import * as savedSearchController from './controllers/savedSearchController';
 
 const router = Router();
 

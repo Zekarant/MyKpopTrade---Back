@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
-import SavedSearch, { ISavedSearch } from './model';
-import { HttpError } from '../../commons/utils/httpError';
-import { toGroupKeys } from './matcher';
-import type { SavedSearchCreateInput, SavedSearchUpdateInput } from './validation';
+import SavedSearch, { ISavedSearch } from '../../../models/savedSearchModel';
+import { HttpError } from '../../../commons/utils/httpError';
+import { toGroupKeys } from './savedSearchMatcher';
+import type { SavedSearchCreateInput, SavedSearchUpdateInput } from './savedSearchValidationService';
 
 /** Au-delà, les alertes deviendraient du bruit : l'utilisateur fait le tri. */
 export const MAX_SAVED_SEARCHES_PER_USER = 20;

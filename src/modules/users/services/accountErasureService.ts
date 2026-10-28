@@ -7,7 +7,7 @@ import SearchHistory from '../../../models/historicSearchModel';
 import PushSubscription from '../../../models/pushSubscriptionModel';
 import IdentityVerification from '../../../models/identityVerificationModel';
 import Follow from '../../../models/followModel';
-import SavedSearch from '../../savedSearches/model';
+import SavedSearch from '../../../models/savedSearchModel';
 import Block from '../../../models/blockModel';
 import { deleteSecureDocument } from '../../../commons/services/secureStorageService';
 import { invalidateAllUserRefreshTokens } from '../../../commons/services/tokenService';

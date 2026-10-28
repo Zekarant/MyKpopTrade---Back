@@ -1,12 +1,12 @@
 import { Request, Response } from 'express';
-import { badRequest } from '../../commons/utils/httpError';
-import { validateSavedSearchCreate, validateSavedSearchUpdate } from './validation';
+import { badRequest } from '../../../commons/utils/httpError';
+import { validateSavedSearchCreate, validateSavedSearchUpdate } from '../services/savedSearchValidationService';
 import {
   listSavedSearches,
   createSavedSearch,
   updateSavedSearch,
   deleteSavedSearch
-} from './service';
+} from '../services/savedSearchService';
 
 const VALIDATION_ERROR_CODE = 'VALIDATION_ERROR';
 

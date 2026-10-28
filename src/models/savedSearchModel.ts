@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import type { SavedSearchCriteria } from './validation';
+import type { SavedSearchCriteria } from '../modules/savedSearches/services/savedSearchValidationService';
 
 /**
  * Clé de groupe des recherches sans filtre de groupe : elles peuvent

@@ -1,6 +1,6 @@
-import { matchesCriteria, toGroupKeys, groupKeysForProduct, MatchableProduct, ProductCatalogIds } from '../matcher';
-import { ANY_GROUP_KEY } from '../model';
-import type { SavedSearchCriteria } from '../validation';
+import { matchesCriteria, toGroupKeys, groupKeysForProduct, MatchableProduct, ProductCatalogIds } from '../savedSearchMatcher';
+import { ANY_GROUP_KEY } from '../../../../models/savedSearchModel';
+import type { SavedSearchCriteria } from '../savedSearchValidationService';
 
 const GROUP_ID = '64b000000000000000000001';
 const ALBUM_ID = '64b000000000000000000002';

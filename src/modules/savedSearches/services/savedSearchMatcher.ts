@@ -1,6 +1,6 @@
-import type { IProduct } from '../../models/productModel';
-import type { SavedSearchCriteria } from './validation';
-import { ANY_GROUP_KEY } from './model';
+import type { IProduct } from '../../../models/productModel';
+import type { SavedSearchCriteria } from './savedSearchValidationService';
+import { ANY_GROUP_KEY } from '../../../models/savedSearchModel';
 
 export type MatchableProduct = Pick<
   IProduct,

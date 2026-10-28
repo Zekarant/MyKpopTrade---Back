@@ -3,19 +3,19 @@ import {
   startInMemoryMongo,
   stopInMemoryMongo,
   clearAllCollections
-} from '../../../tests/helpers/mongoMemory';
-import { createTestUser, createTestProduct } from '../../../tests/helpers/fixtures';
-import Notification from '../../../models/notificationModel';
-import Block from '../../../models/blockModel';
-import KpopGroup from '../../../models/kpopGroupModel';
-import SavedSearch from '../model';
-import { createSavedSearch } from '../service';
+} from '../../../../tests/helpers/mongoMemory';
+import { createTestUser, createTestProduct } from '../../../../tests/helpers/fixtures';
+import Notification from '../../../../models/notificationModel';
+import Block from '../../../../models/blockModel';
+import KpopGroup from '../../../../models/kpopGroupModel';
+import SavedSearch from '../../../../models/savedSearchModel';
+import { createSavedSearch } from '../savedSearchService';
 import {
   notifyMatchingSavedSearches,
   flushDueSavedSearchAlerts,
   SAVED_SEARCH_ALERT_COOLDOWN_MS
-} from '../alertService';
-import type { SavedSearchCriteria } from '../validation';
+} from '../savedSearchAlertService';
+import type { SavedSearchCriteria } from '../savedSearchValidationService';
 
 const T0 = new Date('2026-10-09T10:00:00Z');
 const minutesAfter = (minutes: number) => new Date(T0.getTime() + minutes * 60 * 1000);
