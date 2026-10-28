@@ -10,6 +10,8 @@ module.exports = {
   maxWorkers: '50%',
   // Sur une machine chargée, une requête MongoDB en mémoire dépasse parfois les 5 s par défaut.
   testTimeout: 15000,
+  // Valeurs factices propres aux tests, indépendantes du .env (absent en CI).
+  setupFiles: ['<rootDir>/src/tests/setupEnv.ts'],
   testPathIgnorePatterns: ['/node_modules/', '/dist/', '/\\.claude/'],
   modulePathIgnorePatterns: ['/\\.claude/'],
   // Couverture mesurée sur tout le code applicatif, y compris les fichiers
