@@ -4,7 +4,7 @@ import logger from '../../../commons/utils/logger';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { isAiChatConfigured, aiChatJson } from '../../../commons/services/aiChatClient';
 import { createNotification } from '../../notifications/services/notificationService';
-import { dispatchSavedSearchAlerts } from '../../savedSearches/alertService';
+import { dispatchSavedSearchAlerts } from '../../savedSearches/services/savedSearchAlertService';
 import { findSuspectKeywords } from './suspectKeywords';
 import { buildModerationPrompt } from './productModerationPrompt';
 import { parseModerationResult } from './productModerationParser';

@@ -12,7 +12,7 @@ import { queryString } from '../../../commons/utils/query';
 import { validateProductData, validateProductUpdate } from './productValidationService';
 import { notifyWishlistPriceDrop, notifyWishlistUnavailable } from './wishlistAlertService';
 import { dispatchProductModeration, awaitsModerationVerdict } from './productModerationService';
-import { dispatchSavedSearchAlerts } from '../../savedSearches/alertService';
+import { dispatchSavedSearchAlerts } from '../../savedSearches/services/savedSearchAlertService';
 import { assertCatalogConsistency, buildCatalogClauses, parseCatalogCriteria } from './productCatalogService';
 
 const DEFAULT_LIST_LIMIT = 20;

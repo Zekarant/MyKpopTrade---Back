@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import mongoose from 'mongoose';
-import type { IProduct } from '../../models/productModel';
+import type { IProduct } from '../../../models/productModel';
 
 const CONDITIONS = ['new', 'likeNew', 'good', 'fair', 'poor'] as const satisfies readonly IProduct['condition'][];
 const PRODUCT_TYPES = ['photocard', 'album', 'merch', 'other'] as const satisfies readonly IProduct['type'][];

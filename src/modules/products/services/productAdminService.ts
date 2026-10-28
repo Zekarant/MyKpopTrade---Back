@@ -9,7 +9,7 @@ import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import logger from '../../../commons/utils/logger';
 import { createNotification } from '../../notifications/services/notificationService';
-import { dispatchSavedSearchAlerts } from '../../savedSearches/alertService';
+import { dispatchSavedSearchAlerts } from '../../savedSearches/services/savedSearchAlertService';
 
 const PRODUCT_TYPES: readonly IProduct['type'][] = ['photocard', 'album', 'merch', 'other'];
 const NEW_PRODUCTS_WINDOW_DAYS = 7;

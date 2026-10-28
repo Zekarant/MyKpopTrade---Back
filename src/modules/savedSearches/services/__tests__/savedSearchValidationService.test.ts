@@ -1,4 +1,4 @@
-import { validateSavedSearchCreate, validateSavedSearchUpdate } from '../validation';
+import { validateSavedSearchCreate, validateSavedSearchUpdate } from '../savedSearchValidationService';
 
 describe('validateSavedSearchCreate', () => {
   it('retire les critères vides envoyés par la page de recherche', () => {
