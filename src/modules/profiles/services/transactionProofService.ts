@@ -1,7 +1,7 @@
 import { QueryFilter, isValidObjectId } from 'mongoose';
 import TransactionProof, { ITransactionProof } from '../../../models/transactionProofModel';
 import User from '../../../models/userModel';
-import { HttpError, notFound } from '../../../commons/utils/httpError';
+import { HttpError, userNotFound } from '../../../commons/utils/httpError';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 
 /**
@@ -96,7 +96,7 @@ export async function getVerificationStats(userId: string) {
     ? await User.findById(userId, { username: 1, statistics: 1 }).lean()
     : null;
   if (!user) {
-    throw notFound('Utilisateur non trouvé', 'USER_NOT_FOUND');
+    throw userNotFound();
   }
 
   const stats = await TransactionProof.aggregate<{ status?: string; count: number }>([

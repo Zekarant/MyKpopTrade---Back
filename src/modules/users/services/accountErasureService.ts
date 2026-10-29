@@ -12,7 +12,7 @@ import Block from '../../../models/blockModel';
 import { deleteSecureDocument } from '../../../commons/services/secureStorageService';
 import { invalidateAllUserRefreshTokens } from '../../../commons/services/tokenService';
 import { anonymizeBuyerPayments } from '../../payments/services/paymentAnonymizationService';
-import { notFound } from '../../../commons/utils/httpError';
+import { userNotFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 
 const DEFAULT_PROFILE_PICTURE = 'https://mykpoptrade.com/images/avatar-default.png';
@@ -70,7 +70,7 @@ export function erasePersonalFields(user: IUser, pseudonym: string): void {
 export async function eraseUserAccount(userId: string): Promise<{ pseudonym: string }> {
   const user = await User.findById(userId);
   if (!user) {
-    throw notFound('Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   const pseudonym = deletedUsernameFor(userId);

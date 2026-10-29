@@ -1,14 +1,14 @@
-import mongoose from 'mongoose';
 import { Request, Response } from 'express';
 import * as followService from '../services/followService';
 import { notFound } from '../../../commons/utils/httpError';
 import { parsePagination } from '../../../commons/utils/pagination';
+import { isObjectIdString } from '../../../commons/utils/query';
 
 const PAGE_OPTIONS = { defaultLimit: 20, maxLimit: 50 };
 
 /** Identifiant de membre lu dans l'URL ; un identifiant mal formé ne désigne personne (404). */
 function readUserId(value: unknown, message = 'Utilisateur introuvable'): string {
-  if (typeof value !== 'string' || !mongoose.Types.ObjectId.isValid(value)) {
+  if (!isObjectIdString(value)) {
     throw notFound(message);
   }
   return value;

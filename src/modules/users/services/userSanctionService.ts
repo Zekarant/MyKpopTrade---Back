@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import User from '../../../models/userModel';
-import { badRequest, forbidden, notFound } from '../../../commons/utils/httpError';
+import { badRequest, forbidden, userNotFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { recordAuditLog } from '../../../commons/utils/auditService';
 import { createNotification } from '../../notifications/services/notificationService';
@@ -34,7 +34,7 @@ const resolveSuspensionEnd = (durationDays: unknown): Date | undefined => {
 const loadSanctionableUser = async (userId: string) => {
   const user = await User.findById(userId);
   if (!user) {
-    throw notFound('Utilisateur non trouvé');
+    throw userNotFound();
   }
   if (user.role === 'admin') {
     throw forbidden('Impossible de modifier le statut d\'un administrateur', 'ADMIN_PROTECTED');

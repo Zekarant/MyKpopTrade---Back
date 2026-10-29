@@ -16,6 +16,7 @@ import { buildCsvFile, CSV_EXPORT_ROW_LIMIT, CsvFile } from '../../../commons/ut
 import { badRequest, forbidden, notFound } from '../../../commons/utils/httpError';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 import { describeReportTarget, excerpt, findReportTarget, loadReportTargetView } from './reportTargetService';
+import { isObjectIdString } from '../../../commons/utils/query';
 
 /** Code MongoDB d'une violation d'index unique. */
 const DUPLICATE_KEY_ERROR = 11000;
@@ -68,7 +69,7 @@ export function assertValidTarget(targetType: unknown, targetId: unknown): asser
   if (!isReportTargetType(targetType)) {
     throw badRequest(`Type de cible invalide. Valeurs acceptées : ${REPORT_TARGET_TYPES.join(', ')}`);
   }
-  if (typeof targetId !== 'string' || !mongoose.Types.ObjectId.isValid(targetId)) {
+  if (!isObjectIdString(targetId)) {
     throw badRequest('ID de cible invalide');
   }
 }

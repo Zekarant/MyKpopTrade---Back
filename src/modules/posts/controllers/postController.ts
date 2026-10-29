@@ -1,8 +1,8 @@
-import mongoose from 'mongoose';
 import { Request, Response } from 'express';
 import * as postService from '../services/postService';
-import { badRequest, notFound } from '../../../commons/utils/httpError';
+import { badRequest } from '../../../commons/utils/httpError';
 import { parsePagination } from '../../../commons/utils/pagination';
+import { isObjectIdString } from '../../../commons/utils/query';
 
 const PAGE_OPTIONS = { defaultLimit: 20, maxLimit: 50 };
 const MAX_CONTENT_LENGTH = 1000;
@@ -18,8 +18,8 @@ function readContent(value: unknown): string {
 
 /** Un identifiant de post mal formé ne désigne aucun post (404). */
 function readPostId(value: unknown): string {
-  if (typeof value !== 'string' || !mongoose.Types.ObjectId.isValid(value)) {
-    throw notFound('Post introuvable');
+  if (!isObjectIdString(value)) {
+    throw postService.postNotFound();
   }
   return value;
 }
@@ -42,7 +42,7 @@ export const createPost = async (req: Request, res: Response) => {
  */
 export const getUserPosts = async (req: Request, res: Response) => {
   const { userId } = req.params;
-  if (typeof userId !== 'string' || !mongoose.Types.ObjectId.isValid(userId)) {
+  if (!isObjectIdString(userId)) {
     throw badRequest('Identifiant utilisateur invalide');
   }
   return res.status(200).json(await postService.listUserPosts(userId, parsePagination(req.query, PAGE_OPTIONS)));

@@ -159,7 +159,7 @@ describe('HTTP — administration des membres', () => {
 
       expect(invalid.status).toBe(400);
       expect(unknown.status).toBe(404);
-      expect(unknown.body.code).toBe('NOT_FOUND');
+      expect(unknown.body.code).toBe('USER_NOT_FOUND');
     });
 
     it('ajoute puis supprime une note, avec trace d\'audit', async () => {

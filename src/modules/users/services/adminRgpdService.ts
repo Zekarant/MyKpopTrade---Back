@@ -3,9 +3,8 @@ import Product from '../../../models/productModel';
 import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
-import { badRequest, forbidden, notFound } from '../../../commons/utils/httpError';
+import { badRequest, forbidden, notFound, userNotFound } from '../../../commons/utils/httpError';
 import { eraseUserAccount } from './accountErasureService';
-import { USER_NOT_FOUND_MESSAGE } from './adminUserService';
 
 const IDENTIFIER_NOT_FOUND_MESSAGE = 'Utilisateur introuvable';
 
@@ -124,7 +123,7 @@ export async function cancelDeletionRequestByAdmin({ adminId, userId }: { adminI
     .select('_id')
     .lean();
   if (!user) {
-    throw notFound(USER_NOT_FOUND_MESSAGE);
+    throw userNotFound();
   }
 
   await recordAuditLog({

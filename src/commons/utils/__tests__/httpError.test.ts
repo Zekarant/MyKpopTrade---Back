@@ -1,5 +1,11 @@
 import mongoose from 'mongoose';
-import { HttpError, assertOwner } from '../httpError';
+import { HttpError, assertOwner, userNotFound } from '../httpError';
+
+describe('userNotFound', () => {
+  it('même 404, même message et même code partout', () => {
+    expect(userNotFound()).toMatchObject({ statusCode: 404, message: 'Utilisateur non trouvé', code: 'USER_NOT_FOUND' });
+  });
+});
 
 describe('assertOwner', () => {
   const userId = new mongoose.Types.ObjectId().toString();

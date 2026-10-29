@@ -7,7 +7,7 @@ import { listFollowedUserIds } from '../../follows/services/followService';
 const AUTHOR_FIELDS = 'username profilePicture isIdentityVerified';
 const POST_NOT_FOUND_MESSAGE = 'Post introuvable';
 
-const postNotFound = () => notFound(POST_NOT_FOUND_MESSAGE);
+export const postNotFound = () => notFound(POST_NOT_FOUND_MESSAGE);
 
 async function findPopulatedPost(postId: mongoose.Types.ObjectId | string) {
   return await Post.findById(postId).populate('author', AUTHOR_FIELDS).lean();

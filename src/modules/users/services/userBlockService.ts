@@ -2,7 +2,7 @@ import { Types } from 'mongoose';
 import Block from '../../../models/blockModel';
 import User from '../../../models/userModel';
 import Follow from '../../../models/followModel';
-import { HttpError, notFound } from '../../../commons/utils/httpError';
+import { HttpError, userNotFound } from '../../../commons/utils/httpError';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 
 type UserIdLike = string | Types.ObjectId;
@@ -80,7 +80,7 @@ export async function blockUser(blockerId: string, blockedId: string): Promise<v
     throw new HttpError(400, 'Vous ne pouvez pas vous bloquer vous-même', 'CANNOT_BLOCK_SELF');
   }
   if (!(await User.exists({ _id: blockedId }))) {
-    throw notFound('Utilisateur introuvable');
+    throw userNotFound();
   }
 
   const alreadyBlocked = await Block.exists({ blocker: blockerId, blocked: blockedId });

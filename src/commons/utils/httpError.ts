@@ -16,6 +16,9 @@ export class HttpError extends Error {
 /** 404 avec un message lisible : la ressource n'existe pas ou n'est pas visible. */
 export const notFound = (message = 'Ressource introuvable', code = 'NOT_FOUND') => new HttpError(404, message, code);
 
+/** 404 d'un compte absent (ou supprimé) : même message et même code dans toute l'API. */
+export const userNotFound = () => notFound('Utilisateur non trouvé', 'USER_NOT_FOUND');
+
 /** 400 pour une entrée client invalide. */
 export const badRequest = (message: string, code = 'BAD_REQUEST', details?: Record<string, unknown>) =>
   new HttpError(400, message, code, details);

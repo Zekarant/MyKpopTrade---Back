@@ -1,8 +1,8 @@
-import mongoose from 'mongoose';
 import { Request, Response } from 'express';
-import { notFound } from '../../../commons/utils/httpError';
+import { userNotFound } from '../../../commons/utils/httpError';
 import { parsePagination } from '../../../commons/utils/pagination';
 import logger from '../../../commons/utils/logger';
+import { isObjectIdString } from '../../../commons/utils/query';
 import {
   blockUser,
   unblockUser,
@@ -19,8 +19,8 @@ const MAX_PAGE_SIZE = 50;
  */
 function targetUserId(req: Request): string {
   const id = req.params.id;
-  if (typeof id !== 'string' || !mongoose.Types.ObjectId.isValid(id)) {
-    throw notFound('Utilisateur introuvable');
+  if (!isObjectIdString(id)) {
+    throw userNotFound();
   }
   return id;
 }

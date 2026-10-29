@@ -5,7 +5,7 @@ import { IUser } from '../../../models/userModel';
 import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
-import { notFound } from '../../../commons/utils/httpError';
+import { postNotFound } from '../../posts/services/postService';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 
 const AUDIT_TARGET_TYPES: IAuditLog['targetType'][] = [
@@ -62,7 +62,7 @@ export async function deletePostAsAdmin({ adminId, postId, reason }: { adminId: 
     .populate<{ author: Pick<IUser, 'username'> | null }>('author', 'username')
     .lean();
   if (!post) {
-    throw notFound('Post introuvable');
+    throw postNotFound();
   }
 
   if (!post.isReply) {

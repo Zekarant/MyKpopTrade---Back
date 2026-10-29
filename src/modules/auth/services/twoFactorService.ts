@@ -8,7 +8,7 @@ import {
 } from '../../../commons/utils/totp';
 import User, { IUser } from '../../../models/userModel';
 import { EncryptionService } from '../../../commons/utils/encryptionService';
-import { HttpError } from '../../../commons/utils/httpError';
+import { HttpError, userNotFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import env from '../../../config/env';
 import { consumeTwoFactorAttempt } from './twoFactorAttemptLimiter';
@@ -77,7 +77,7 @@ async function loadUserWithTwoFactor(userId: string): Promise<IUser> {
   );
 
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   return user;
@@ -255,7 +255,7 @@ export async function disableTwoFactor(
   );
 
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   if (!isTwoFactorEnabled(user)) {

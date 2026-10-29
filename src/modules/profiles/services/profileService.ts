@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import User, { IUser } from '../../../models/userModel';
 import Product from '../../../models/productModel';
 import Rating from '../../../models/ratingModel';
-import { HttpError, notFound } from '../../../commons/utils/httpError';
+import { HttpError, userNotFound } from '../../../commons/utils/httpError';
 
 /**
  * Calcule le pourcentage de complétion du profil
@@ -60,7 +60,6 @@ async function removeFileIfExists(absolutePath: string): Promise<void> {
   await fs.rm(absolutePath, { force: true });
 }
 
-const userNotFoundError = () => notFound('Utilisateur non trouvé', 'USER_NOT_FOUND');
 
 export async function fetchPublicProfile(identifier: string) {
   const isValidObjectId = mongoose.Types.ObjectId.isValid(identifier);
@@ -135,7 +134,7 @@ export async function fetchMyProfile(userId: string) {
   const user = await User.findById(userId);
 
   if (!user) {
-    throw userNotFoundError();
+    throw userNotFound();
   }
 
   const completenessPercentage = calculateProfileCompleteness(user);
@@ -203,7 +202,7 @@ export async function replaceProfileImage({
   try {
     const user = await User.findById(userId);
     if (!user) {
-      throw userNotFoundError();
+      throw userNotFound();
     }
 
     const previous = user[field];
@@ -237,7 +236,7 @@ export async function removeProfileImage({
 }): Promise<void> {
   const user = await User.findById(userId);
   if (!user) {
-    throw userNotFoundError();
+    throw userNotFound();
   }
 
   const current = user[field];
