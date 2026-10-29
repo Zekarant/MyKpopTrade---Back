@@ -2,7 +2,7 @@ import path from 'path';
 import { rm } from 'fs/promises';
 import mongoose from 'mongoose';
 import Product from '../../../models/productModel';
-import { badRequest, forbidden, notFound } from '../../../commons/utils/httpError';
+import { assertOwner, badRequest, notFound } from '../../../commons/utils/httpError';
 
 /** Même plafond que l'envoi d'images à la création d'une annonce. */
 export const MAX_PRODUCT_IMAGES = 10;
@@ -19,9 +19,7 @@ function assertValidProductId(productId: string): void {
 async function findOwnedProduct(productId: string, userId: string) {
   const product = await Product.findById(productId);
   if (!product) throw notFound('Produit non trouvé');
-  if (product.seller.toString() !== userId) {
-    throw forbidden('Vous n\'êtes pas autorisé à modifier ce produit');
-  }
+  assertOwner(product.seller, userId, 'Vous n\'êtes pas autorisé à modifier ce produit');
   return product;
 }
 

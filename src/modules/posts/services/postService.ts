@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import Post, { IPost } from '../../../models/postModel';
-import { forbidden, notFound } from '../../../commons/utils/httpError';
+import { assertOwner, notFound } from '../../../commons/utils/httpError';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 import { listFollowedUserIds } from '../../follows/services/followService';
 
@@ -117,7 +117,7 @@ export async function toggleLike(userId: string, postId: string): Promise<{ like
 export async function deletePost(userId: string, postId: string): Promise<void> {
   const post = await Post.findById(postId).select('author parentPost').lean();
   if (!post) throw postNotFound();
-  if (post.author.toString() !== userId) throw forbidden('Non autorisé');
+  assertOwner(post.author, userId, 'Non autorisé');
 
   if (post.parentPost) {
     await Post.updateOne({ _id: post.parentPost }, { $inc: { repliesCount: -1 } });

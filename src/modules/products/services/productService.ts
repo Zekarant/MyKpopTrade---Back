@@ -6,7 +6,7 @@ import User from '../../../models/userModel';
 import Payment, { IPayment } from '../../../models/paymentModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import KpopAlbum from '../../../models/albumModel';
-import { HttpError } from '../../../commons/utils/httpError';
+import { HttpError, assertOwner } from '../../../commons/utils/httpError';
 import { MAX_PAGE_SIZE, paginationMeta, parsePagination } from '../../../commons/utils/pagination';
 import { queryString } from '../../../commons/utils/query';
 import { validateProductData, validateProductUpdate } from './productValidationService';
@@ -133,12 +133,6 @@ async function findProductOr404(productId: string) {
     throw new HttpError(404, 'Produit non trouvé');
   }
   return product;
-}
-
-function assertOwnership(product: Pick<IProduct, 'seller'>, userId: string, message: string) {
-  if (product.seller.toString() !== userId) {
-    throw new HttpError(403, message);
-  }
 }
 
 /** Retire des compteurs la vente que `markAsSold` y avait ajoutée. */
@@ -373,7 +367,7 @@ export async function updateProductForOwner({
   assertValidObjectId(productId);
 
   const product = await findProductOr404(productId);
-  assertOwnership(product, userId, 'Vous n\'êtes pas autorisé à modifier ce produit');
+  assertOwner(product.seller, userId, 'Vous n\'êtes pas autorisé à modifier ce produit');
 
   const allowedUpdates: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
@@ -462,7 +456,7 @@ export async function removeProduct({
   assertValidObjectId(productId);
 
   const product = await findProductOr404(productId);
-  assertOwnership(product, userId, 'Vous n\'êtes pas autorisé à supprimer ce produit');
+  assertOwner(product.seller, userId, 'Vous n\'êtes pas autorisé à supprimer ce produit');
 
   if (soft) {
     product.isAvailable = false;
@@ -490,7 +484,7 @@ export async function markAsSold({
   assertValidObjectId(productId);
 
   const product = await findProductOr404(productId);
-  assertOwnership(product, userId, 'Vous n\'êtes pas autorisé à modifier ce produit');
+  assertOwner(product.seller, userId, 'Vous n\'êtes pas autorisé à modifier ce produit');
 
   // Le front n'envoie plus d'acheteur pour une vente hors plateforme, mais
   // d'anciens clients transmettent encore l'identifiant du vendeur lui-même :
