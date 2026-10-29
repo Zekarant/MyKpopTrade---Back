@@ -15,6 +15,7 @@
     "paypal:status": "tsx src/scripts/paypalStatus.ts",
     "fix:post-images": "tsx src/scripts/fixPostImagePaths.ts",
     "migrate": "tsx src/scripts/migrate.ts",
+    "migrate:prod": "node dist/scripts/migrate.js",
     "seed:test": "tsx src/scripts/seedTestData.ts --yes",
     "test": "jest",
     "test:watch": "jest --watch",
