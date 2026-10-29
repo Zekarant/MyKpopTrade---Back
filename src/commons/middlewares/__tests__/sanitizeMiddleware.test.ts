@@ -15,7 +15,10 @@ describe('sanitizeInputs', () => {
     ['« guillemets » et "doubles" et \'simples\'', '« guillemets » et "doubles" et \'simples\''],
     ['<b>gras</b> conservé en texte', 'gras conservé en texte'],
     ['<img src=x onerror=alert(1)>coucou', 'coucou'],
-    ['<script>alert(1)</script>ok', 'ok']
+    ['<script>alert(1)</script>ok', 'ok'],
+    // Saisi sous forme d'entités, c'est du texte : il est stocké tel quel, décodé.
+    // À l'affichage, le front et les e-mails l'échappent (voir shipmentReminderEmail.test).
+    ['&lt;a href="x"&gt;Payer&lt;/a&gt;', '<a href="x">Payer</a>']
   ])('stocke du texte brut : %s → %s', (input, expected) => {
     const req = { body: { content: input, count: 3 } };
 

@@ -9,10 +9,13 @@ import { MIGRATIONS_COLLECTION, type Migration } from './runner';
  * quelle par le front ; il stocke désormais du texte brut (commons/utils/plainText).
  *
  * Toutes les collections sont parcourues, chaînes imbriquées comprises : seuls
- * les champs qui contiennent une entité sont réécrits. Rejouée, elle ne change
- * plus rien, sauf un texte où un membre avait tapé lui-même une entité (« &lt; »),
- * qui passerait de « &lt; » à « < » : cas marginal, accepté.
+ * les champs qui contiennent une entité sont réécrits, par lots. Rejouée (après
+ * un échec en cours de route, les collections déjà traitées le sont de nouveau),
+ * elle ne change plus rien, sauf un texte où un membre avait tapé lui-même une
+ * entité (« &lt; »), qui passerait de « &lt; » à « < » : cas marginal, accepté.
  */
+
+const BATCH_SIZE = 500;
 
 /** Ajoute à `out` le chemin (`a.b.0.c`) et la valeur décodée de chaque chaîne qui change. */
 function collectDecoded(value: unknown, path: string, out: Record<string, string>): void {
@@ -43,6 +46,9 @@ export async function decodeStoredHtmlEntities(): Promise<number> {
         if (key !== '_id') collectDecoded(value, key, $set);
       }
       if (Object.keys($set).length > 0) updates.push({ updateOne: { filter: { _id: doc._id }, update: { $set } } });
+      if (updates.length >= BATCH_SIZE) {
+        modified += (await collection.bulkWrite(updates.splice(0))).modifiedCount;
+      }
     }
     if (updates.length > 0) modified += (await collection.bulkWrite(updates)).modifiedCount;
   }
