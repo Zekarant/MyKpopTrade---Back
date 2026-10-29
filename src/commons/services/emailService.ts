@@ -62,68 +62,49 @@ const createTransporter = async (): Promise<Transporter> => {
   return transporterPromise;
 };
 
+/*
+ * Emails de compte : passent par sendEmail (journalisation, erreur ignorée hors
+ * production) et le gabarit commun, comme les autres emails.
+ */
+
 /**
  * Envoie un email de vérification à l'utilisateur
  */
 export const sendVerificationEmail = async (user: IUser, token: string): Promise<void> => {
-  const verificationUrl = `${BASE_URL}/verify-email/${token}`;
-  
-  const transporter = await createTransporter();
-  
-  const mailOptions = {
-    from: `"MyKpopTrade" <${FROM_EMAIL}>`,
+  await sendEmail({
     to: user.email,
     subject: 'Vérification de votre adresse email',
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Bienvenue sur MyKpopTrade !</h2>
-        <p>Bonjour ${user.username},</p>
-        <p>Merci de vous être inscrit(e) sur MyKpopTrade. Pour activer votre compte, veuillez cliquer sur le lien ci-dessous :</p>
-        <p>
-          <a href="${verificationUrl}" style="display: inline-block; background-color: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
-            Vérifier mon adresse email
-          </a>
-        </p>
-        <p>Ce lien expirera dans 24 heures.</p>
+    html: emailTemplate({
+      title: 'Bienvenue sur MyKpopTrade !',
+      content: `
+        <p>Bonjour ${escapeHtml(user.username)},</p>
+        <p>Merci de vous être inscrit(e) sur MyKpopTrade. Pour activer votre compte, veuillez cliquer sur le lien ci-dessous (il expire dans 24 heures).</p>
         <p>Si vous n'avez pas créé de compte sur MyKpopTrade, vous pouvez ignorer cet email.</p>
-        <p>Cordialement,<br/>L'équipe MyKpopTrade</p>
-      </div>
-    `
-  };
-
-  await transporter.sendMail(mailOptions);
+      `,
+      ctaText: 'Vérifier mon adresse email',
+      ctaUrl: `${BASE_URL}/verify-email/${token}`
+    })
+  });
 };
 
 /**
  * Envoie un email de réinitialisation de mot de passe
  */
 export const sendPasswordResetEmail = async (user: IUser, token: string): Promise<void> => {
-  const resetUrl = `${BASE_URL}/reset-password/${token}`;
-  
-  const transporter = await createTransporter();
-  
-  const mailOptions = {
-    from: `"MyKpopTrade" <${FROM_EMAIL}>`,
+  await sendEmail({
     to: user.email,
     subject: 'Réinitialisation de votre mot de passe',
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Réinitialisation de mot de passe</h2>
-        <p>Bonjour ${user.username},</p>
-        <p>Vous avez demandé une réinitialisation de mot de passe. Cliquez sur le lien ci-dessous pour créer un nouveau mot de passe :</p>
-        <p>
-          <a href="${resetUrl}" style="display: inline-block; background-color: #2196F3; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
-            Réinitialiser mon mot de passe
-          </a>
-        </p>
-        <p>Ce lien expirera dans 1 heure.</p>
+    html: emailTemplate({
+      title: 'Réinitialisation de mot de passe',
+      content: `
+        <p>Bonjour ${escapeHtml(user.username)},</p>
+        <p>Vous avez demandé une réinitialisation de mot de passe. Cliquez sur le lien ci-dessous pour créer un nouveau mot de passe (il expire dans 1 heure).</p>
         <p>Si vous n'avez pas demandé cette réinitialisation, vous pouvez ignorer cet email.</p>
-        <p>Cordialement,<br/>L'équipe MyKpopTrade</p>
-      </div>
-    `
-  };
-
-  await transporter.sendMail(mailOptions);
+      `,
+      ctaText: 'Réinitialiser mon mot de passe',
+      ctaUrl: `${BASE_URL}/reset-password/${token}`
+    })
+  });
 };
 
 /**
@@ -131,21 +112,17 @@ export const sendPasswordResetEmail = async (user: IUser, token: string): Promis
  * changement n'est pas du fait du titulaire, c'est sa seule alerte.
  */
 export const sendEmailChangedNotice = async (user: IUser, previousEmail: string): Promise<void> => {
-  const transporter = await createTransporter();
-
-  await transporter.sendMail({
-    from: `"MyKpopTrade" <${FROM_EMAIL}>`,
+  await sendEmail({
     to: previousEmail,
     subject: 'Votre adresse email a été modifiée',
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Adresse email modifiée</h2>
-        <p>Bonjour ${user.username},</p>
-        <p>L'adresse email de votre compte MyKpopTrade vient d'être remplacée par <strong>${user.email}</strong>.</p>
+    html: emailTemplate({
+      title: 'Adresse email modifiée',
+      content: `
+        <p>Bonjour ${escapeHtml(user.username)},</p>
+        <p>L'adresse email de votre compte MyKpopTrade vient d'être remplacée par <strong>${escapeHtml(user.email)}</strong>.</p>
         <p>Si vous n'êtes pas à l'origine de ce changement, contactez immédiatement support@mykpoptrade.com.</p>
-        <p>Cordialement,<br/>L'équipe MyKpopTrade</p>
-      </div>
-    `
+      `
+    })
   });
 };
 
@@ -153,25 +130,19 @@ export const sendEmailChangedNotice = async (user: IUser, previousEmail: string)
  * Envoie un email de confirmation de suppression de compte
  */
 export const sendAccountDeletionEmail = async (user: IUser): Promise<void> => {
-  const transporter = await createTransporter();
-  
-  const mailOptions = {
-    from: `"MyKpopTrade" <${FROM_EMAIL}>`,
+  await sendEmail({
     to: user.email,
     subject: 'Confirmation de suppression de compte',
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Votre compte a été supprimé</h2>
-        <p>Bonjour ${user.username},</p>
+    html: emailTemplate({
+      title: 'Votre compte a été supprimé',
+      content: `
+        <p>Bonjour ${escapeHtml(user.username)},</p>
         <p>Nous vous confirmons que votre compte a été supprimé de notre service.</p>
         <p>Nous regrettons de vous voir partir et espérons vous revoir bientôt !</p>
         <p>Si cette action a été faite par erreur, veuillez nous contacter rapidement à support@mykpoptrade.com.</p>
-        <p>Cordialement,<br/>L'équipe MyKpopTrade</p>
-      </div>
-    `
-  };
-
-  await transporter.sendMail(mailOptions);
+      `
+    })
+  });
 };
 
 /**
