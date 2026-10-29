@@ -3,6 +3,7 @@ import User from '../../../models/userModel';
 import Product, { IProduct } from '../../../models/productModel';
 import { IUser } from '../../../models/userModel';
 import { paginationMeta } from '../../../commons/utils/pagination';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 /** Statuts visibles de tous ; les annonces retirées ne regardent que leur vendeur. */
 const PUBLIC_INVENTORY_STATUSES = new Set(['available', 'sold']);
@@ -113,7 +114,7 @@ export async function fetchUserFavorites(userId: string, page: number, limit: nu
     Product.find({ _id: { $in: favoriteIds } })
       // Données internes : analyse de modération et identité de l'acheteur.
       .select('-moderationFlag -soldTo')
-      .populate('seller', 'username profilePicture')
+      .populate('seller', USER_CARD_FIELDS)
       .sort({ isAvailable: -1, createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
@@ -239,7 +240,7 @@ export async function fetchRecommendedProducts(userId: string | undefined, limit
       seller: { $ne: userId },
       _id: { $nin: excludeIds }
     })
-      .populate('seller', 'username profilePicture')
+      .populate('seller', USER_CARD_FIELDS)
       .sort('-views -favorites -createdAt')
       .limit(remainingLimit)
       .lean();

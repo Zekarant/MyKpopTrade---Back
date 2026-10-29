@@ -9,6 +9,7 @@ import { processRefund } from '../../payments/services/paymentService';
 import logger from '../../../commons/utils/logger';
 import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 const VALID_REASONS: DisputeReason[] = [
   'not_received', 'damaged', 'not_as_described', 'counterfeit',
@@ -433,8 +434,8 @@ export async function listMyDisputes(userId: string, { page, limit, skip }: Page
       .skip(skip)
       .limit(limit)
       .populate('payment', 'amount currency status product')
-      .populate('buyer', 'username profilePicture')
-      .populate('seller', 'username profilePicture')
+      .populate('buyer', USER_CARD_FIELDS)
+      .populate('seller', USER_CARD_FIELDS)
       .lean(),
     Dispute.countDocuments(filter)
   ]);

@@ -4,6 +4,7 @@ import Message from '../../../models/messageModel';
 import Notification from '../../../models/notificationModel';
 import logger from '../../../commons/utils/logger';
 import { realtimeHub, type RealtimeHub } from '../realtimeHub';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 /**
  * Événements poussés aux clients. Les noms sont un contrat avec le front
@@ -86,7 +87,7 @@ export function createRealtimePublisher(hub: RealtimeHub) {
 
         const messages = await Message.find({ _id: { $in: messageIds } })
           .sort({ createdAt: 1 })
-          .populate('sender', 'username profilePicture')
+          .populate('sender', USER_CARD_FIELDS)
           .lean();
 
         for (const recipientId of recipients) {

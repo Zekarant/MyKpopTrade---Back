@@ -9,6 +9,7 @@ import logger from '../../../commons/utils/logger';
 import { createNotification } from '../../notifications/services/notificationService';
 import Payment from '../../../models/paymentModel';
 import { BlockedInteractionError, isBlockedBetween } from '../../users/services/userBlockService';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 const DUPLICATE_KEY_ERROR = 11000;
 const ALREADY_RATED_MESSAGE = 'Vous avez déjà évalué cette transaction.';
@@ -151,7 +152,7 @@ export async function getUserRatingsWithStats(
 
   const [ratings, count] = await Promise.all([
     Rating.find(filter)
-      .populate('reviewer', 'username profilePicture')
+      .populate('reviewer', USER_CARD_FIELDS)
       .sort({ createdAt: -1 })
       .skip(pageRequest.skip)
       .limit(pageRequest.limit)
@@ -271,7 +272,7 @@ export async function createUserRating({
   await updateUserAverageRating(recipientId);
   await notifyRatingReceived({ recipientId, reviewerId, rating, ratingId: newRating._id });
 
-  return await Rating.findById(newRating._id).populate('reviewer', 'username profilePicture');
+  return await Rating.findById(newRating._id).populate('reviewer', USER_CARD_FIELDS);
 }
 
 /** Exécute `action` ; en cas d'échec, supprime les images reçues, que rien ne référencera. */

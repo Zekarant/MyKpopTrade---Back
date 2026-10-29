@@ -5,6 +5,7 @@ import User, { IUser } from '../../../models/userModel';
 import Product from '../../../models/productModel';
 import Rating from '../../../models/ratingModel';
 import { HttpError, userNotFound } from '../../../commons/utils/httpError';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 /**
  * Calcule le pourcentage de complétion du profil
@@ -99,7 +100,7 @@ export async function fetchPublicProfile(identifier: string) {
   const [activeListings, recentRatings] = await Promise.all([
     Product.countDocuments({ seller: user._id, isAvailable: true }),
     Rating.find({ recipient: user._id })
-      .populate('reviewer', 'username profilePicture')
+      .populate('reviewer', USER_CARD_FIELDS)
       .sort({ createdAt: -1 })
       .limit(3)
       .select('rating review createdAt reviewer response')

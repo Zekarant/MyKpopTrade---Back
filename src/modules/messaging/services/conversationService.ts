@@ -21,6 +21,7 @@ import { badRequest, notFound } from '../../../commons/utils/httpError';
 import { paginationMeta } from '../../../commons/utils/pagination';
 import { assertNotBlocked, getBlockStatus } from '../../users/services/userBlockService';
 import { realtimePublisher } from '../../realtime/services/realtimePublisher';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 const conversationNotFound = () => notFound('Conversation non trouvée', 'CONVERSATION_NOT_FOUND');
 
@@ -133,7 +134,7 @@ export async function fetchConversation(
       path: 'productId',
       select: 'title description price images seller category condition kpopGroup kpopMember albumName currency isAvailable allowOffers minOfferPercentage isPayWhatYouWant pwywMinPrice pwywMaxPrice shippingOptions createdAt'
     })
-    .populate('offerHistory.offeredBy', 'username profilePicture')
+    .populate('offerHistory.offeredBy', USER_CARD_FIELDS)
     .lean();
 
   if (!conversationRaw) {
@@ -197,7 +198,7 @@ export async function fetchConversation(
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
-    .populate('sender', 'username profilePicture')
+    .populate('sender', USER_CARD_FIELDS)
     .lean();
 
   const markedCount = await markConversationAsRead(conversationId, userId);
@@ -210,7 +211,7 @@ export async function fetchConversation(
 
   const mediaMessages = await Message.find(mediaQuery)
     .select('attachments createdAt sender')
-    .populate('sender', 'username profilePicture')
+    .populate('sender', USER_CARD_FIELDS)
     .sort({ createdAt: -1 })
     .lean();
 
@@ -435,7 +436,7 @@ export async function createConversationForUser({
   }
 
   return await Conversation.findById(conversation._id)
-    .populate('participants', 'username profilePicture')
+    .populate('participants', USER_CARD_FIELDS)
     .populate('productId', 'title price images')
     .populate('lastMessage');
 }
@@ -491,7 +492,7 @@ export async function fetchConversationMedia({
     }
   ]);
 
-  await Message.populate(result.items, { path: 'sender', select: 'username profilePicture' });
+  await Message.populate(result.items, { path: 'sender', select: USER_CARD_FIELDS });
 
   const media = formatConversationMedia(
     result.items.map(({ attachment, ...item }) => ({ ...item, attachments: [attachment] }))

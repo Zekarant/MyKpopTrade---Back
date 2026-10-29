@@ -17,6 +17,7 @@ import { badRequest, forbidden, notFound } from '../../../commons/utils/httpErro
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 import { describeReportTarget, excerpt, findReportTarget, loadReportTargetView } from './reportTargetService';
 import { isObjectIdString } from '../../../commons/utils/query';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 /** Code MongoDB d'une violation d'index unique. */
 const DUPLICATE_KEY_ERROR = 11000;
@@ -203,7 +204,7 @@ export async function listReports(filters: ReportListFilters, pageRequest: PageR
   const filter = buildReportListFilter(filters);
   const [reports, total] = await Promise.all([
     Report.find(filter)
-      .populate('reporter', 'username profilePicture')
+      .populate('reporter', USER_CARD_FIELDS)
       .sort({ createdAt: -1 })
       .skip(pageRequest.skip)
       .limit(pageRequest.limit)

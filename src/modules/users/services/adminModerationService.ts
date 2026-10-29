@@ -7,6 +7,7 @@ import { dispatchAdminAlert } from '../../../commons/services/adminAlertService'
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import { postNotFound } from '../../posts/services/postService';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
+import { USER_CARD_FIELDS, VERIFIED_USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 const AUDIT_TARGET_TYPES: IAuditLog['targetType'][] = [
   'user', 'product', 'post', 'report', 'verification', 'system', 'dispute', 'payment'
@@ -35,7 +36,7 @@ export async function listAdminPosts({ search, type }: AdminPostFilters, pageReq
 
   const [posts, total] = await Promise.all([
     Post.find(filter)
-      .populate('author', 'username profilePicture isIdentityVerified')
+      .populate('author', VERIFIED_USER_CARD_FIELDS)
       .sort({ createdAt: -1 })
       .skip(pageRequest.skip)
       .limit(pageRequest.limit)
@@ -108,7 +109,7 @@ export async function listAuditLogs(targetType: string | undefined, pageRequest:
 
   const [logs, total] = await Promise.all([
     AuditLog.find(filter)
-      .populate('admin', 'username profilePicture')
+      .populate('admin', USER_CARD_FIELDS)
       .sort({ createdAt: -1 })
       .skip(pageRequest.skip)
       .limit(pageRequest.limit)

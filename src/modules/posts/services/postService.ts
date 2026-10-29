@@ -3,21 +3,21 @@ import Post, { IPost } from '../../../models/postModel';
 import { assertOwner, notFound } from '../../../commons/utils/httpError';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 import { listFollowedUserIds } from '../../follows/services/followService';
+import { VERIFIED_USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
-const AUTHOR_FIELDS = 'username profilePicture isIdentityVerified';
 const POST_NOT_FOUND_MESSAGE = 'Post introuvable';
 
 export const postNotFound = () => notFound(POST_NOT_FOUND_MESSAGE);
 
 async function findPopulatedPost(postId: mongoose.Types.ObjectId | string) {
-  return await Post.findById(postId).populate('author', AUTHOR_FIELDS).lean();
+  return await Post.findById(postId).populate('author', VERIFIED_USER_CARD_FIELDS).lean();
 }
 
 /** Page de posts (du plus récent au plus ancien) correspondant au filtre. */
 async function listPosts(filter: mongoose.QueryFilter<IPost>, pageRequest: PageRequest) {
   const [posts, total] = await Promise.all([
     Post.find(filter)
-      .populate('author', AUTHOR_FIELDS)
+      .populate('author', VERIFIED_USER_CARD_FIELDS)
       .sort({ createdAt: -1 })
       .skip(pageRequest.skip)
       .limit(pageRequest.limit)
@@ -54,7 +54,7 @@ export async function getPostWithReplies(postId: string, pageRequest: PageReques
 
   const [replies, repliesCount] = await Promise.all([
     Post.find({ parentPost: postId })
-      .populate('author', AUTHOR_FIELDS)
+      .populate('author', VERIFIED_USER_CARD_FIELDS)
       .sort({ createdAt: 1 })
       .skip(pageRequest.skip)
       .limit(pageRequest.limit)

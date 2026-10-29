@@ -7,6 +7,7 @@ import logger from '../../../commons/utils/logger';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import { paginationMeta } from '../../../commons/utils/pagination';
 import { pickFields } from '../../../commons/utils/pickFields';
+import { SELLER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 /** Corps libre d'une requête admin, validé par le schéma Mongoose à l'écriture. */
 type AlbumInput = Record<string, unknown>;
@@ -14,6 +15,11 @@ type AlbumInput = Record<string, unknown>;
 const EDITABLE_ALBUM_FIELDS = [
   'name', 'coverImage', 'artistId', 'spotifyId', 'spotifyUrl', 'releaseDate', 'totalTracks', 'albumType'
 ] as const;
+
+/** Groupe d'un album dans les listes. */
+const ARTIST_CARD_FIELDS = 'name profileImage';
+/** Groupe d'un album renvoyé après création ou modification. */
+const ARTIST_FIELDS = 'name description profileImage';
 
 function assertValidId(id: string, message: string) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -39,7 +45,7 @@ export async function createAlbumForGroup(body: AlbumInput) {
   });
   await album.save();
 
-  await album.populate('artistId', 'name description profileImage');
+  await album.populate('artistId', ARTIST_FIELDS);
 
   logger.info('Nouvel album créé', {
     albumId: album._id,
@@ -100,7 +106,7 @@ export async function listAlbums({
 
   const [albums, total] = await Promise.all([
     Album.find(filters)
-      .populate('artistId', 'name profileImage')
+      .populate('artistId', ARTIST_CARD_FIELDS)
       .sort({ [sortBy]: sortOrder })
       .skip((page - 1) * limit)
       .limit(limit)
@@ -118,7 +124,7 @@ export async function fetchAlbumById(albumId: string) {
   assertValidId(albumId, 'ID d\'album invalide');
 
   const album = await Album.findById(albumId)
-    .populate('artistId', 'name description profileImage socialLinks');
+    .populate('artistId', `${ARTIST_FIELDS} socialLinks`);
 
   if (!album) {
     throw new HttpError(404, 'Album non trouvé');
@@ -131,7 +137,7 @@ export async function fetchAlbumById(albumId: string) {
     ],
     isAvailable: true
   })
-    .populate('seller', 'username profilePicture isIdentityVerified statistics.averageRating')
+    .populate('seller', SELLER_CARD_FIELDS)
     .sort({ price: 1 })
     .limit(10);
 
@@ -200,7 +206,7 @@ export async function searchAlbumsByQuery({
   })
     .sort({ releaseDate: -1 })
     .limit(limit)
-    .populate('artistId', 'name profileImage')
+    .populate('artistId', ARTIST_CARD_FIELDS)
     .lean();
 
   return {
@@ -231,7 +237,7 @@ export async function updateAlbumById(albumId: string, body: AlbumInput) {
     albumId,
     { $set: updates },
     { returnDocument: 'after', runValidators: true }
-  ).populate('artistId', 'name description profileImage');
+  ).populate('artistId', ARTIST_FIELDS);
 
   if (!album) {
     throw new HttpError(404, 'Album non trouvé');

@@ -14,6 +14,7 @@ import { notifyWishlistPriceDrop, notifyWishlistUnavailable } from './wishlistAl
 import { dispatchProductModeration, awaitsModerationVerdict } from './productModerationService';
 import { dispatchSavedSearchAlerts } from '../../savedSearches/services/savedSearchAlertService';
 import { assertCatalogConsistency, buildCatalogClauses, parseCatalogCriteria } from './productCatalogService';
+import { VERIFIED_USER_CARD_FIELDS, SELLER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = MAX_PAGE_SIZE;
@@ -258,7 +259,7 @@ export async function fetchProductById(productId: string, userId?: string) {
   assertValidObjectId(productId);
 
   const product = await Product.findById(productId)
-    .populate('seller', 'username profilePicture isIdentityVerified statistics.averageRating statistics.totalRatings');
+    .populate('seller', `${SELLER_CARD_FIELDS} statistics.totalRatings`);
 
   if (!product) {
     throw new HttpError(404, 'Produit non trouvé');
@@ -342,7 +343,7 @@ export async function listProducts(query: Record<string, unknown>) {
 
   const [products, total] = await Promise.all([
     Product.find(filter)
-      .populate('seller', 'username profilePicture isIdentityVerified')
+      .populate('seller', VERIFIED_USER_CARD_FIELDS)
       .sort(sort)
       .skip(pageRequest.skip)
       .limit(pageRequest.limit),

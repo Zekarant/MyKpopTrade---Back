@@ -12,6 +12,7 @@ import logger from '../../../commons/utils/logger';
 import { assertNotBlockedInConversation } from '../../users/services/userBlockService';
 import { realtimePublisher } from '../../realtime/services/realtimePublisher';
 import { attachmentPath, attachmentExists, removeFiles } from '../attachmentStorage';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 type StoredAttachment = { filename: string; mimetype: string };
 
@@ -86,7 +87,7 @@ export async function sendMessageToConversation({
   realtimePublisher.publishNewMessages(conversationId, [newMessage._id]);
 
   return await Message.findById(newMessage._id)
-    .populate('sender', 'username profilePicture');
+    .populate('sender', USER_CARD_FIELDS);
 }
 
 export async function markConversationRead(userId: string, conversationId: string) {
