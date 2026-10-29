@@ -1,10 +1,9 @@
 import request from 'supertest';
 import { createApp } from '../../app';
 import { startInMemoryMongo, stopInMemoryMongo, clearAllCollections } from '../helpers/mongoMemory';
-import { createTestProduct, createTestUser } from '../helpers/fixtures';
+import { createTestPayment, createTestProduct, createTestUser } from '../helpers/fixtures';
 import { generateAccessToken } from '../../commons/services/tokenService';
 import Dispute from '../../models/disputeModel';
-import Payment from '../../models/paymentModel';
 
 /** Litiges : ouverture, échanges, retrait et arbitrage par un admin. */
 const app = createApp();
@@ -30,12 +29,10 @@ describe('HTTP — litiges', () => {
     const seller = await createTestUser();
     const buyer = await createTestUser();
     const product = await createTestProduct(seller._id);
-    const payment = await Payment.create({
-      product: product._id, buyer: buyer._id, seller: seller._id,
-      amount: 20, currency: 'EUR', paymentIntentId: `order-${product._id}`,
-      status: 'completed', completedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-      paymentMethod: 'paypal', paymentType: 'direct'
-    });
+    const payment = await createTestPayment(
+      { product: product._id, buyer: buyer._id, seller: seller._id },
+      { completedAt: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+    );
     return { seller, buyer, payment };
   }
 

@@ -4,7 +4,7 @@ import {
   stopInMemoryMongo,
   clearAllCollections
 } from '../../../../tests/helpers/mongoMemory';
-import { createTestUser, createTestProduct } from '../../../../tests/helpers/fixtures';
+import { createTestUser, createTestProduct, createTestPayment } from '../../../../tests/helpers/fixtures';
 import {
   toggleFavoriteForUser,
   removeProduct,
@@ -16,7 +16,6 @@ import {
 import { HttpError } from '../../../../commons/utils/httpError';
 import User from '../../../../models/userModel';
 import Product from '../../../../models/productModel';
-import Payment from '../../../../models/paymentModel';
 
 describe('productService (integration)', () => {
   beforeAll(async () => {
@@ -340,10 +339,7 @@ describe('productService (integration)', () => {
       const seller = await createTestUser();
       const buyer = await createTestUser();
       const product = await createTestProduct(seller._id, { isSold: true, isAvailable: false, soldTo: buyer._id });
-      await Payment.create({
-        product: product._id, buyer: buyer._id, seller: seller._id,
-        amount: 20, currency: 'EUR', paymentIntentId: 'ORDER-PAID', status: 'completed'
-      });
+      await createTestPayment({ product: product._id, buyer: buyer._id, seller: seller._id });
 
       await expect(relist(product._id, seller._id)).rejects.toMatchObject({ statusCode: 409 });
       expect((await Product.findById(product._id))?.isSold).toBe(true);

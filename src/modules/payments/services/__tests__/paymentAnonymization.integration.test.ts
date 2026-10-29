@@ -3,8 +3,8 @@ import {
   stopInMemoryMongo,
   clearAllCollections
 } from '../../../../tests/helpers/mongoMemory';
-import { createTestProduct, createTestUser } from '../../../../tests/helpers/fixtures';
-import Payment from '../../../../models/paymentModel';
+import { createTestPayment, createTestProduct, createTestUser } from '../../../../tests/helpers/fixtures';
+import Payment, { IPayment } from '../../../../models/paymentModel';
 import { anonymizeBuyerPayments, anonymizeExpiredPayments } from '../paymentAnonymizationService';
 
 const ADDRESS = {
@@ -16,7 +16,7 @@ const ADDRESS = {
   phone: '+33612345678'
 };
 
-const DELIVERED_SHIPMENT = {
+const DELIVERED_SHIPMENT: NonNullable<IPayment['shipment']> = {
   carrier: 'colissimo',
   trackingNumber: 'X1',
   status: 'delivered',
@@ -24,25 +24,14 @@ const DELIVERED_SHIPMENT = {
   events: [{ status: 'delivered', location: 'Lyon 1er', occurredAt: new Date(), source: 'carrier' }]
 };
 
-async function createPayment(overrides: Record<string, unknown> = {}) {
+async function createPayment(overrides: Partial<IPayment> = {}) {
   const seller = await createTestUser();
   const buyer = await createTestUser();
   const product = await createTestProduct(seller._id);
-  return Payment.create({
-    product: product._id,
-    buyer: buyer._id,
-    seller: seller._id,
-    amount: 20,
-    currency: 'EUR',
-    paymentIntentId: `order-${Math.random()}`,
-    status: 'completed',
-    paymentMethod: 'paypal',
-    paymentType: 'direct',
-    ipAddress: '203.0.113.7',
-    userAgent: 'Firefox',
-    shippingAddress: ADDRESS,
-    ...overrides
-  });
+  return createTestPayment(
+    { product: product._id, buyer: buyer._id, seller: seller._id },
+    { ipAddress: '203.0.113.7', userAgent: 'Firefox', shippingAddress: ADDRESS, ...overrides }
+  );
 }
 
 describe('paymentAnonymizationService (integration)', () => {

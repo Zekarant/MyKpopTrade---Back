@@ -7,7 +7,7 @@ import {
   stopInMemoryMongo,
   clearAllCollections
 } from '../../../../tests/helpers/mongoMemory';
-import { createTestUser, createTestProduct } from '../../../../tests/helpers/fixtures';
+import { createTestUser, createTestProduct, createTestPayment } from '../../../../tests/helpers/fixtures';
 import {
   markShipped,
   confirmDelivery,
@@ -15,7 +15,7 @@ import {
   buildTrackingUrl
 } from '../shipmentService';
 import { createNotification } from '../../../notifications/services/notificationService';
-import Payment from '../../../../models/paymentModel';
+import Payment, { IPayment } from '../../../../models/paymentModel';
 
 describe('shipmentService (integration)', () => {
   beforeAll(async () => {
@@ -31,25 +31,15 @@ describe('shipmentService (integration)', () => {
     jest.clearAllMocks();
   });
 
-  async function createTestPayment(overrides: Record<string, unknown> = {}) {
+  async function completedSale(overrides: Partial<IPayment> = {}) {
     const seller = await createTestUser();
     const buyer = await createTestUser();
     const product = await createTestProduct(seller._id);
 
-    const payment = await Payment.create({
-      product: product._id,
-      buyer: buyer._id,
-      seller: seller._id,
-      amount: 20,
-      platformFee: 0,
-      currency: 'EUR',
-      paymentIntentId: `pi_${Date.now()}_${Math.random()}`,
-      status: 'completed',
-      paymentMethod: 'paypal',
-      paymentType: 'direct',
-      captureId: 'cap_test_123',
-      ...overrides
-    });
+    const payment = await createTestPayment(
+      { product: product._id, buyer: buyer._id, seller: seller._id },
+      { captureId: 'cap_test_123', ...overrides }
+    );
 
     return { seller, buyer, product, payment };
   }
@@ -77,7 +67,7 @@ describe('shipmentService (integration)', () => {
 
   describe('markShipped', () => {
     it('enregistre l\'expédition et notifie l\'acheteur', async () => {
-      const { seller, buyer, payment } = await createTestPayment();
+      const { seller, buyer, payment } = await completedSale();
 
       const shipment = await markShipped({
         userId: seller._id.toString(),
@@ -103,7 +93,7 @@ describe('shipmentService (integration)', () => {
     });
 
     it('utilise une URL fournie manuellement plutôt que celle dérivée du transporteur', async () => {
-      const { seller, payment } = await createTestPayment();
+      const { seller, payment } = await completedSale();
 
       const shipment = await markShipped({
         userId: seller._id.toString(),
@@ -117,7 +107,7 @@ describe('shipmentService (integration)', () => {
     });
 
     it('laisse trackingUrl indéfini si transporteur inconnu et pas d\'URL fournie', async () => {
-      const { seller, payment } = await createTestPayment();
+      const { seller, payment } = await completedSale();
 
       const shipment = await markShipped({
         userId: seller._id.toString(),
@@ -130,7 +120,7 @@ describe('shipmentService (integration)', () => {
     });
 
     it('403 si l\'utilisateur n\'est pas le vendeur', async () => {
-      const { buyer, payment } = await createTestPayment();
+      const { buyer, payment } = await completedSale();
 
       await expect(markShipped({
         userId: buyer._id.toString(),
@@ -141,7 +131,7 @@ describe('shipmentService (integration)', () => {
     });
 
     it('400 si le paiement n\'est pas complété', async () => {
-      const { seller, payment } = await createTestPayment({ status: 'pending' });
+      const { seller, payment } = await completedSale({ status: 'pending' });
 
       await expect(markShipped({
         userId: seller._id.toString(),
@@ -152,7 +142,7 @@ describe('shipmentService (integration)', () => {
     });
 
     it('400 si une expédition est déjà enregistrée', async () => {
-      const { seller, payment } = await createTestPayment();
+      const { seller, payment } = await completedSale();
 
       await markShipped({
         userId: seller._id.toString(),
@@ -170,7 +160,7 @@ describe('shipmentService (integration)', () => {
     });
 
     it('400 si le transporteur est manquant', async () => {
-      const { seller, payment } = await createTestPayment();
+      const { seller, payment } = await completedSale();
 
       await expect(markShipped({
         userId: seller._id.toString(),
@@ -181,7 +171,7 @@ describe('shipmentService (integration)', () => {
     });
 
     it('400 si la trackingUrl ne commence pas par http(s)', async () => {
-      const { seller, payment } = await createTestPayment();
+      const { seller, payment } = await completedSale();
 
       await expect(markShipped({
         userId: seller._id.toString(),
@@ -206,7 +196,7 @@ describe('shipmentService (integration)', () => {
 
   describe('confirmDelivery', () => {
     it('passe le statut à delivered et notifie le vendeur', async () => {
-      const { seller, buyer, payment } = await createTestPayment();
+      const { seller, buyer, payment } = await completedSale();
 
       await markShipped({
         userId: seller._id.toString(),
@@ -230,7 +220,7 @@ describe('shipmentService (integration)', () => {
     });
 
     it('403 si l\'utilisateur n\'est pas l\'acheteur', async () => {
-      const { seller, payment } = await createTestPayment();
+      const { seller, payment } = await completedSale();
       await markShipped({
         userId: seller._id.toString(),
         paymentId: payment._id.toString(),
@@ -245,7 +235,7 @@ describe('shipmentService (integration)', () => {
     });
 
     it('400 si pas d\'expédition enregistrée', async () => {
-      const { buyer, payment } = await createTestPayment();
+      const { buyer, payment } = await completedSale();
 
       await expect(confirmDelivery(
         buyer._id.toString(),
@@ -254,7 +244,7 @@ describe('shipmentService (integration)', () => {
     });
 
     it('400 si la livraison est déjà confirmée', async () => {
-      const { seller, buyer, payment } = await createTestPayment();
+      const { seller, buyer, payment } = await completedSale();
       await markShipped({
         userId: seller._id.toString(),
         paymentId: payment._id.toString(),
@@ -272,7 +262,7 @@ describe('shipmentService (integration)', () => {
 
   describe('getShipment', () => {
     it('renvoie l\'expédition pour le vendeur', async () => {
-      const { seller, payment } = await createTestPayment();
+      const { seller, payment } = await completedSale();
       await markShipped({
         userId: seller._id.toString(),
         paymentId: payment._id.toString(),
@@ -285,7 +275,7 @@ describe('shipmentService (integration)', () => {
     });
 
     it('renvoie l\'expédition pour l\'acheteur', async () => {
-      const { seller, buyer, payment } = await createTestPayment();
+      const { seller, buyer, payment } = await completedSale();
       await markShipped({
         userId: seller._id.toString(),
         paymentId: payment._id.toString(),
@@ -298,14 +288,14 @@ describe('shipmentService (integration)', () => {
     });
 
     it('renvoie null si pas encore expédié', async () => {
-      const { seller, payment } = await createTestPayment();
+      const { seller, payment } = await completedSale();
       const shipment = await getShipment(seller._id.toString(), payment._id.toString());
       expect(shipment).toBeNull();
     });
 
     it('403 pour un tiers', async () => {
       const stranger = await createTestUser();
-      const { payment } = await createTestPayment();
+      const { payment } = await completedSale();
 
       await expect(getShipment(
         stranger._id.toString(),
