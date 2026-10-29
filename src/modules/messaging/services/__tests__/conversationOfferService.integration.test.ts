@@ -75,6 +75,27 @@ describe('conversationOfferService (integration)', () => {
       ).rejects.toMatchObject({ statusCode: 400 });
     });
 
+    it('minimum arrondi au centime supérieur, comme affiché par le front : 50 % de 19,99 € = 10 €', async () => {
+      const seller = await createTestUser();
+      const buyer = await createTestUser();
+      const product = await createTestProduct(seller._id, {
+        price: 19.99,
+        allowOffers: true,
+        minOfferPercentage: 50
+      });
+      const offer = (initialOffer: number) => initiateNegotiationFlow({
+        userId: buyer._id.toString(),
+        productId: product._id.toString(),
+        initialOffer
+      });
+
+      await expect(offer(9.99)).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'L\'offre doit être au moins 50% du prix (10 EUR)'
+      });
+      await expect(offer(10)).resolves.toBeDefined();
+    });
+
     it('rejette si le produit n\'accepte pas les offres', async () => {
       const seller = await createTestUser();
       const buyer = await createTestUser();

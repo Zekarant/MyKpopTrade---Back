@@ -3,20 +3,13 @@ import { removePurchasedItems, validateCart } from './cartService';
 import User from '../../../models/userModel';
 import { PayPalService } from '../../payments/services/paypalService';
 import { cancelDirectPayment } from '../../payments/services/paymentService';
+import type { ShippingAddress, ShippingMethod } from '../../payments/services/checkoutService';
 import { HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 
 export interface CartCheckoutInput {
-  shippingMethod: 'national' | 'worldwide' | 'localPickup';
-  shippingAddress?: {
-    recipientName: string;
-    streetLine1: string;
-    streetLine2?: string;
-    postalCode: string;
-    city: string;
-    country?: string;
-    phone?: string;
-  };
+  shippingMethod: ShippingMethod;
+  shippingAddress?: ShippingAddress;
 }
 
 interface SellerPaymentResult {

@@ -2,6 +2,7 @@ import User from '../../../models/userModel';
 import Product from '../../../models/productModel';
 import Report from '../../../models/reportModel';
 import Payment from '../../../models/paymentModel';
+import { roundToCents } from '../../../commons/utils/moneyMath';
 
 const NEW_USERS_WINDOW_DAYS = 30;
 export const TIMESERIES_DAYS = 30;
@@ -75,7 +76,7 @@ export async function getDailyActivity(now: Date = new Date()) {
       signups: signupsByDay[key] ?? 0,
       listings: listingsByDay[key] ?? 0,
       sales: salesByDay[key] ?? 0,
-      revenue: Number((revenueByDay[key] ?? 0).toFixed(2)),
+      revenue: roundToCents(revenueByDay[key] ?? 0),
       reports: reportsByDay[key] ?? 0
     };
   });

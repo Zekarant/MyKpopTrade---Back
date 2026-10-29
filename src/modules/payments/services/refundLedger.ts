@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { add, gt } from '../../../commons/utils/moneyMath';
+import { add, gt, subtract } from '../../../commons/utils/moneyMath';
 import { createNotification } from '../../notifications/services/notificationService';
 import type { IPayment } from '../../../models/paymentModel';
 
@@ -93,7 +93,7 @@ export function remainingRefundable(
   // détaillée existe : on retient la valeur la plus prudente des deux.
   const alreadyRefunded = Math.max(completed, payment.totalRefunded || 0);
 
-  return Math.max(0, Math.round((payment.amount - alreadyRefunded) * 100) / 100);
+  return Math.max(0, subtract(payment.amount, alreadyRefunded));
 }
 
 /**

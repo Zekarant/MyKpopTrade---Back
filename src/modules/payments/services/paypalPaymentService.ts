@@ -17,7 +17,7 @@ import { PayPalPartnerService, SELLER_BLOCK_MESSAGES } from './paypalPartnerServ
 import { paymentConfig } from '../../../config/paymentConfig';
 import env from '../../../config/env';
 import logger from '../../../commons/utils/logger';
-import { formatForPayPal } from '../../../commons/utils/moneyMath';
+import { formatForPayPal, percentOf } from '../../../commons/utils/moneyMath';
 import { CheckoutBreakdown, resolveCheckout, ShippingAddress, ShippingMethod } from './checkoutService';
 import { resolveBuyerPrice } from './buyerPrice';
 import { HttpError } from '../../../commons/utils/httpError';
@@ -130,7 +130,7 @@ function computePlatformFee(productAmount: number): number {
   if (!Number.isFinite(percent) || percent <= 0) {
     return 0;
   }
-  return Math.round(productAmount * percent) / 100;
+  return percentOf(productAmount, percent);
 }
 
 /**
