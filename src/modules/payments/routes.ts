@@ -3,7 +3,7 @@ import * as paymentController from './controllers/paymentController';
 import * as paymentGdprController from './controllers/paymentGdprController';
 import { authenticateJWT, requireAdmin } from '../../commons/middlewares/authMiddleware';
 import { sanitizeInputs } from '../../commons/middlewares/sanitizeMiddleware';
-import { validateRefundRequest, validatePassword } from '../../commons/middlewares/validationMiddleware';
+import { validateRefundRequest, requireConfirmationPassword } from '../../commons/middlewares/validationMiddleware';
 import { dataBreachDetection } from '../../commons/middlewares/dataBreachDetectionMiddleware';
 
 // La configuration PayPal est validée au démarrage par config/env.ts.
@@ -35,7 +35,7 @@ router.get('/export',
 );
 
 router.post('/gdpr/anonymize', 
-  validatePassword, 
+  requireConfirmationPassword, 
   paymentGdprController.anonymizeUserPaymentData
 );
 

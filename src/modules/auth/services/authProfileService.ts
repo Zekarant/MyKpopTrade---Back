@@ -29,7 +29,8 @@ async function verifyPasswordIfProvided(userId: string, confirmPassword?: string
   }
 }
 
-export async function getPublicProfileData(userId: string) {
+/** Profil complet de l'utilisateur connecté (sans ses secrets) ; le profil public d'un membre est fetchPublicProfile. */
+export async function getOwnProfile(userId: string) {
   const user = await User.findById(userId, {
     password: 0,
     emailVerificationToken: 0,

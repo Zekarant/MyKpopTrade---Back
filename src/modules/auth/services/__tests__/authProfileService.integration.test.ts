@@ -14,7 +14,7 @@ import {
 } from '../../../../tests/helpers/mongoMemory';
 import { createTestUser } from '../../../../tests/helpers/fixtures';
 import {
-  getPublicProfileData,
+  getOwnProfile,
   updateProfileData,
   setPayPalEmail,
   clearPayPalEmail
@@ -35,17 +35,17 @@ describe('authProfileService (integration)', () => {
     await clearAllCollections();
   });
 
-  describe('getPublicProfileData', () => {
+  describe('getOwnProfile', () => {
     it('retourne l\'utilisateur sans champs sensibles', async () => {
       const user = await createTestUser();
-      const result = await getPublicProfileData(user._id.toString());
+      const result = await getOwnProfile(user._id.toString());
       expect(result.password).toBeUndefined();
       expect(result.emailVerificationToken).toBeUndefined();
     });
 
     it('404 si utilisateur inexistant', async () => {
       await expect(
-        getPublicProfileData('507f1f77bcf86cd799439011')
+        getOwnProfile('507f1f77bcf86cd799439011')
       ).rejects.toMatchObject({ statusCode: 404 });
     });
   });

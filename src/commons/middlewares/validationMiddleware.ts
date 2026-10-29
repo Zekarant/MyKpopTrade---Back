@@ -1,56 +1,43 @@
 import { Request, Response, NextFunction } from 'express';
+import { badRequest } from '../utils/httpError';
 
 /**
- * Valide la requête de remboursement
+ * Valide la demande de remboursement : montant positif s'il est donné
+ * (remboursement partiel), raison de 255 caractères au plus. L'erreur suit le
+ * format commun (errorMiddleware) : `{ message, code, errors }`.
  */
-export const validateRefundRequest = (req: Request, res: Response, next: NextFunction): void => {
+export const validateRefundRequest = (req: Request, _res: Response, next: NextFunction): void => {
   const { amount, reason } = req.body;
   const errors: string[] = [];
-  
-  // Valider le montant si présent (remboursement partiel)
+
   if (amount !== undefined && amount !== null) {
-    // Vérifier que c'est un nombre
-    if (isNaN(parseFloat(amount))) {
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount)) {
       errors.push('Le montant doit être un nombre');
-    } else {
-      const numAmount = parseFloat(amount);
-      // Vérifier que c'est positif
-      if (numAmount <= 0) {
-        errors.push('Le montant du remboursement doit être positif');
-      }
+    } else if (numAmount <= 0) {
+      errors.push('Le montant du remboursement doit être positif');
     }
   }
-  
-  // Valider la raison
+
   if (reason && reason.length > 255) {
     errors.push('La raison du remboursement ne peut pas dépasser 255 caractères');
   }
-  
+
   if (errors.length > 0) {
-    res.status(400).json({
-      success: false,
-      errors,
-      message: 'Erreur de validation des données de remboursement'
-    });
-    return; // Important: on retourne sans appeler next()
+    throw badRequest('Erreur de validation des données de remboursement', 'REFUND_INVALID', { errors });
   }
-  
-  next(); // Si tout est valide, on passe à la suite
+  next();
 };
 
 /**
- * Vérifie que le mot de passe est présent dans la demande
+ * Exige le mot de passe actuel dans le corps, pour confirmer une action
+ * sensible ; sa vérification revient au contrôleur. Ne juge pas la force d'un
+ * nouveau mot de passe : c'est `validatePassword` (commons/utils/validators).
  */
-export const validatePassword = (req: Request, res: Response, next: NextFunction): void => {
+export const requireConfirmationPassword = (req: Request, _res: Response, next: NextFunction): void => {
   const { password } = req.body;
-  
-  if (!password || typeof password !== 'string' || password.length === 0) {
-    res.status(400).json({
-      success: false,
-      message: 'Le mot de passe est requis pour cette action'
-    });
-    return;
+  if (typeof password !== 'string' || password.length === 0) {
+    throw badRequest('Le mot de passe est requis pour cette action', 'PASSWORD_REQUIRED');
   }
-  
   next();
 };
