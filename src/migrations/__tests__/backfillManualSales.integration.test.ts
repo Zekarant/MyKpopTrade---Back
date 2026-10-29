@@ -3,9 +3,8 @@ import {
   stopInMemoryMongo,
   clearAllCollections
 } from '../../tests/helpers/mongoMemory';
-import { createTestProduct, createTestUser } from '../../tests/helpers/fixtures';
+import { createTestPayment, createTestProduct, createTestUser } from '../../tests/helpers/fixtures';
 import Product from '../../models/productModel';
-import Payment from '../../models/paymentModel';
 import Notification from '../../models/notificationModel';
 import { backfillManualSales } from '../0002-backfillManualSales';
 
@@ -38,10 +37,7 @@ describe('backfillManualSales (integration)', () => {
       }
     });
     const completedAt = new Date('2026-05-01T10:00:00Z');
-    await Payment.create({
-      product: paid._id, buyer: buyer._id, seller: seller._id,
-      amount: 20, currency: 'EUR', paymentIntentId: 'ORDER-1', status: 'completed', completedAt
-    });
+    await createTestPayment({ product: paid._id, buyer: buyer._id, seller: seller._id }, { completedAt });
     const notifiedAt = new Date('2026-06-01T10:00:00Z');
     await Notification.create({
       recipient: buyer._id,

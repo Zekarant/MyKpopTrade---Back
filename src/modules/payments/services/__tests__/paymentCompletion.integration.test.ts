@@ -11,7 +11,7 @@ import {
   stopInMemoryMongo,
   clearAllCollections
 } from '../../../../tests/helpers/mongoMemory';
-import { createTestProduct, createTestUser } from '../../../../tests/helpers/fixtures';
+import { createTestPayment, createTestProduct, createTestUser } from '../../../../tests/helpers/fixtures';
 import Payment from '../../../../models/paymentModel';
 import Product from '../../../../models/productModel';
 import { createNotification } from '../../../notifications/services/notificationService';
@@ -35,18 +35,10 @@ async function setupPendingPayment() {
   const seller = await createTestUser({ paypalMerchantId: 'MERCHANT-COMPLETION' });
   const buyer = await createTestUser();
   const product = await createTestProduct(seller._id);
-  const payment = await Payment.create({
-    product: product._id,
-    buyer: buyer._id,
-    seller: seller._id,
-    amount: 20,
-    currency: 'EUR',
-    paymentIntentId: ORDER_ID,
-    approvalUrl: 'https://paypal.test/approve/completion',
-    status: 'pending',
-    paymentMethod: 'paypal',
-    paymentType: 'direct'
-  });
+  const payment = await createTestPayment(
+    { product: product._id, buyer: buyer._id, seller: seller._id },
+    { paymentIntentId: ORDER_ID, approvalUrl: 'https://paypal.test/approve/completion', status: 'pending' }
+  );
   return { seller, buyer, product, payment };
 }
 

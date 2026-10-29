@@ -2,7 +2,7 @@ import request from 'supertest';
 import { Types } from 'mongoose';
 import { createApp } from '../../app';
 import { startInMemoryMongo, stopInMemoryMongo, clearAllCollections } from '../helpers/mongoMemory';
-import { createTestUser, createTestProduct } from '../helpers/fixtures';
+import { createTestUser, createTestProduct, createTestPayment } from '../helpers/fixtures';
 import { generateAccessToken } from '../../commons/services/tokenService';
 import Payment from '../../models/paymentModel';
 import Rating from '../../models/ratingModel';
@@ -18,14 +18,10 @@ const auth = (user: TestUser) => `Bearer ${generateAccessToken(user)}`;
 
 async function completedSale(buyer: TestUser, seller: TestUser, completedAt = new Date()) {
   const product = await createTestProduct(seller._id);
-  const payment = await Payment.create({
-    product: product._id,
-    buyer: buyer._id,
-    seller: seller._id,
-    amount: 20,
-    status: 'completed',
-    completedAt
-  });
+  const payment = await createTestPayment(
+    { product: product._id, buyer: buyer._id, seller: seller._id },
+    { completedAt }
+  );
   return { product, payment };
 }
 

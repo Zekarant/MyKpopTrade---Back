@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import User, { IUser } from '../../models/userModel';
 import Product, { IProduct } from '../../models/productModel';
+import Payment, { IPayment } from '../../models/paymentModel';
 
 let uniqueCounter = 0;
 
@@ -47,4 +48,25 @@ export async function createTestProduct(sellerId: Types.ObjectId | string, overr
   } satisfies Partial<IProduct>;
 
   return await Product.create({ ...defaults, ...overrides });
+}
+
+type Id = Types.ObjectId | string;
+
+/**
+ * Crée un paiement terminé de 20 € (PayPal direct en euros : valeurs par
+ * défaut du modèle) avec un identifiant de commande unique.
+ */
+export async function createTestPayment(
+  parties: { product: Id; buyer: Id; seller: Id },
+  overrides: Partial<IPayment> = {}
+) {
+  uniqueCounter += 1;
+
+  return await Payment.create({
+    ...parties,
+    amount: 20,
+    status: 'completed',
+    paymentIntentId: `order-test-${uniqueCounter}`,
+    ...overrides
+  });
 }

@@ -11,7 +11,7 @@ import {
   stopInMemoryMongo,
   clearAllCollections
 } from '../../../../tests/helpers/mongoMemory';
-import { createTestUser, createTestProduct } from '../../../../tests/helpers/fixtures';
+import { createTestUser, createTestProduct, createTestPayment } from '../../../../tests/helpers/fixtures';
 import {
   markShipped,
   confirmDelivery,
@@ -24,7 +24,7 @@ import * as trackingModule from '../tracking';
 import { resetTrackingProviderCache } from '../tracking';
 import { createNotification } from '../../../notifications/services/notificationService';
 import { sendShipmentReminderEmail } from '../../../../commons/services/emailService';
-import Payment from '../../../../models/paymentModel';
+import Payment, { IPayment } from '../../../../models/paymentModel';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -57,25 +57,15 @@ describe('shipmentService — automatisation', () => {
     resetTrackingProviderCache();
   });
 
-  async function createPaymentWithShipment(overrides: Record<string, unknown> = {}) {
+  async function createPaymentWithShipment(overrides: Partial<IPayment> = {}) {
     const seller = await createTestUser();
     const buyer = await createTestUser();
     const product = await createTestProduct(seller._id);
 
-    const payment = await Payment.create({
-      product: product._id,
-      buyer: buyer._id,
-      seller: seller._id,
-      amount: 20,
-      platformFee: 0,
-      currency: 'EUR',
-      paymentIntentId: `pi_${Date.now()}_${Math.random()}`,
-      status: 'completed',
-      paymentMethod: 'paypal',
-      paymentType: 'direct',
-      captureId: 'cap_test_123',
-      ...overrides
-    });
+    const payment = await createTestPayment(
+      { product: product._id, buyer: buyer._id, seller: seller._id },
+      { captureId: 'cap_test_123', ...overrides }
+    );
 
     await markShipped({
       userId: seller._id.toString(),

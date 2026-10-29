@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { createApp } from '../../app';
 import { startInMemoryMongo, stopInMemoryMongo, clearAllCollections } from '../helpers/mongoMemory';
-import { createTestProduct, createTestUser } from '../helpers/fixtures';
+import { createTestPayment, createTestProduct, createTestUser } from '../helpers/fixtures';
 import { generateAccessToken } from '../../commons/services/tokenService';
 import Payment from '../../models/paymentModel';
 import Product from '../../models/productModel';
@@ -40,11 +40,10 @@ describe('HTTP — paiements', () => {
       const seller = await createTestUser();
       const buyer = await createTestUser();
       const product = await createTestProduct(seller._id, { isAvailable: false, isSold: true, soldTo: buyer._id });
-      const payment = await Payment.create({
-        product: product._id, buyer: buyer._id, seller: seller._id,
-        amount: 20, currency: 'EUR', paymentIntentId: 'ORDER-1', captureId: 'CAPTURE-1',
-        status: 'completed', completedAt: new Date(), paymentMethod: 'paypal', paymentType: 'direct'
-      });
+      const payment = await createTestPayment(
+        { product: product._id, buyer: buyer._id, seller: seller._id },
+        { paymentIntentId: 'ORDER-1', captureId: 'CAPTURE-1', completedAt: new Date() }
+      );
       const event = {
         id: 'WH-1',
         event_type: 'PAYMENT.CAPTURE.COMPLETED',
@@ -177,11 +176,10 @@ describe('HTTP — paiements', () => {
       const buyer = await createTestUser();
       const other = await createTestUser();
       const product = await createTestProduct(seller._id);
-      await Payment.create({
-        product: product._id, buyer: buyer._id, seller: seller._id,
-        amount: 20, currency: 'EUR', paymentIntentId: 'ORDER-2',
-        status: 'pending', paymentMethod: 'paypal', paymentType: 'direct'
-      });
+      await createTestPayment(
+        { product: product._id, buyer: buyer._id, seller: seller._id },
+        { paymentIntentId: 'ORDER-2', status: 'pending' }
+      );
       await Product.updateOne({ _id: product._id }, { isSold: true, isAvailable: false, soldTo: other._id });
       const capture = jest.spyOn(PayPalService, 'captureConnectedPayment');
 
