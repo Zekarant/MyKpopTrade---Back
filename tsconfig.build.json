@@ -1,5 +1,9 @@
 {
   "extends": "./tsconfig.json",
+  // Les scripts de dev restent hors du build, sauf celui des migrations, lancé
+  // en production par `npm run migrate:prod` (un fichier listé ici est compilé
+  // même s'il correspond à un `exclude`).
+  "files": ["src/scripts/migrate.ts"],
   "exclude": [
     "node_modules",
     "dist",

@@ -51,11 +51,11 @@ docker-compose up -d   # MongoDB
 npm run dev            # migrations, puis développement (tsx watch, rechargement à chaud)
 ```
 
-En production (pas encore de serveur : `npm run migrate` dépend de `tsx`,
-installé en dev seulement ; à revoir au premier déploiement) :
+En production (dépendances de production seulement : `npm run migrate:prod`
+lance la version compilée des migrations, sans `tsx`) :
 
 ```sh
-npm run build && npm run migrate && npm start
+npm run build && npm run migrate:prod && npm start
 ```
 
 L'API écoute sur <http://localhost:3000>.
@@ -73,6 +73,7 @@ L'API écoute sur <http://localhost:3000>.
 | `npm run test:coverage` | Suite Jest avec couverture |
 | `npm run paypal:status` | Diagnostic de la configuration PayPal |
 | `npm run migrate` | Applique les migrations de base en attente (voir ci-dessous) |
+| `npm run migrate:prod` | Idem en production, depuis `dist/` (après `npm run build`) |
 
 ## Migrations
 
