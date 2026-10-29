@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import {
-  getPublicProfileData,
+  getOwnProfile,
   updateProfileData,
   completeFirstProfile,
   setPayPalEmail,
@@ -12,7 +12,7 @@ import {
  * @route GET /api/auth/profile
  */
 export const getProfile = async (req: Request, res: Response): Promise<void> => {
-  const user = await getPublicProfileData(req.user!.id);
+  const user = await getOwnProfile(req.user!.id);
   res.status(200).json({ user });
 };
 
