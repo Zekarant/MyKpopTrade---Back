@@ -3,6 +3,7 @@ import logger from './logger';
 import { EncryptionService } from './encryptionService';
 import User from '../../models/userModel';
 import env from '../../config/env';
+import { escapeHtml } from './escapeHtml';
 
 /**
  * Logger compatible RGPD qui masque les données sensibles
@@ -253,9 +254,9 @@ export class GdprLogger {
           html: `
             <p>Une activité suspecte a été détectée:</p>
             <ul>
-              <li>Ressource: ${resourceType}</li>
+              <li>Ressource: ${escapeHtml(resourceType)}</li>
               <li>Nombre de requêtes: ${requestCount} en moins d'une heure</li>
-              <li>Utilisateur: ${user ? user.username : userId} (${user ? user.email : 'Email inconnu'})</li>
+              <li>Utilisateur: ${escapeHtml(user ? user.username : userId)} (${escapeHtml(user ? user.email : 'Email inconnu')})</li>
               <li>Horodatage: ${new Date().toISOString()}</li>
             </ul>
             <p>Cette alerte a été générée automatiquement conformément au RGPD Article 33.

@@ -166,7 +166,7 @@ export const sendVerificationResultEmail = async (
     : `
       <h2>Demande de vérification rejetée</h2>
       <p>Nous sommes désolés de vous informer que votre demande de vérification d'identité a été rejetée.</p>
-      <p><strong>Motif :</strong> ${reason || 'Document non conforme'}</p>
+      <p><strong>Motif :</strong> ${escapeHtml(reason || 'Document non conforme')}</p>
       <p>Vous pouvez soumettre une nouvelle demande en vous assurant que votre document répond aux critères suivants :</p>
       <ul>
         <li>Document officiel en cours de validité</li>
@@ -305,8 +305,10 @@ export const sendShipmentReminderEmail = async (
   user: IUser,
   ctx: ShipmentEmailContext & { daysSinceShipped: number }
 ): Promise<void> => {
-  const trackingLink = ctx.trackingUrl
-    ? `<p>Si besoin, vérifiez le suivi : <a href="${ctx.trackingUrl}">${ctx.trackingUrl}</a></p>`
+  // Transporteur, numéro et lien de suivi sont saisis par le vendeur : tout est échappé.
+  const trackingUrl = ctx.trackingUrl ? escapeHtml(ctx.trackingUrl) : '';
+  const trackingLink = trackingUrl
+    ? `<p>Si besoin, vérifiez le suivi : <a href="${trackingUrl}">${trackingUrl}</a></p>`
     : '';
   await sendEmail({
     to: user.email,
@@ -314,8 +316,8 @@ export const sendShipmentReminderEmail = async (
     html: emailTemplate({
       title: 'Votre colis devrait être arrivé',
       content: `
-        <p>Bonjour ${user.username},</p>
-        <p>Votre commande a été expédiée il y a ${ctx.daysSinceShipped} jours par <strong>${ctx.carrier}</strong> (${ctx.trackingNumber}).</p>
+        <p>Bonjour ${escapeHtml(user.username)},</p>
+        <p>Votre commande a été expédiée il y a ${ctx.daysSinceShipped} jours par <strong>${escapeHtml(ctx.carrier)}</strong> (${escapeHtml(ctx.trackingNumber)}).</p>
         <p>Merci de confirmer la réception depuis votre espace pour clôturer la transaction. Si le colis n'est pas arrivé, contactez le vendeur ou le support.</p>
         ${trackingLink}
       `,
