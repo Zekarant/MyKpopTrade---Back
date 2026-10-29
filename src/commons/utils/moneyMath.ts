@@ -30,6 +30,15 @@ export function roundToCents(amount: number): number {
 }
 
 /**
+ * `percent` % de `amount`, arrondi au centime le plus proche (0,5 vers le haut).
+ * Calculé sur des centimes entiers : `1.45 * 10 / 100` donnerait 0,14 à cause
+ * des flottants (`0.145 * 100 = 14.499999…`), au lieu de 0,15.
+ */
+export function percentOf(amount: number, percent: number): number {
+  return fromCents(Math.round(toCents(amount) * percent / 100));
+}
+
+/**
  * Arrondi au centime supérieur : un minimum exprimé en pourcentage d'un prix ne
  * doit jamais tomber sous la règle (50 % de 19,99 € → 10,00 €, pas 9,995 €).
  * La marge absorbe l'erreur des flottants (`0.1 * 3 * 100 = 30.000000000000004`).

@@ -1,4 +1,4 @@
-import { add, ceilToCents, roundToCents, subtract } from '../moneyMath';
+import { add, ceilToCents, percentOf, roundToCents, subtract } from '../moneyMath';
 
 /** Montants au centime : calculs sans les erreurs des flottants. */
 
@@ -14,6 +14,15 @@ describe('moneyMath', () => {
     expect(ceilToCents(19.99 * 50 / 100)).toBe(10);
     expect(ceilToCents(0.1 * 3)).toBe(0.3);
     expect(ceilToCents(12)).toBe(12);
+  });
+
+  it('percentOf arrondit la demi-centime vers le haut, sans erreur de flottant (commission plateforme)', () => {
+    expect(percentOf(1.45, 10)).toBe(0.15);
+    expect(percentOf(2.85, 10)).toBe(0.29);
+    expect(percentOf(5.65, 10)).toBe(0.57);
+    expect(percentOf(2.9, 5)).toBe(0.15);
+    expect(percentOf(5.7, 5)).toBe(0.29);
+    expect(percentOf(100, 2.5)).toBe(2.5);
   });
 
   it('add / subtract travaillent en centimes', () => {
