@@ -7,7 +7,7 @@ jest.mock('../pushService', () => ({
 
 import { startInMemoryMongo, stopInMemoryMongo, clearAllCollections } from '../../../../tests/helpers/mongoMemory';
 import { createTestUser } from '../../../../tests/helpers/fixtures';
-import { createNotification } from '../notificationService';
+import { createNotification, notifyAllAdmins } from '../notificationService';
 import { sendNotificationEmail } from '../../../../commons/services/emailService';
 import { sendToUser } from '../pushService';
 import Notification from '../../../../models/notificationModel';
@@ -120,5 +120,20 @@ describe('createNotification — canaux selon les préférences', () => {
     } finally {
       create.mockRestore();
     }
+  });
+
+  it('notifyAllAdmins : un échec pour un admin n\'empêche pas les autres et est compté', async () => {
+    await createTestUser({ role: 'admin' });
+    await createTestUser({ role: 'admin' });
+    await createTestUser({ role: 'admin', accountStatus: 'suspended' });
+    await createTestUser();
+    const create = jest.spyOn(Notification, 'create').mockRejectedValueOnce(new Error('Mongo indisponible'));
+    try {
+      await expect(notifyAllAdmins({ type: 'system', title: 'Litige ouvert', content: 'À traiter' }))
+        .resolves.toEqual({ sent: 1, failed: 1 });
+    } finally {
+      create.mockRestore();
+    }
+    expect(await Notification.countDocuments()).toBe(1);
   });
 });
