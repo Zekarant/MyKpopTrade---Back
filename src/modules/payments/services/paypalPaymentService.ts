@@ -20,6 +20,7 @@ import logger from '../../../commons/utils/logger';
 import { formatForPayPal } from '../../../commons/utils/moneyMath';
 import { CheckoutBreakdown, resolveCheckout, ShippingAddress, ShippingMethod } from './checkoutService';
 import { resolveBuyerPrice } from './buyerPrice';
+import { roundToCents } from '../../../commons/utils/moneyMath';
 import { HttpError } from '../../../commons/utils/httpError';
 
 export interface CheckoutInput {
@@ -130,7 +131,7 @@ function computePlatformFee(productAmount: number): number {
   if (!Number.isFinite(percent) || percent <= 0) {
     return 0;
   }
-  return Math.round(productAmount * percent) / 100;
+  return roundToCents(productAmount * percent / 100);
 }
 
 /**

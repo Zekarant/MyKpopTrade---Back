@@ -1,27 +1,20 @@
 import { Request, Response } from 'express';
 import * as cartCheckoutService from '../services/cartCheckoutService';
-import { badRequest } from '../../../commons/utils/httpError';
-
-const VALID_SHIPPING_METHODS = ['national', 'worldwide', 'localPickup'] as const;
+import {
+  SHIPPING_METHODS,
+  assertShippingMethod,
+  validateShippingAddress
+} from '../../payments/services/checkoutService';
 
 export async function checkoutCart(req: Request, res: Response) {
-  const { shippingMethod, shippingAddress } = req.body;
+  // Mêmes règles que le paiement d'une annonce seule (checkoutService), vérifiées
+  // ici une fois pour tout le panier, avant le premier appel à PayPal.
+  const shippingMethod = assertShippingMethod(req.body.shippingMethod);
+  const shippingAddress = shippingMethod === SHIPPING_METHODS.LOCAL_PICKUP
+    ? undefined
+    : validateShippingAddress(req.body.shippingAddress);
 
-  if (!shippingMethod || !VALID_SHIPPING_METHODS.includes(shippingMethod)) {
-    throw badRequest('shippingMethod invalide (national, worldwide, localPickup)');
-  }
-
-  // Valider l'adresse si nécessaire
-  if (shippingMethod !== 'localPickup') {
-    if (!shippingAddress || !shippingAddress.recipientName || !shippingAddress.streetLine1 || !shippingAddress.postalCode || !shippingAddress.city) {
-      throw badRequest('Adresse de livraison incomplète');
-    }
-  }
-
-  const results = await cartCheckoutService.checkoutCart(req.user!.id, {
-    shippingMethod,
-    shippingAddress: shippingMethod !== 'localPickup' ? shippingAddress : undefined
-  });
+  const results = await cartCheckoutService.checkoutCart(req.user!.id, { shippingMethod, shippingAddress });
 
   res.json({ success: true, payments: results });
 }

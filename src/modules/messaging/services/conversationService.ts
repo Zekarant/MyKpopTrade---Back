@@ -16,17 +16,13 @@ import {
   isFavoritedByUser,
   formatOfferHistory
 } from '../types/conversationTypes';
+import { OFFER_STATUS } from './offerHistory';
 import { badRequest, notFound } from '../../../commons/utils/httpError';
 import { paginationMeta } from '../../../commons/utils/pagination';
 import { assertNotBlocked, getBlockStatus } from '../../users/services/userBlockService';
 import { realtimePublisher } from '../../realtime/services/realtimePublisher';
 
 const conversationNotFound = () => notFound('Conversation non trouvée', 'CONVERSATION_NOT_FOUND');
-
-const OFFER_STATUS = {
-  PENDING: 'pending',
-  ACCEPTED: 'accepted'
-} as const;
 
 const CONVERSATION_TYPE = {
   NEGOTIATION: 'negotiation'

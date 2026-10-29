@@ -24,6 +24,24 @@ export function fromCents(cents: number): number {
   return cents / SCALE;
 }
 
+/** Arrondi au centime le plus proche (montants calculés : frais, totaux, soldes). */
+export function roundToCents(amount: number): number {
+  return fromCents(toCents(amount));
+}
+
+/**
+ * Arrondi au centime supérieur : un minimum exprimé en pourcentage d'un prix ne
+ * doit jamais tomber sous la règle (50 % de 19,99 € → 10,00 €, pas 9,995 €).
+ * La marge absorbe l'erreur des flottants (`0.1 * 3 * 100 = 30.000000000000004`).
+ * Même calcul que `offerRules.ts` côté front.
+ */
+export function ceilToCents(amount: number): number {
+  if (!Number.isFinite(amount)) {
+    throw new Error(`Montant invalide : ${amount}`);
+  }
+  return Math.ceil(amount * SCALE - 1e-9) / SCALE;
+}
+
 /**
  * Formate un montant pour l'API PayPal (toujours 2 décimales, point décimal).
  */

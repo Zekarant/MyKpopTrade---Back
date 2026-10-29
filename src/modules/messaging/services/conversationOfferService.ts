@@ -16,6 +16,7 @@ import {
   findOfferConversation
 } from './offerHistory';
 import { MESSAGE_CONTENT_TYPE, createOfferMessages } from './offerMessageService';
+import { ceilToCents, toCents } from '../../../commons/utils/moneyMath';
 
 /**
  * Offres de négociation : ouverture (ou mise à jour), historique et annulation.
@@ -61,8 +62,9 @@ function assertOfferInAcceptedRange(product: OfferProduct, offer: number): void 
   }
 
   const minPercentage = product.minOfferPercentage || DEFAULT_MIN_OFFER_PERCENTAGE;
-  const minOffer = product.price * minPercentage / 100;
-  if (offer < minOffer) {
+  // Arrondi au centime supérieur, comme le front (offerRules.ts) : la règle affichée est celle appliquée.
+  const minOffer = ceilToCents(product.price * minPercentage / 100);
+  if (toCents(offer) < toCents(minOffer)) {
     throw new HttpError(
       400,
       `L'offre doit être au moins ${minPercentage}% du prix (${minOffer} ${product.currency})`

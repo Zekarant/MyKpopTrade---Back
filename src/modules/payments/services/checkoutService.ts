@@ -1,4 +1,5 @@
 import { HttpError } from '../../../commons/utils/httpError';
+import { add, roundToCents } from '../../../commons/utils/moneyMath';
 import type { IProduct } from '../../../models/productModel';
 
 export type ShippingMethod = 'national' | 'worldwide' | 'localPickup';
@@ -100,7 +101,7 @@ export function quoteShipping(product: CheckoutProduct): Record<ShippingMethod, 
   };
 }
 
-function assertShippingMethod(value: unknown): ShippingMethod {
+export function assertShippingMethod(value: unknown): ShippingMethod {
   if (value === SHIPPING_METHODS.NATIONAL ||
       value === SHIPPING_METHODS.WORLDWIDE ||
       value === SHIPPING_METHODS.LOCAL_PICKUP) {
@@ -140,9 +141,9 @@ export function computeCheckout(
     );
   }
 
-  const productAmount = parseFloat(productPrice.toFixed(2));
-  const shippingAmount = parseFloat(shippingCost.toFixed(2));
-  const total = parseFloat((productAmount + shippingAmount).toFixed(2));
+  const productAmount = roundToCents(productPrice);
+  const shippingAmount = roundToCents(shippingCost);
+  const total = add(productAmount, shippingAmount);
 
   return { productAmount, shippingAmount, total };
 }
