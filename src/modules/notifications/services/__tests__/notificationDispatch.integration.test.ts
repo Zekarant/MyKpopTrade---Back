@@ -115,7 +115,10 @@ describe('createNotification — canaux selon les préférences', () => {
 
     const buyer = await createTestUser();
     const create = jest.spyOn(Notification, 'create').mockRejectedValueOnce(new Error('Mongo indisponible'));
-    await expect(notify(buyer._id, 'order_status')).resolves.toBeNull();
-    create.mockRestore();
+    try {
+      await expect(notify(buyer._id, 'order_status')).resolves.toBeNull();
+    } finally {
+      create.mockRestore();
+    }
   });
 });

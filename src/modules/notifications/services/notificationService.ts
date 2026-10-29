@@ -131,7 +131,10 @@ export async function createNotification({
     logger.error('Erreur lors de la création de notification', {
       error: errorMessage(error),
       recipientId,
-      type
+      type,
+      // Pour retrouver l'objet concerné (annonce, litige, conversation…).
+      link,
+      data
     });
     return null;
   }
