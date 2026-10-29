@@ -3,6 +3,7 @@ import { IProduct } from '../../../models/productModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import KpopAlbum from '../../../models/albumModel';
 import { HttpError } from '../../../commons/utils/httpError';
+import { isObjectIdString } from '../../../commons/utils/query';
 
 /**
  * Métadonnées structurées d'une annonce (groupe, membre, album, version,
@@ -56,7 +57,7 @@ export interface CatalogCriteria {
 
 function readObjectId(value: unknown, message: string): string | undefined {
   if (value === undefined || value === '') return undefined;
-  if (typeof value !== 'string' || !mongoose.Types.ObjectId.isValid(value)) {
+  if (!isObjectIdString(value)) {
     throw new HttpError(400, message);
   }
   return value;

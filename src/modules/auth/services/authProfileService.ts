@@ -1,14 +1,14 @@
 import User, { IUser } from '../../../models/userModel';
 import { validateEmail, normalizePhoneNumber, validateUsername } from '../../../commons/utils/validators';
 import { sendVerificationEmail, sendEmailChangedNotice } from '../../../commons/services/emailService';
-import { HttpError } from '../../../commons/utils/httpError';
+import { HttpError, userNotFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { checkSessionPassword, verifyCurrentPassword } from './passwordService';
 
 async function loadUserOr404(userId: string) {
   const user = await User.findById(userId);
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFound();
   }
   return user;
 }
@@ -19,7 +19,7 @@ async function verifyPasswordIfProvided(userId: string, confirmPassword?: string
   const userWithPassword = await User.findById(userId).select('+password');
 
   if (!userWithPassword) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   if (!userWithPassword.password) return;
@@ -42,7 +42,7 @@ export async function getOwnProfile(userId: string) {
   });
 
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   return user;

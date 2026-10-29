@@ -10,7 +10,7 @@ import Product from '../../../models/productModel';
 import User from '../../../models/userModel';
 import { EncryptionService } from '../../../commons/utils/encryptionService';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
-import { HttpError } from '../../../commons/utils/httpError';
+import { HttpError, userNotFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { gt, subtract } from '../../../commons/utils/moneyMath';
 import { recordAuditLog } from '../../../commons/utils/auditService';
@@ -97,7 +97,7 @@ export function decryptPaymentMetadata(
 export async function buildOnboardingLink(userId: string): Promise<string> {
   const seller = await User.findById(userId);
   if (!seller) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   return PayPalService.createOnboardingLink(userId);
@@ -137,7 +137,7 @@ export async function getPayPalAccountStatus(
   );
 
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   if (!user.paypalMerchantId) {
@@ -202,7 +202,7 @@ export async function getPayPalAccountStatus(
 export async function disconnectPayPalForUser(userId: string): Promise<void> {
   const user = await User.findById(userId).select('_id');
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   await PayPalService.forgetSellerAccount(userId);

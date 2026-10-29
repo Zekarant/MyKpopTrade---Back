@@ -3,7 +3,7 @@ import Follow from '../../../models/followModel';
 import User from '../../../models/userModel';
 import { createNotification } from '../../notifications/services/notificationService';
 import { assertNotBlocked } from '../../users/services/userBlockService';
-import { badRequest, notFound } from '../../../commons/utils/httpError';
+import { badRequest, notFound, userNotFound } from '../../../commons/utils/httpError';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 import logger from '../../../commons/utils/logger';
 
@@ -67,7 +67,7 @@ export async function toggleFollow(followerId: string, followingId: string): Pro
 
   const target = await User.findById(followingId).select('accountStatus').lean<{ accountStatus?: string } | null>();
   if (!target || target.accountStatus === 'deleted') {
-    throw notFound('Utilisateur introuvable');
+    throw userNotFound();
   }
   // Se désabonner reste possible ; s'abonner est refusé entre membres bloqués.
   await assertNotBlocked(followerId, followingId);

@@ -6,7 +6,7 @@ import Dispute from '../../../models/disputeModel';
 import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
-import { badRequest, notFound } from '../../../commons/utils/httpError';
+import { badRequest, userNotFound } from '../../../commons/utils/httpError';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 
 export const USER_ROLES: IUser['role'][] = ['user', 'moderator', 'admin'];
@@ -21,7 +21,6 @@ const USER_DETAIL_FIELDS =
 
 const ADMIN_NOTE_MAX_LENGTH = 2000;
 
-export const USER_NOT_FOUND_MESSAGE = 'Utilisateur non trouvé';
 
 export interface UserListFilters {
   search?: string;
@@ -79,7 +78,7 @@ export async function getUserDetail(userId: string) {
     .populate('sanctions.by', 'username')
     .lean();
   if (!user) {
-    throw notFound(USER_NOT_FOUND_MESSAGE);
+    throw userNotFound();
   }
 
   const [listings, reportsAgainst, reportsFiled, disputes] = await Promise.all([
@@ -113,7 +112,7 @@ export async function addUserNote({ adminId, userId, content }: { adminId: strin
     .populate('adminNotes.author', 'username')
     .lean();
   if (!user) {
-    throw notFound(USER_NOT_FOUND_MESSAGE);
+    throw userNotFound();
   }
 
   await recordAuditLog({
@@ -138,7 +137,7 @@ export async function deleteUserNote({ adminId, userId, noteId }: { adminId: str
     .populate('adminNotes.author', 'username')
     .lean();
   if (!user) {
-    throw notFound(USER_NOT_FOUND_MESSAGE);
+    throw userNotFound();
   }
 
   await recordAuditLog({
@@ -159,7 +158,7 @@ export async function changeUserRole({ adminId, userId, role }: { adminId: strin
 
   const user = await User.findById(userId);
   if (!user) {
-    throw notFound(USER_NOT_FOUND_MESSAGE);
+    throw userNotFound();
   }
 
   const oldRole = user.role;

@@ -1,7 +1,7 @@
 import User, { IUser, hashOneTimeToken } from '../../../models/userModel';
 import { sessionPasswordAttempts } from '../middleware/authRateLimiter';
 import { sendPasswordResetEmail } from '../../../commons/services/emailService';
-import { HttpError, notFound } from '../../../commons/utils/httpError';
+import { HttpError, userNotFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import {
   invalidateAllUserRefreshTokens,
@@ -102,7 +102,7 @@ export async function changePassword({
 }): Promise<void> {
   const user = await User.findById(userId).select('+password');
   if (!user) {
-    throw notFound('Utilisateur non trouvé', 'USER_NOT_FOUND');
+    throw userNotFound();
   }
 
   if (!(await checkSessionPassword(user, currentPassword))) {

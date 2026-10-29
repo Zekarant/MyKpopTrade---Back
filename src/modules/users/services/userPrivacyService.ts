@@ -11,19 +11,18 @@ import SearchHistory from '../../../models/historicSearchModel';
 import IdentityVerification from '../../../models/identityVerificationModel';
 import Post from '../../../models/postModel';
 import { createNotification } from '../../notifications/services/notificationService';
-import { badRequest, notFound } from '../../../commons/utils/httpError';
+import { badRequest, userNotFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { erasePersonalFields } from './accountErasureService';
 import { verifyCurrentPassword } from '../../auth/services/passwordService';
 
-const USER_NOT_FOUND_MESSAGE = 'Utilisateur non trouvé';
 const DELETION_GRACE_PERIOD_DAYS = 30;
 
 async function loadUserOr404(userId: string) {
   const user = await User.findById(userId);
   if (!user) {
-    throw notFound(USER_NOT_FOUND_MESSAGE);
+    throw userNotFound();
   }
   return user;
 }
@@ -84,7 +83,7 @@ export async function updateConsents(userId: string, {
 export async function buildUserDataExport(userId: string) {
   const user = await User.findById(userId).select('-password');
   if (!user) {
-    throw notFound(USER_NOT_FOUND_MESSAGE);
+    throw userNotFound();
   }
 
   const [

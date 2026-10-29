@@ -7,7 +7,7 @@ import {
   SmsUnavailableError
 } from '../../../commons/services/smsService';
 import { normalizePhoneNumber } from '../../../commons/utils/validators';
-import { HttpError, notFound } from '../../../commons/utils/httpError';
+import { HttpError, userNotFound } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 
 const CODE_VALIDITY_MS = 10 * 60 * 1000;
@@ -17,7 +17,6 @@ const MAX_CODE_ATTEMPTS = 5;
 const phoneAlreadyUsedError = () =>
   new HttpError(409, 'Ce numéro est déjà vérifié sur un autre compte', 'PHONE_ALREADY_USED');
 
-const userNotFoundError = () => notFound('Utilisateur non trouvé', 'USER_NOT_FOUND');
 
 /**
  * Compare le condensat attendu et celui du code fourni à temps constant.
@@ -48,7 +47,7 @@ async function isPhoneVerifiedByAnotherUser(phoneNumber: string, userId: string)
  */
 export async function sendPhoneVerificationCode(userId: string, requestedPhoneNumber?: unknown): Promise<void> {
   const user = await User.findById(userId);
-  if (!user) throw userNotFoundError();
+  if (!user) throw userNotFound();
 
   const rawPhoneNumber = requestedPhoneNumber || user.phoneNumber;
   if (!rawPhoneNumber) {
@@ -101,7 +100,7 @@ export async function sendPhoneVerificationCode(userId: string, requestedPhoneNu
  */
 export async function confirmPhoneVerificationCode(userId: string, code: string): Promise<void> {
   const user = await User.findById(userId).select('+phoneVerificationCode +phoneVerificationAttempts');
-  if (!user) throw userNotFoundError();
+  if (!user) throw userNotFound();
 
   if (!user.phoneVerificationCode || !user.phoneVerificationExpires) {
     throw new HttpError(400, 'Aucun code de vérification n\'a été demandé', 'NO_PHONE_CODE_REQUESTED');

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { badRequest, HttpError } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
+import { clampLimit } from '../../../commons/utils/pagination';
 
 const BAN_URL = 'https://api-adresse.data.gouv.fr/search/';
 const DEFAULT_LIMIT = 8;
@@ -34,11 +35,6 @@ function sanitizeQueryString(value: unknown, max: number): string | undefined {
   return trimmed.slice(0, max);
 }
 
-function clampLimit(value: unknown): number {
-  const n = typeof value === 'string' ? parseInt(value, 10) : Number(value);
-  if (!Number.isFinite(n) || n <= 0) return DEFAULT_LIMIT;
-  return Math.min(n, MAX_LIMIT);
-}
 
 /** Feature GeoJSON renvoyée par la BAN (propriétés exploitées uniquement). */
 interface BanFeature {
@@ -86,7 +82,7 @@ export async function lookupAddress(query: LookupQuery): Promise<AddressResult[]
   const q = sanitizeQueryString(query.q, 200);
   const postalCode = sanitizeQueryString(query.postalCode, 10);
   const city = sanitizeQueryString(query.city, 100);
-  const limit = clampLimit(query.limit);
+  const limit = clampLimit(query.limit, DEFAULT_LIMIT, MAX_LIMIT);
 
   if (!q && !postalCode) {
     throw badRequest('Paramètre q ou postalCode requis');

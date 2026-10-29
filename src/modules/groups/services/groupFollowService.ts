@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import KpopGroup, { IKpopGroup } from '../../../models/kpopGroupModel';
 import User from '../../../models/userModel';
-import { HttpError } from '../../../commons/utils/httpError';
+import { HttpError, userNotFound } from '../../../commons/utils/httpError';
 import { paginationMeta } from '../../../commons/utils/pagination';
 import logger from '../../../commons/utils/logger';
 
@@ -25,7 +25,7 @@ export async function toggleFollow(userId: string, groupId: string) {
     throw new HttpError(404, 'Groupe non trouvé');
   }
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   const groupObjectId = new mongoose.Types.ObjectId(groupId);
@@ -161,7 +161,7 @@ export async function listFollowedGroups(userId: string, page: number, limit: nu
     .select('followedGroups followedGroupsCount');
 
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   return {

@@ -1,4 +1,13 @@
-import { queryInt, queryString } from '../query';
+import { isObjectIdString, queryInt, queryString } from '../query';
+
+describe('isObjectIdString', () => {
+  it('accepte une chaîne qu\'ObjectId reconnaît, refuse le reste', () => {
+    expect(isObjectIdString('507f1f77bcf86cd799439011')).toBe(true);
+    expect(isObjectIdString('pas-un-id')).toBe(false);
+    expect(isObjectIdString(['507f1f77bcf86cd799439011'])).toBe(false);
+    expect(isObjectIdString(undefined)).toBe(false);
+  });
+});
 
 describe('queryString', () => {
   it('garde une valeur unique', () => {

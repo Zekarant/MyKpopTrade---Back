@@ -2,7 +2,7 @@ import Payment, { IPayment } from '../../../models/paymentModel';
 import { IProduct } from '../../../models/productModel';
 import User from '../../../models/userModel';
 import { GdprLogger } from '../../../commons/utils/gdprLogger';
-import { HttpError, notFound } from '../../../commons/utils/httpError';
+import { HttpError, userNotFound } from '../../../commons/utils/httpError';
 import { anonymizeBuyerPayments, anonymizeExpiredPayments } from './paymentAnonymizationService';
 import { checkSessionPassword } from '../../auth/services/passwordService';
 
@@ -75,7 +75,7 @@ export async function exportUserPayments(userId: string): Promise<ExportedPaymen
 export async function anonymizeOwnPayments(userId: string, password: string): Promise<number> {
   const user = await User.findById(userId).select('+password');
   if (!user) {
-    throw notFound('Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   if (!(await checkSessionPassword(user, password))) {

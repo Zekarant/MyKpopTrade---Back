@@ -6,9 +6,9 @@ import User from '../../../models/userModel';
 import Payment, { IPayment } from '../../../models/paymentModel';
 import KpopGroup from '../../../models/kpopGroupModel';
 import KpopAlbum from '../../../models/albumModel';
-import { HttpError, assertOwner } from '../../../commons/utils/httpError';
+import { HttpError, assertOwner, userNotFound } from '../../../commons/utils/httpError';
 import { MAX_PAGE_SIZE, paginationMeta, parsePagination } from '../../../commons/utils/pagination';
-import { queryString } from '../../../commons/utils/query';
+import { queryString, isObjectIdString } from '../../../commons/utils/query';
 import { validateProductData, validateProductUpdate } from './productValidationService';
 import { notifyWishlistPriceDrop, notifyWishlistUnavailable } from './wishlistAlertService';
 import { dispatchProductModeration, awaitsModerationVerdict } from './productModerationService';
@@ -165,7 +165,7 @@ async function saveNewProduct(sellerId: string, productData: Record<string, unkn
     'paypalConnected paypalMerchantId paypalOnboarding'
   ).lean();
   if (!seller) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   const canReceiveViaPayPal = Boolean(
@@ -491,7 +491,7 @@ export async function markAsSold({
   // dans les deux cas, la vente est enregistrée sans acheteur.
   const declaredBuyerId = buyerId && buyerId !== userId ? buyerId : undefined;
   // Le corps JSON n'est pas typé : un tableau ou un objet ne passe pas.
-  if (declaredBuyerId && (typeof declaredBuyerId !== 'string' || !mongoose.Types.ObjectId.isValid(declaredBuyerId))) {
+  if (declaredBuyerId && (!isObjectIdString(declaredBuyerId))) {
     throw new HttpError(400, 'ID d\'acheteur invalide');
   }
   // Un identifiant fantôme fausserait `soldTo` (avis, litiges) sans compter d'achat à personne.
@@ -536,7 +536,7 @@ export async function toggleFavoriteForUser(userId: string, productId: string): 
 
   const user = await User.findById(userId);
   if (!user) {
-    throw new HttpError(404, 'Utilisateur non trouvé');
+    throw userNotFound();
   }
 
   if (!user.favorites) {
