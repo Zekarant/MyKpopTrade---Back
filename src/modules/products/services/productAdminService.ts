@@ -9,6 +9,7 @@ import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import { createNotification } from '../../notifications/services/notificationService';
 import { dispatchSavedSearchAlerts } from '../../savedSearches/services/savedSearchAlertService';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 const PRODUCT_TYPES: readonly IProduct['type'][] = ['photocard', 'album', 'merch', 'other'];
 const NEW_PRODUCTS_WINDOW_DAYS = 7;
@@ -61,7 +62,7 @@ export async function listAdminProducts(filters: AdminProductFilters, pageReques
   const filter = buildAdminProductFilter(filters);
   const [products, total] = await Promise.all([
     Product.find(filter)
-      .populate('seller', 'username profilePicture')
+      .populate('seller', USER_CARD_FIELDS)
       .sort({ createdAt: -1 })
       .skip(pageRequest.skip)
       .limit(pageRequest.limit)

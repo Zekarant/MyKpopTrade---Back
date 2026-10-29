@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import Conversation from '../../../models/conversationModel';
 import { IProduct } from '../../../models/productModel';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 /** Briques partagées par les offres, leurs réponses et le prix libre. */
 
@@ -54,8 +55,8 @@ export async function setOfferHistoryStatus(
 /** Conversation d'offre telle que renvoyée au front après chaque action. */
 export function findOfferConversation(conversationId: ObjectIdLike) {
   return Conversation.findById(conversationId)
-    .populate('participants', 'username profilePicture')
+    .populate('participants', USER_CARD_FIELDS)
     .populate('productId', 'title price images')
     .populate('lastMessage')
-    .populate('offerHistory.offeredBy', 'username profilePicture');
+    .populate('offerHistory.offeredBy', USER_CARD_FIELDS);
 }

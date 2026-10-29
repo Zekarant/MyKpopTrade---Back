@@ -17,6 +17,7 @@ import {
 } from './offerHistory';
 import { MESSAGE_CONTENT_TYPE, createOfferMessages } from './offerMessageService';
 import { ceilToCents, toCents } from '../../../commons/utils/moneyMath';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 /**
  * Offres de négociation : ouverture (ou mise à jour), historique et annulation.
@@ -256,7 +257,7 @@ export async function fetchConversationOffers(userId: string, conversationId: st
   await verifyConversationAccess(conversationId, userId);
 
   const conversationRaw = await Conversation.findById(conversationId)
-    .populate('offerHistory.offeredBy', 'username profilePicture')
+    .populate('offerHistory.offeredBy', USER_CARD_FIELDS)
     .populate({
       path: 'productId',
       select: 'title price images currency seller'

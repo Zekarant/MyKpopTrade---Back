@@ -5,6 +5,7 @@ import Product from '../../../models/productModel';
 import Post from '../../../models/postModel';
 import Message from '../../../models/messageModel';
 import User from '../../../models/userModel';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 const EXCERPT_LENGTH = 400;
 
@@ -133,7 +134,7 @@ async function loadRatingTarget(targetId: mongoose.Types.ObjectId) {
   const rating = await Rating.findById(targetId)
     .select('rating review images isHidden reviewer recipient createdAt')
     .populate('reviewer', OWNER_FIELDS)
-    .populate('recipient', 'username profilePicture')
+    .populate('recipient', USER_CARD_FIELDS)
     .lean();
   if (!rating) return null;
 

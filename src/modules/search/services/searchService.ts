@@ -7,6 +7,7 @@ import { badRequest, notFound } from '../../../commons/utils/httpError';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
 import { paginationMeta } from '../../../commons/utils/pagination';
 import { buildCatalogClauses, parseCatalogCriteria } from '../../products/services/productCatalogService';
+import { SELLER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 export interface SearchFilters {
   query?: string;
@@ -122,7 +123,7 @@ export async function runAdvancedSearch({
 
   const [products, total] = await Promise.all([
     Product.find(searchFilters)
-      .populate('seller', 'username profilePicture isIdentityVerified statistics.averageRating')
+      .populate('seller', SELLER_CARD_FIELDS)
       .sort(getSortOption(sortBy))
       .skip((page - 1) * limit)
       .limit(limit)

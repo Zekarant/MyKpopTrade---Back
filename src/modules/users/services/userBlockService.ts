@@ -4,6 +4,7 @@ import User from '../../../models/userModel';
 import Follow from '../../../models/followModel';
 import { HttpError, userNotFound } from '../../../commons/utils/httpError';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 type UserIdLike = string | Types.ObjectId;
 
@@ -117,7 +118,7 @@ export async function listBlockedUsers(blockerId: string, pageRequest: PageReque
       .sort({ createdAt: -1 })
       .skip(pageRequest.skip)
       .limit(pageRequest.limit)
-      .populate<{ blocked: BlockedUserRef | null }>('blocked', 'username profilePicture')
+      .populate<{ blocked: BlockedUserRef | null }>('blocked', USER_CARD_FIELDS)
       .lean(),
     Block.countDocuments(filter)
   ]);

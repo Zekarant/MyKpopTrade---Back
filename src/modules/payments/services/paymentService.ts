@@ -17,6 +17,7 @@ import { recordAuditLog } from '../../../commons/utils/auditService';
 import { dispatchAdminAlert } from '../../../commons/services/adminAlertService';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 import { checkSessionPassword } from '../../auth/services/passwordService';
+import { USER_CARD_FIELDS } from '../../../commons/utils/userFields';
 
 const PAYMENT_STATUS = {
   PENDING: 'pending',
@@ -470,8 +471,8 @@ export async function listUserPayments(
   const [payments, total] = await Promise.all([
     Payment.find(filter)
       .populate('product', 'title images price currency')
-      .populate('buyer', 'username profilePicture')
-      .populate('seller', 'username profilePicture')
+      .populate('buyer', USER_CARD_FIELDS)
+      .populate('seller', USER_CARD_FIELDS)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
