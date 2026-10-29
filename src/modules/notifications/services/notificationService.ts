@@ -42,6 +42,11 @@ export interface NotificationPayload {
 /**
  * Crée une notification in-app, la pousse aux onglets ouverts du destinataire,
  * puis déclenche push et email selon ses préférences (sans les attendre).
+ *
+ * Ne lève jamais : un échec est journalisé et renvoie `null`. La notification
+ * accompagne une action (paiement, litige, offre…) qui, elle, est déjà
+ * enregistrée et ne doit pas échouer pour ça. Les appelants n'ont donc ni
+ * `.catch` ni `try` à écrire.
  */
 export async function createNotification({
   recipientId,
@@ -128,7 +133,7 @@ export async function createNotification({
       recipientId,
       type
     });
-    throw error;
+    return null;
   }
 }
 
@@ -141,10 +146,10 @@ export async function createNotification({
 export async function notifyAllAdmins(payload: NotificationPayload) {
   try {
     const admins = await User.find({ role: 'admin', accountStatus: 'active' }).select('_id').lean();
-    const results = await Promise.allSettled(
+    const results = await Promise.all(
       admins.map((admin) => createNotification({ recipientId: admin._id, ...payload }))
     );
-    const failed = results.filter((r) => r.status === 'rejected').length;
+    const failed = results.filter((notification) => notification === null).length;
     if (failed > 0) {
       logger.warn('Notifications admin partielles', { sent: admins.length - failed, failed });
     }

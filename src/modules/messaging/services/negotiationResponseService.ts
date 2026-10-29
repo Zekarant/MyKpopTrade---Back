@@ -243,7 +243,7 @@ export async function respondToNegotiationFlow({
     ...buildResponseNotification(action, { responder, product, offerAmount, counterOffer }),
     link: `/adherents/messages/${conversationId}`,
     data: { conversationId, productId: product._id, action, amount: counterOffer || offerAmount }
-  }).catch(() => undefined);
+  });
 
   const updatedConversation = await findOfferConversation(conversationId);
 

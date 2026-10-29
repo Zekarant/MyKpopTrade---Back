@@ -243,7 +243,7 @@ export async function addDisputeMessage({
     content: text.length > 100 ? text.substring(0, 100) + '…' : text,
     link: `/disputes/${dispute._id}`,
     data: { disputeId: dispute._id }
-  }).catch(() => undefined)));
+  })));
 
   return dispute;
 }
@@ -268,7 +268,7 @@ export async function cancelDispute(userId: string, disputeId: string) {
     content: 'Le plaignant a retiré le litige.',
     link: `/disputes/${dispute._id}`,
     data: { disputeId: dispute._id }
-  }).catch(() => undefined);
+  });
 
   return dispute;
 }
@@ -299,7 +299,7 @@ export async function takeDisputeUnderReview(adminId: string, disputeId: string)
       content: 'Un membre de l\'équipe de modération étudie votre dossier.',
       link: `/disputes/${dispute._id}`,
       data: { disputeId: dispute._id }
-    }).catch(() => undefined)
+    })
   ));
 
   return dispute;
@@ -403,7 +403,7 @@ export async function resolveDispute({
       content: notesStr || 'Le litige a été clôturé par l\'équipe de modération.',
       link: `/disputes/${dispute._id}`,
       data: { disputeId: dispute._id, outcome }
-    }).catch(() => undefined)
+    })
   ));
 
   await recordAuditLog({

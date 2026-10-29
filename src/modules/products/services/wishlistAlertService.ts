@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
 import User from '../../../models/userModel';
 import { createNotification } from '../../notifications/services/notificationService';
-import logger from '../../../commons/utils/logger';
 
 /**
  * Pousse une notification à tous les utilisateurs ayant ce produit dans
@@ -27,12 +26,6 @@ async function broadcastToWishlistOwners(
         content: payload.content,
         link: payload.link,
         data: payload.data
-      }).catch((error) => {
-        logger.error('Erreur notification wishlist', {
-          ownerId: owner._id?.toString(),
-          productId: productId?.toString(),
-          error: error instanceof Error ? error.message : String(error)
-        });
       })
     )
   );

@@ -240,7 +240,7 @@ export async function initiateNegotiationFlow({
     content: `${initialOffer} ${product.currency} pour "${product.title}"`,
     link: `/adherents/messages/${conversationId}`,
     data: { conversationId, productId: product._id, amount: initialOffer }
-  }).catch(() => undefined);
+  });
 
   return {
     conversation: populatedConversation,
