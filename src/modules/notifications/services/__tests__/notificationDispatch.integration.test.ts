@@ -108,4 +108,17 @@ describe('createNotification — canaux selon les préférences', () => {
     await expect(notify(buyer._id, 'order_status')).resolves.toBeDefined();
     expect(await Notification.countDocuments({ recipient: buyer._id })).toBe(1);
   });
+
+  it('ne lève jamais : un échec de création est journalisé et renvoie null, l\'action notifiée continue', async () => {
+    const unknownUser = new User()._id;
+    await expect(notify(unknownUser, 'order_status')).resolves.toBeNull();
+
+    const buyer = await createTestUser();
+    const create = jest.spyOn(Notification, 'create').mockRejectedValueOnce(new Error('Mongo indisponible'));
+    try {
+      await expect(notify(buyer._id, 'order_status')).resolves.toBeNull();
+    } finally {
+      create.mockRestore();
+    }
+  });
 });

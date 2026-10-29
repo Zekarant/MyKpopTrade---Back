@@ -135,18 +135,13 @@ const runModeration = async (productId: string): Promise<void> => {
 };
 
 const notifySeller = (product: IProduct, result: ProductModerationResult): void => {
-  createNotification({
+  void createNotification({
     recipientId: product.seller,
     type: 'product_flagged',
     title: 'Votre annonce a été mise en pause pour vérification',
     content: `« ${product.title} » est en cours de vérification par notre équipe et n'est plus visible temporairement.`,
     link: `/products/${product._id}`,
     data: { productId: product._id, categories: result.categories }
-  }).catch((error) => {
-    logger.warn('Erreur notification vendeur (annonce suspecte)', {
-      productId: product._id,
-      error: error instanceof Error ? error.message : String(error)
-    });
   });
 };
 

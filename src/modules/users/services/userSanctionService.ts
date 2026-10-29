@@ -86,11 +86,6 @@ export async function suspendUser({
     content: `Votre compte est suspendu ${formatDeadline(until)}. Motif : ${motive}`,
     link: '/contact',
     data: { reason: motive, until }
-  }).catch((error) => {
-    logger.warn('Notification de suspension non délivrée', {
-      userId: userId.substring(0, 5) + '...',
-      error: error instanceof Error ? error.message : String(error)
-    });
   });
 
   dispatchAdminAlert({
@@ -143,11 +138,6 @@ export async function reactivateUser({
     title: 'Votre compte a été réactivé',
     content: 'Votre compte est de nouveau actif. Merci de respecter nos conditions d\'utilisation.',
     link: '/adherents/dashboard'
-  }).catch((error) => {
-    logger.warn('Notification de réactivation non délivrée', {
-      userId: userId.substring(0, 5) + '...',
-      error: error instanceof Error ? error.message : String(error)
-    });
   });
 
   return user;
@@ -174,11 +164,6 @@ export async function liftExpiredSuspensions(): Promise<number> {
       title: 'Votre compte a été réactivé',
       content: 'Votre période de suspension est terminée, votre compte est de nouveau actif.',
       link: '/adherents/dashboard'
-    }).catch((error) => {
-      logger.warn('Notification de fin de suspension non délivrée', {
-        userId: String(user._id).substring(0, 5) + '...',
-        error: error instanceof Error ? error.message : String(error)
-      });
     });
   }
 

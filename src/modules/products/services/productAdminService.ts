@@ -7,7 +7,6 @@ import { buildCsvFile, CSV_EXPORT_ROW_LIMIT, CsvFile } from '../../../commons/ut
 import { badRequest, notFound } from '../../../commons/utils/httpError';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 import { escapeRegex } from '../../../commons/utils/escapeRegex';
-import logger from '../../../commons/utils/logger';
 import { createNotification } from '../../notifications/services/notificationService';
 import { dispatchSavedSearchAlerts } from '../../savedSearches/services/savedSearchAlertService';
 
@@ -221,18 +220,13 @@ export async function reviewFlaggedProduct({
   });
 
   if (approve) {
-    createNotification({
+    void createNotification({
       recipientId: product.seller,
       type: 'product_flagged',
       title: 'Votre annonce a été validée',
       content: `« ${product.title} » est de nouveau visible sur la marketplace.`,
       link: `/products/${product._id}`,
       data: { productId: product._id }
-    }).catch((error) => {
-      logger.warn('Erreur notification vendeur (annonce republiée)', {
-        productId: product._id,
-        error: error instanceof Error ? error.message : String(error)
-      });
     });
   }
 
