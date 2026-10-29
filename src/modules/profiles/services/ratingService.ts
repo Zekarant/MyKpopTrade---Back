@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import Rating, { IRating } from '../../../models/ratingModel';
 import User from '../../../models/userModel';
-import { HttpError, notFound, forbidden } from '../../../commons/utils/httpError';
+import { HttpError, assertOwner, notFound } from '../../../commons/utils/httpError';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
 import logger from '../../../commons/utils/logger';
 import { createNotification } from '../../notifications/services/notificationService';
@@ -322,9 +322,7 @@ async function loadRatingForReviewer(userId: string, ratingId: string) {
   if (!rating) {
     throw ratingNotFoundError();
   }
-  if (rating.reviewer.toString() !== userId) {
-    throw forbidden('Vous n\'êtes pas autorisé à modifier cette évaluation');
-  }
+  assertOwner(rating.reviewer, userId, 'Vous n\'êtes pas autorisé à modifier cette évaluation');
   return rating;
 }
 
@@ -396,9 +394,7 @@ async function loadRatingForRecipient(userId: string, ratingId: string, permissi
     throw ratingNotFoundError();
   }
 
-  if (rating.recipient.toString() !== userId) {
-    throw forbidden(permissionMsg);
-  }
+  assertOwner(rating.recipient, userId, permissionMsg);
 
   return rating;
 }

@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import Payment, { IPayment } from '../../../models/paymentModel';
 import { createNotification } from '../../notifications/services/notificationService';
-import { HttpError } from '../../../commons/utils/httpError';
+import { HttpError, assertOwner } from '../../../commons/utils/httpError';
 import logger from '../../../commons/utils/logger';
 import env from '../../../config/env';
 import { sendShipmentReminderEmail } from '../../../commons/services/emailService';
@@ -93,23 +93,11 @@ async function loadPayment(paymentId: string) {
 }
 
 function assertSeller(payment: Pick<IPayment, 'seller'>, userId: string): void {
-  if (payment.seller.toString() !== userId) {
-    throw new HttpError(
-      403,
-      'Seul le vendeur peut effectuer cette action',
-      ERROR_CODES.SHIPMENT_FORBIDDEN
-    );
-  }
+  assertOwner(payment.seller, userId, 'Seul le vendeur peut effectuer cette action', ERROR_CODES.SHIPMENT_FORBIDDEN);
 }
 
 function assertBuyer(payment: Pick<IPayment, 'buyer'>, userId: string): void {
-  if (payment.buyer.toString() !== userId) {
-    throw new HttpError(
-      403,
-      'Seul l\'acheteur peut confirmer la réception',
-      ERROR_CODES.SHIPMENT_FORBIDDEN
-    );
-  }
+  assertOwner(payment.buyer, userId, 'Seul l\'acheteur peut confirmer la réception', ERROR_CODES.SHIPMENT_FORBIDDEN);
 }
 
 function assertParticipant(payment: Pick<IPayment, 'buyer' | 'seller'>, userId: string): void {

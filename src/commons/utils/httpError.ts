@@ -22,3 +22,11 @@ export const badRequest = (message: string, code = 'BAD_REQUEST', details?: Reco
 
 /** 403 : authentifié, mais pas autorisé pour cette action. */
 export const forbidden = (message = 'Action non autorisée', code = 'FORBIDDEN') => new HttpError(403, message, code);
+
+/**
+ * 403 sauf si `ownerId` (ObjectId ou chaîne) désigne `userId` : l'objet est bien
+ * le sien. Une seule écriture du contrôle, quelle que soit la forme de l'identifiant.
+ */
+export function assertOwner(ownerId: { toString(): string }, userId: string, message?: string, code?: string): void {
+  if (ownerId.toString() !== userId) throw forbidden(message, code);
+}

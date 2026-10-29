@@ -3,7 +3,7 @@ import Dispute, { DisputeReason, DisputeStatus, IDispute } from '../../../models
 import Payment from '../../../models/paymentModel';
 import User from '../../../models/userModel';
 import { PageRequest, paginationMeta } from '../../../commons/utils/pagination';
-import { HttpError } from '../../../commons/utils/httpError';
+import { HttpError, assertOwner } from '../../../commons/utils/httpError';
 import { createNotification } from '../../notifications/services/notificationService';
 import { processRefund } from '../../payments/services/paymentService';
 import logger from '../../../commons/utils/logger';
@@ -251,9 +251,7 @@ export async function addDisputeMessage({
 /** Retire un litige (par le plaignant uniquement). */
 export async function cancelDispute(userId: string, disputeId: string) {
   const dispute = await loadDisputeForUser(disputeId, userId);
-  if (dispute.openedBy.toString() !== userId) {
-    throw new HttpError(403, 'Seul le plaignant peut retirer le litige', 'DISPUTE_FORBIDDEN');
-  }
+  assertOwner(dispute.openedBy, userId, 'Seul le plaignant peut retirer le litige', 'DISPUTE_FORBIDDEN');
   if (TERMINAL_STATUSES.includes(dispute.status)) {
     throw new HttpError(400, 'Le litige est déjà clôturé', 'DISPUTE_CLOSED');
   }

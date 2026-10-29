@@ -1,4 +1,34 @@
-import { HttpError } from '../httpError';
+import mongoose from 'mongoose';
+import { HttpError, assertOwner } from '../httpError';
+
+describe('assertOwner', () => {
+  const userId = new mongoose.Types.ObjectId().toString();
+
+  it('laisse passer le propriétaire, que l\'identifiant soit un ObjectId ou une chaîne', () => {
+    expect(() => assertOwner(new mongoose.Types.ObjectId(userId), userId)).not.toThrow();
+    expect(() => assertOwner(userId, userId)).not.toThrow();
+  });
+
+  it('refuse (403) un autre utilisateur, avec le message et le code fournis', () => {
+    const other = new mongoose.Types.ObjectId();
+    let error: unknown;
+    try {
+      assertOwner(other, userId, 'Seul le vendeur peut effectuer cette action', 'SHIPMENT_FORBIDDEN');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(HttpError);
+    expect(error).toMatchObject({
+      statusCode: 403,
+      message: 'Seul le vendeur peut effectuer cette action',
+      code: 'SHIPMENT_FORBIDDEN'
+    });
+  });
+
+  it('applique le message et le code par défaut de forbidden', () => {
+    expect(() => assertOwner('autre', userId)).toThrow(expect.objectContaining({ statusCode: 403, code: 'FORBIDDEN' }));
+  });
+});
 
 describe('HttpError', () => {
   it('stocke le statusCode et le message', () => {
