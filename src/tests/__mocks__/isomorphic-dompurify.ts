@@ -1,8 +1,18 @@
 /**
- * Mock d'isomorphic-dompurify pour les tests Jest.
- * La vraie lib utilise des ESM imports qui ne jouent pas avec le setup
- * CommonJS du projet ; en tests on se contente d'un pass-through.
+ * isomorphic-dompurify pour les tests Jest : la bibliothèque publiée (ESM, via
+ * jsdom) ne se charge pas dans le setup CommonJS du projet.
+ *
+ * Imitation de son comportement avec `ALLOWED_TAGS: []`, le seul réglage employé
+ * (commons/utils/plainText.ts), vérifiée sur la vraie bibliothèque : contenu de
+ * <script>/<style> retiré, autres balises retirées en gardant leur texte, puis
+ * sérialisation HTML du texte (`&`, `<`, `>` encodés).
  */
 export default {
-  sanitize: (input: unknown) => (typeof input === 'string' ? input : String(input))
+  sanitize: (input: unknown) =>
+    String(input)
+      .replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, '')
+      .replace(/<\/?[a-z][^>]*>/gi, '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
 };

@@ -4,6 +4,7 @@ import { migration as backfillManualSales } from './0002-backfillManualSales';
 import { migration as dropStaleIdentityVerificationIndex } from './0003-dropStaleIdentityVerificationIndex';
 import { migration as uniquePaymentIntentId } from './0004-uniquePaymentIntentId';
 import { migration as dropEmptyRatingResponses } from './0005-dropEmptyRatingResponses';
+import { migration as decodeStoredHtmlEntities } from './0006-decodeStoredHtmlEntities';
 
 /**
  * Toutes les migrations, dans l'ordre d'application. Une nouvelle migration
@@ -15,5 +16,6 @@ export const migrations: readonly Migration[] = [
   backfillManualSales,
   dropStaleIdentityVerificationIndex,
   uniquePaymentIntentId,
-  dropEmptyRatingResponses
+  dropEmptyRatingResponses,
+  decodeStoredHtmlEntities
 ];

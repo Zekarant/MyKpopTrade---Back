@@ -1,11 +1,6 @@
 import { Request, Response } from 'express';
 import { sanitizeInputs } from '../sanitizeMiddleware';
 
-jest.mock('isomorphic-dompurify', () => ({
-  __esModule: true,
-  default: { sanitize: (value: string) => `propre(${value})` }
-}));
-
 function run(req: Partial<Request>) {
   const next = jest.fn();
   sanitizeInputs(req as Request, {} as Response, next);
@@ -13,12 +8,20 @@ function run(req: Partial<Request>) {
 }
 
 describe('sanitizeInputs', () => {
-  it('nettoie les champs texte de premier niveau du corps', () => {
-    const req = { body: { content: '<img onerror=x>', count: 3 } };
+  it.each([
+    ['A&B', 'A&B'],
+    ['1 < 2 & 3 > 2', '1 < 2 & 3 > 2'],
+    ['I <3 BTS', 'I <3 BTS'],
+    ['« guillemets » et "doubles" et \'simples\'', '« guillemets » et "doubles" et \'simples\''],
+    ['<b>gras</b> conservé en texte', 'gras conservé en texte'],
+    ['<img src=x onerror=alert(1)>coucou', 'coucou'],
+    ['<script>alert(1)</script>ok', 'ok']
+  ])('stocke du texte brut : %s → %s', (input, expected) => {
+    const req = { body: { content: input, count: 3 } };
 
     const next = run(req);
 
-    expect(req.body).toEqual({ content: 'propre(<img onerror=x>)', count: 3 });
+    expect(req.body).toEqual({ content: expected, count: 3 });
     expect(next).toHaveBeenCalledWith();
   });
 
